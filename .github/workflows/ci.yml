@@ -1,0 +1,251 @@
+# Repo CI — seven parallel jobs per architecture §6 (Story 1.2, FR-20).
+# Jobs guard for not-yet-existing files so the E1 tree passes while later
+# epics fill in commands/agents/skills/scripts/tests.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  manifest-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate plugin.json and marketplace.json with jq
+        run: |
+          set -euo pipefail
+          fail=0
+
+          jq -e . .claude-plugin/marketplace.json >/dev/null \
+            || { echo "FAIL: marketplace.json does not parse"; exit 1; }
+          jq -e '.name and .owner.name and (.plugins | length > 0)' \
+            .claude-plugin/marketplace.json >/dev/null \
+            || { echo "FAIL: marketplace.json missing required fields"; fail=1; }
+
+          count=$(jq '.plugins | length' .claude-plugin/marketplace.json)
+          for i in $(seq 0 $((count - 1))); do
+            name=$(jq -r ".plugins[$i].name" .claude-plugin/marketplace.json)
+            source=$(jq -r ".plugins[$i].source" .claude-plugin/marketplace.json)
+            if [ "$source" != "./plugins/$name" ]; then
+              echo "FAIL: marketplace entry '$name' source '$source' != './plugins/$name' (ADR-9)"
+              fail=1
+            fi
+            [ -d "$source" ] || { echo "FAIL: source dir '$source' missing"; fail=1; }
+          done
+
+          for dir in plugins/*/; do
+            pj="${dir}.claude-plugin/plugin.json"
+            [ -f "$pj" ] || { echo "FAIL: $pj missing"; fail=1; continue; }
+            jq -e . "$pj" >/dev/null || { echo "FAIL: $pj does not parse"; fail=1; continue; }
+            jq -e '.name and .description and .version and .author.name and .homepage
+                   and .repository and .license and (.keywords | length > 0)' "$pj" >/dev/null \
+              || { echo "FAIL: $pj missing required fields"; fail=1; }
+            jq -e '.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")' "$pj" >/dev/null \
+              || { echo "FAIL: $pj version is not semver"; fail=1; }
+            name=$(jq -r .name "$pj")
+            [ "$name" = "$(basename "$dir")" ] \
+              || { echo "FAIL: plugin name '$name' != dir '$(basename "$dir")' (FR-19)"; fail=1; }
+          done
+          exit "$fail"
+
+  markdown-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: markdownlint-cli2 over plugins/**/*.md
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find plugins -type f -name '*.md')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No markdown files under plugins/ yet — pass"
+            exit 0
+          fi
+          npx --yes markdownlint-cli2 "${files[@]}"
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck plugin scripts
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find plugins/php-backend-sdlc/scripts -type f -name '*.sh')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No shell scripts yet — pass"
+            exit 0
+          fi
+          shellcheck "${files[@]}"
+
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run bats suites
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find plugins/php-backend-sdlc/tests -type f -name '*.bats')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No bats tests yet — pass"
+            exit 0
+          fi
+          npm install -g bats
+          bats "${files[@]}"
+
+  frontmatter-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check component frontmatter (ADR-11 skill glob)
+        run: |
+          set -euo pipefail
+          PLUGIN=plugins/php-backend-sdlc
+          fail=0
+
+          extract_frontmatter() {
+            awk 'NR==1 { if ($0 != "---") exit; next } /^---$/ { exit } { print }' "$1"
+          }
+
+          # yq with python3+PyYAML fallback (ADR-2 toolchain convention).
+          fm_get() {
+            if command -v yq >/dev/null 2>&1; then
+              yq ".\"$1\" // \"\"" -
+            else
+              python3 -c '
+          import sys, yaml
+          data = yaml.safe_load(sys.stdin) or {}
+          value = data.get(sys.argv[1], "")
+          print("" if value is None else value)' "$1"
+            fi
+          }
+
+          check_keys() {
+            local file=$1; shift
+            local fm key val
+            fm=$(extract_frontmatter "$file")
+            if [ -z "$fm" ]; then
+              echo "FAIL: $file has no frontmatter"
+              fail=1
+              return
+            fi
+            for key in "$@"; do
+              val=$(printf '%s\n' "$fm" | fm_get "$key")
+              if [ -z "$val" ]; then
+                echo "FAIL: $file missing frontmatter key '$key'"
+                fail=1
+              fi
+            done
+          }
+
+          for f in "$PLUGIN"/commands/*.md; do
+            [ -e "$f" ] || continue
+            check_keys "$f" description argument-hint
+          done
+          for f in "$PLUGIN"/agents/*.md; do
+            [ -e "$f" ] || continue
+            check_keys "$f" name description tools model
+          done
+          # Skills are matched as skills/*/SKILL.md ONLY (ADR-11): loose
+          # meta-guide .md files at skills/ root are exempt and must NOT
+          # have frontmatter.
+          for f in "$PLUGIN"/skills/*/SKILL.md; do
+            [ -e "$f" ] || continue
+            check_keys "$f" name description
+          done
+          for f in "$PLUGIN"/skills/*.md; do
+            [ -e "$f" ] || continue
+            if [ "$(head -n1 "$f")" = "---" ]; then
+              echo "FAIL: meta-guide $f must not have frontmatter (ADR-11)"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+  profile-keys-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skill profile keys declared in docs/profile-schema.md (FR-17)
+        run: |
+          set -euo pipefail
+          PLUGIN=plugins/php-backend-sdlc
+          SCHEMA="$PLUGIN/docs/profile-schema.md"
+          shopt -s nullglob
+          skills=("$PLUGIN"/skills/*/SKILL.md)
+          if [ "${#skills[@]}" -eq 0 ]; then
+            echo "No skills yet — pass"
+            exit 0
+          fi
+          [ -f "$SCHEMA" ] || { echo "FAIL: $SCHEMA missing — it is the canonical key list"; exit 1; }
+          fail=0
+          for f in "${skills[@]}"; do
+            # Section between '## Profile keys consumed' and the next H2.
+            section=$(awk '/^## Profile keys consumed/{flag=1; next} /^## /{flag=0} flag' "$f")
+            [ -n "$section" ] || continue
+            # Profile keys are namespaced (dot-separated) or the bare
+            # schema_version root key; other backticked words in the
+            # section (null, false, ...) are not keys.
+            keys=$(printf '%s\n' "$section" \
+              | grep -oE '`(schema_version|[a-z0-9_]+(\.[a-z0-9_<>]+)+)`' \
+              | tr -d '`' | sort -u) || true
+            for key in $keys; do
+              if ! grep -qF "\`$key\`" "$SCHEMA"; then
+                echo "FAIL: $f consumes profile key '$key' not declared in profile-schema.md"
+                fail=1
+              fi
+            done
+          done
+          exit "$fail"
+
+  generalization-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: NFR-2 denylist grep + NFR-7 tree hygiene
+        run: |
+          set -euo pipefail
+          PLUGIN=plugins/php-backend-sdlc
+          fail=0
+
+          # NFR-7: no _bmad/ or .ralph/ files inside the plugin tree.
+          stray=$(find "$PLUGIN" \( -name '_bmad' -o -name '.ralph' \) -print)
+          if [ -n "$stray" ]; then
+            echo "FAIL (NFR-7): _bmad/.ralph entries inside plugin tree:"
+            echo "$stray"
+            fail=1
+          fi
+
+          # Drop fenced code blocks whose opening fence carries the
+          # '# profile-example' marker — those may cite user-service values.
+          strip_profile_examples() {
+            awk 'BEGIN{skip=0}
+              /^[[:space:]]*```/ {
+                if (skip) { skip=0; next }
+                if ($0 ~ /# profile-example/) { skip=1; next }
+                print; next
+              }
+              skip { next }
+              { print }' "$1"
+          }
+
+          # NFR-2 denylist (case-insensitive). user[-_ ]service also covers
+          # the workspace.dsl container name "User Service".
+          DENY='user[-_ ]service|mongo[a-z][a-z0-9_]*repository|apprunner|src/user|src/oauth'
+          while IFS= read -r -d '' f; do
+            rel=${f#"$PLUGIN/"}
+            pattern="$DENY|vilnacrm"
+            # VilnaCRM is allowed only in plugin manifest metadata.
+            if [ "$rel" = ".claude-plugin/plugin.json" ]; then
+              pattern="$DENY"
+            fi
+            hits=$(strip_profile_examples "$f" | grep -inE "$pattern" || true)
+            if [ -n "$hits" ]; then
+              echo "FAIL (NFR-2): $f contains denylisted identifiers:"
+              echo "$hits"
+              fail=1
+            fi
+          done < <(find "$PLUGIN" -type f \
+            \( -name '*.md' -o -name '*.sh' -o -name '*.json' \
+               -o -name '*.yml' -o -name '*.yaml' -o -name '*.bats' \) -print0)
+          exit "$fail"
