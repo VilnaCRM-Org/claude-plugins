@@ -6,5 +6,18 @@
     "name": "VilnaCRM",
     "url": "https://github.com/VilnaCRM-Org"
   },
-  "homepage": "https://github.com/VilnaCRM-Org/claude-plugins/tree/main/plugins/php-backend-sdlc"
+  "homepage": "https://github.com/VilnaCRM-Org/claude-plugins/tree/main/plugins/php-backend-sdlc",
+  "repository": "https://github.com/VilnaCRM-Org/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "php",
+    "sdlc",
+    "bmad",
+    "ralph",
+    "automation",
+    "code-review",
+    "qa",
+    "ci",
+    "github"
+  ]
 }
