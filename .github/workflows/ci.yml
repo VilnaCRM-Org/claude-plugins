@@ -76,7 +76,8 @@ jobs:
             echo "No shell scripts yet — pass"
             exit 0
           fi
-          shellcheck "${files[@]}"
+          # -x follows source'd files (scripts source lib/common.sh)
+          shellcheck -x "${files[@]}"
 
   bats:
     runs-on: ubuntu-latest
