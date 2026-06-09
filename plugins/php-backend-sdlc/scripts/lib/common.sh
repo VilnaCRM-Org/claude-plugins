@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# common.sh — shared helpers for php-backend-sdlc plugin scripts.
+#
+# Source this file, do not execute it. Plugin script convention:
+#   set -euo pipefail
+#   source "${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh"
+#
+# YAML access uses yq when available and falls back to python3 + PyYAML
+# (ADR-2). SDLC_FORCE_PYTHON_YAML=1 forces the fallback; tests use it to
+# exercise the yq-absent code path on machines where yq is installed.
+
+# Helpers assume they run in the caller's shell, and `die` must terminate
+# a script — not an interactive session — so refuse direct execution.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  echo "common.sh is a library; source it instead of executing" >&2
+  exit 64
+fi
+
+# --- logging -----------------------------------------------------------
+
+log_info()  { printf '[php-sdlc][INFO] %s\n' "$*"; }
+log_warn()  { printf '[php-sdlc][WARN] %s\n' "$*" >&2; }
+log_error() { printf '[php-sdlc][ERROR] %s\n' "$*" >&2; }
+
+die() {
+  log_error "$*"
+  exit 1
+}
+
+# --- plugin root resolution (ADR-4) -------------------------------------
+
+# Claude Code sets ${CLAUDE_PLUGIN_ROOT} when invoking plugin scripts from
+# the install cache. Fall back to deriving the root from this file's
+# location so bats suites and direct repo checkouts work identically.
+resolve_plugin_root() {
+  if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+    if [[ ! -d "$CLAUDE_PLUGIN_ROOT" ]]; then
+      die "CLAUDE_PLUGIN_ROOT points to a missing directory: $CLAUDE_PLUGIN_ROOT"
+    fi
+    printf '%s\n' "$CLAUDE_PLUGIN_ROOT"
+    return 0
+  fi
+  local lib_dir
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  (cd "$lib_dir/../.." && pwd)
+}
+
+# --- YAML access (ADR-2: yq with python3+PyYAML fallback) ----------------
+
+have_yq() {
+  [[ "${SDLC_FORCE_PYTHON_YAML:-0}" != "1" ]] && command -v yq >/dev/null 2>&1
+}
+
+# Preflight helper: at least one YAML backend must be present.
+require_yaml_toolchain() {
+  if ! have_yq && ! python3 -c 'import yaml' >/dev/null 2>&1; then
+    die "no YAML toolchain: install yq, or python3 with PyYAML"
+  fi
+}
+
+# yaml_get FILE DOTTED.PATH
+# Prints the scalar at DOTTED.PATH ('' when absent or null). Booleans are
+# normalized to true/false in both backends; lists print one item per line
+# (prefer yaml_get_list for those).
+yaml_get() {
+  local file=$1 keypath=$2
+  [[ -f "$file" ]] || die "yaml_get: no such file: $file"
+  if have_yq; then
+    yq ".${keypath} // \"\"" "$file"
+  else
+    python3 - "$file" "$keypath" <<'PYEOF'
+import sys, yaml
+
+cur = yaml.safe_load(open(sys.argv[1])) or {}
+for part in sys.argv[2].split('.'):
+    if isinstance(cur, dict) and part in cur:
+        cur = cur[part]
+    else:
+        cur = None
+        break
+if cur is None:
+    print("")
+elif isinstance(cur, bool):
+    print("true" if cur else "false")
+elif isinstance(cur, list):
+    for item in cur:
+        print(item)
+else:
+    print(cur)
+PYEOF
+  fi
+}
+
+# yaml_get_list FILE DOTTED.PATH — one list item per line, '' when absent.
+yaml_get_list() {
+  local file=$1 keypath=$2
+  [[ -f "$file" ]] || die "yaml_get_list: no such file: $file"
+  if have_yq; then
+    yq "(.${keypath} // [])[]" "$file"
+  else
+    yaml_get "$file" "$keypath"
+  fi
+}
+
+# yaml_has FILE DOTTED.PATH — exit 0 when the key EXISTS, even with a null
+# value. Distinct from yaml_get returning '': the profile schema gives
+# `make.<key>: null` capability-absent semantics (NFR-4), so callers need
+# to tell "explicitly null" apart from "not declared".
+yaml_has() {
+  local file=$1 keypath=$2
+  [[ -f "$file" ]] || die "yaml_has: no such file: $file"
+  if have_yq; then
+    local parent leaf
+    if [[ "$keypath" == *.* ]]; then
+      parent=".${keypath%.*}"
+      leaf="${keypath##*.}"
+    else
+      parent="."
+      leaf="$keypath"
+    fi
+    [[ "$(yq "${parent} | has(\"${leaf}\")" "$file" 2>/dev/null)" == "true" ]]
+  else
+    python3 - "$file" "$keypath" <<'PYEOF'
+import sys, yaml
+
+cur = yaml.safe_load(open(sys.argv[1])) or {}
+parts = sys.argv[2].split('.')
+for part in parts[:-1]:
+    if isinstance(cur, dict) and part in cur:
+        cur = cur[part]
+    else:
+        sys.exit(1)
+sys.exit(0 if isinstance(cur, dict) and parts[-1] in cur else 1)
+PYEOF
+  fi
+}
+
+# --- project profile helpers (architecture §4) ---------------------------
+
+# Canonical profile location inside the target repository.
+SDLC_PROFILE_RELPATH=".claude/php-sdlc.yml"
+
+# profile_path [TARGET_REPO_DIR] — canonical profile path (default: $PWD).
+profile_path() {
+  printf '%s/%s\n' "${1:-$PWD}" "$SDLC_PROFILE_RELPATH"
+}
+
+# profile_get PROFILE_FILE DOTTED.KEY [DEFAULT]
+profile_get() {
+  local file=$1 key=$2 default=${3:-}
+  local val
+  val="$(yaml_get "$file" "$key")"
+  if [[ -n "$val" ]]; then
+    printf '%s\n' "$val"
+  else
+    printf '%s\n' "$default"
+  fi
+}
+
+# profile_require PROFILE_FILE DOTTED.KEY — value, or die naming the key.
+profile_require() {
+  local file=$1 key=$2
+  local val
+  val="$(yaml_get "$file" "$key")"
+  if [[ -z "$val" ]]; then
+    die "profile: required key '$key' missing or empty in $file"
+  fi
+  printf '%s\n' "$val"
+}

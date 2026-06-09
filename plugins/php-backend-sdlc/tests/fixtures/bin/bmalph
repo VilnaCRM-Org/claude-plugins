@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Stub `bmalph` CLI for bats fixtures (Story 1.3).
+# Env config:
+#   STUB_BMALPH_VERSION  printed for --version/-v    (default: 2.11.0)
+#   STUB_BMALPH_EXIT     exit code for every call    (default: 0)
+#   STUB_BMALPH_OUTPUT   stdout for non-version calls (default: none)
+#   STUB_BMALPH_LOG      append-log of argv per call  (default: off)
+set -euo pipefail
+if [[ -n "${STUB_BMALPH_LOG:-}" ]]; then
+  printf 'bmalph %s\n' "$*" >>"$STUB_BMALPH_LOG"
+fi
+if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then
+  printf 'bmalph %s\n' "${STUB_BMALPH_VERSION:-2.11.0}"
+elif [[ -n "${STUB_BMALPH_OUTPUT:-}" ]]; then
+  printf '%s\n' "$STUB_BMALPH_OUTPUT"
+fi
+exit "${STUB_BMALPH_EXIT:-0}"

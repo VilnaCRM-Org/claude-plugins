@@ -1,0 +1,11 @@
+{
+  "name": "acme/sample-api",
+  "description": "Fixture PHP backend for plugin tests",
+  "require": {
+    "php": "^8.4",
+    "symfony/framework-bundle": "^7.3",
+    "api-platform/core": "^4.2",
+    "doctrine/mongodb-odm-bundle": "^5.0",
+    "webonyx/graphql-php": "^15.0"
+  }
+}

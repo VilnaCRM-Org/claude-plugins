@@ -1,0 +1,60 @@
+schema_version: 1
+project:
+  name: sample-api
+  repo: acme/sample-api
+php:
+  version: '8.4'
+framework:
+  name: symfony
+  version: '7.3'
+  api_platform: '4.2'
+  graphql: true
+persistence:
+  mapper: eloquent
+  engine: mongodb
+architecture:
+  source_root: src
+  bounded_contexts:
+  - Catalog
+  - Order
+  shared_context: Shared
+make:
+  ci: ci
+  start: start
+  tests: tests
+  e2e: e2e-tests
+  psalm: psalm
+  deptrac: deptrac
+  phpinsights: phpinsights
+  infection: infection
+  ai_review_loop: null
+  pr_comments: null
+  fr_nfr_gate: null
+  load_tests: load-tests
+quality:
+  phpinsights:
+    quality: 100
+    architecture: 100
+    style: 100
+    complexity: 94
+  deptrac_violations: 0
+  psalm_errors: 0
+  infection_msi: 100
+ci:
+  provider: github-actions
+  workflows:
+  - tests
+  - psalm
+  - deptrac
+  required_checks:
+  - tests
+  - psalm
+review:
+  coderabbit: true
+  ai_review_agents:
+  - claude
+  request_changes_blocking: true
+capabilities:
+  structurizr: false
+  observability_emf: false
+  load_testing: true

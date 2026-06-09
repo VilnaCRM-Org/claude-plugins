@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Stub `claude` CLI for bats fixtures (Story 1.3).
+# Env config:
+#   STUB_CLAUDE_VERSION  printed for --version/-v    (default: 2.1.0)
+#   STUB_CLAUDE_EXIT     exit code for every call    (default: 0)
+#   STUB_CLAUDE_OUTPUT   stdout for non-version calls (default: none)
+#   STUB_CLAUDE_LOG      append-log of argv per call  (default: off)
+set -euo pipefail
+if [[ -n "${STUB_CLAUDE_LOG:-}" ]]; then
+  printf 'claude %s\n' "$*" >>"$STUB_CLAUDE_LOG"
+fi
+if [[ "${1:-}" == "--version" || "${1:-}" == "-v" ]]; then
+  printf '%s\n' "${STUB_CLAUDE_VERSION:-2.1.0}"
+elif [[ -n "${STUB_CLAUDE_OUTPUT:-}" ]]; then
+  printf '%s\n' "$STUB_CLAUDE_OUTPUT"
+fi
+exit "${STUB_CLAUDE_EXIT:-0}"
