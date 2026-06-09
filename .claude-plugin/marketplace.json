@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "vilnacrm-plugins",
+  "description": "VilnaCRM Claude Code plugins: AI-driven engineering automation for VilnaCRM services",
+  "owner": {
+    "name": "VilnaCRM",
+    "url": "https://github.com/VilnaCRM-Org"
+  },
+  "plugins": [
+    {
+      "name": "php-backend-sdlc",
+      "description": "Full-SDLC automation for PHP backend engineering: GitHub issue creation, BMAD-method planning, bmalph/Ralph autonomous implementation with Claude CLI, multi-skill code review with BMAD FR/NFR gate, QA verification, CI auto-fix, and AI review comment resolution — looping until the PR is fully finished.",
+      "author": {
+        "name": "VilnaCRM",
+        "url": "https://github.com/VilnaCRM-Org"
+      },
+      "category": "development",
+      "source": "./plugins/php-backend-sdlc"
+    }
+  ]
+}

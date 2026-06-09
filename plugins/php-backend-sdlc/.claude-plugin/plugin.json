@@ -1,0 +1,10 @@
+{
+  "name": "php-backend-sdlc",
+  "version": "0.1.0",
+  "description": "Full-SDLC automation for PHP backend engineering: GitHub issue creation, BMAD-method planning, bmalph/Ralph autonomous implementation with Claude CLI, multi-skill code review with BMAD FR/NFR gate, QA verification, CI auto-fix, and AI review comment resolution — looping until the PR is fully finished.",
+  "author": {
+    "name": "VilnaCRM",
+    "url": "https://github.com/VilnaCRM-Org"
+  },
+  "homepage": "https://github.com/VilnaCRM-Org/claude-plugins/tree/main/plugins/php-backend-sdlc"
+}
