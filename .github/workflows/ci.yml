@@ -231,22 +231,19 @@ jobs:
           }
 
           # NFR-2 denylist (case-insensitive). user[-_ ]service also covers
-          # the workspace.dsl container name "User Service".
-          DENY='user[-_ ]service|mongo[a-z][a-z0-9_]*repository|apprunner|src/user|src/oauth'
+          # the workspace.dsl container name "User Service". Scope is the
+          # PRD's four component dirs — README/docs may legitimately carry
+          # the marketplace org in install instructions and release URLs.
+          DENY='user[-_ ]service|mongo[a-z][a-z0-9_]*repository|apprunner|src/user|src/oauth|vilnacrm'
           while IFS= read -r -d '' f; do
-            rel=${f#"$PLUGIN/"}
-            pattern="$DENY|vilnacrm"
-            # VilnaCRM is allowed only in plugin manifest metadata.
-            if [ "$rel" = ".claude-plugin/plugin.json" ]; then
-              pattern="$DENY"
-            fi
-            hits=$(strip_profile_examples "$f" | grep -inE "$pattern" || true)
+            hits=$(strip_profile_examples "$f" | grep -inE "$DENY" || true)
             if [ -n "$hits" ]; then
               echo "FAIL (NFR-2): $f contains denylisted identifiers:"
               echo "$hits"
               fail=1
             fi
-          done < <(find "$PLUGIN" -type f \
+          done < <(find "$PLUGIN/skills" "$PLUGIN/commands" "$PLUGIN/agents" "$PLUGIN/scripts" \
+            -type f \
             \( -name '*.md' -o -name '*.sh' -o -name '*.json' \
-               -o -name '*.yml' -o -name '*.yaml' -o -name '*.bats' \) -print0)
+               -o -name '*.yml' -o -name '*.yaml' -o -name '*.bats' \) -print0 2>/dev/null)
           exit "$fail"
