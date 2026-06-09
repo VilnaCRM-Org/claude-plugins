@@ -1,0 +1,137 @@
+#!/usr/bin/env bats
+# Tests for scripts/get-pr-comments.sh (Story 2.5, FR-8 feed, ADR-4).
+#
+# The stub gh returns the fixture GraphQL payload for any invocation,
+# so single-gh-call paths (--pr given, owner/name from the origin
+# remote) are fully stub-driven. The default-PR path needs two
+# DIFFERENT gh responses (pr view, then api graphql), which the static
+# stub cannot produce — that case generates a subcommand-routing gh
+# wrapper. The install-cache test copies the plugin tree elsewhere and
+# runs it via CLAUDE_PLUGIN_ROOT per ADR-4.
+
+setup() {
+  PLUGIN_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  SCRIPT="$PLUGIN_ROOT/scripts/get-pr-comments.sh"
+  STUBS="$BATS_TEST_DIRNAME/fixtures/bin"
+  FIXTURE="$BATS_TEST_DIRNAME/fixtures/gh/pr-comments.json"
+  WORK="$BATS_TEST_TMPDIR/work"
+  mkdir -p "$WORK"
+  cd "$WORK"
+  git init -q
+  git remote add origin https://github.com/acme/sample-api.git
+  PATH="$STUBS:$PATH"
+  export STUB_GH_OUTPUT
+  STUB_GH_OUTPUT="$(cat "$FIXTURE")"
+}
+
+@test "full listing: both threads, issue comment, summary line" {
+  run "$SCRIPT" --pr 7
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR #7"* ]]
+  [[ "$output" == *"[unresolved] src/Catalog/Handler.php:42"* ]]
+  [[ "$output" == *"[resolved] src/Order/Service.php:17"* ]]
+  [[ "$output" == *"(coderabbitai) Consider validating the input length here."* ]]
+  [[ "$output" == *"(maintainer) Good catch, will fix."* ]]
+  [[ "$output" == *"(ci-bot) Overall summary"* ]]
+  [[ "$output" == *"unresolved threads: 1"* ]]
+}
+
+@test "--unresolved-only: resolved thread and issue comments dropped" {
+  run "$SCRIPT" --pr 7 --unresolved-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[unresolved] src/Catalog/Handler.php:42"* ]]
+  [[ "$output" != *"Rename this method"* ]]
+  [[ "$output" != *resolved\]\ src/Order* ]]
+  [[ "$output" != *"ci-bot"* ]]
+  [[ "$output" == *"unresolved threads: 1"* ]]
+}
+
+@test "--json: canonical machine-readable shape" {
+  run "$SCRIPT" --pr 7 --json
+  [ "$status" -eq 0 ]
+  echo "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["pr"] == 7, d["pr"]
+assert len(d["review_threads"]) == 2
+assert d["review_threads"][0]["is_resolved"] is False
+assert d["review_threads"][1]["is_resolved"] is True
+c = d["review_threads"][0]["comments"][0]
+assert c["author"] == "coderabbitai"
+assert c["path"] == "src/Catalog/Handler.php"
+assert c["line"] == 42
+assert c["url"].endswith("discussion_r100")
+assert len(d["issue_comments"]) == 1
+assert d["issue_comments"][0]["author"] == "ci-bot"
+print("json shape OK")'
+}
+
+@test "--json --unresolved-only: filtered threads, empty issue_comments" {
+  run "$SCRIPT" --pr 7 --json --unresolved-only
+  [ "$status" -eq 0 ]
+  echo "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert len(d["review_threads"]) == 1
+assert d["review_threads"][0]["is_resolved"] is False
+assert d["issue_comments"] == []
+print("filtered json OK")'
+}
+
+@test "python fallback path produces identical canonical JSON" {
+  # sandbox PATH without jq: route everything through the python branch
+  dir="$BATS_TEST_TMPDIR/nojq-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname python3 cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  ln -sf "$STUBS/gh" "$dir/gh"
+  jq_out="$("$SCRIPT" --pr 7 --json)"
+  PATH="$dir" run "$SCRIPT" --pr 7 --json
+  [ "$status" -eq 0 ]
+  py_out="$output"
+  python3 -c '
+import json, sys
+a = json.loads(sys.argv[1]); b = json.loads(sys.argv[2])
+assert a == b, "backends disagree"
+print("backends agree")' "$jq_out" "$py_out"
+}
+
+@test "default PR resolved via gh pr view when --pr omitted" {
+  dir="$BATS_TEST_TMPDIR/route-bin"
+  mkdir -p "$dir"
+  cat > "$dir/gh" <<EOF
+#!/usr/bin/env bash
+if [ "\$1" = "pr" ] && [ "\$2" = "view" ]; then
+  echo 7
+else
+  cat "$FIXTURE"
+fi
+EOF
+  chmod +x "$dir/gh"
+  PATH="$dir:$PATH" run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR #7"* ]]
+  [[ "$output" == *"unresolved threads: 1"* ]]
+}
+
+@test "runs from a simulated install cache via CLAUDE_PLUGIN_ROOT (ADR-4)" {
+  CACHE="$BATS_TEST_TMPDIR/install-cache/php-backend-sdlc"
+  mkdir -p "$(dirname "$CACHE")"
+  cp -r "$PLUGIN_ROOT" "$CACHE"
+  CLAUDE_PLUGIN_ROOT="$CACHE" run "$CACHE/scripts/get-pr-comments.sh" --pr 7
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unresolved threads: 1"* ]]
+}
+
+@test "non-numeric --pr: usage error" {
+  run "$SCRIPT" --pr seven
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--pr must be a number"* ]]
+}
+
+@test "unknown flag: usage error" {
+  run "$SCRIPT" --bogus
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unknown argument: --bogus"* ]]
+}
