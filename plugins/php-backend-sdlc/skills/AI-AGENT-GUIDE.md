@@ -32,7 +32,7 @@ Skills never name repository-specific Make targets directly. They reference the 
 
 ### Step 0: New Feature Verification Gate (Mandatory)
 
-If you implement a **NEW feature**, you MUST evaluate **every** skill in this directory **after implementation**. If a skill is not applicable (including capability-gated skills whose `capabilities.*` flag is `false`), explicitly record **"Not applicable"** with a concrete reason. The gate contract is: **every skill verdict recorded, no silent skips**. Provide evidence (commands run and outcomes). Run commands only through the profile's `make.*` target map. Do not claim the feature is complete until this gate is finished.
+If you implement a **NEW feature**, you MUST evaluate **every** skill in this directory **after implementation**. If a skill is not applicable (including capability-gated skills whose `capabilities.*` flag is `false`), explicitly record **"Not applicable"** with a concrete reason. Exception: `observability-instrumentation` is not skip-gated — `capabilities.observability_emf: false` selects its generic metrics-backend branch, so evaluate the skill either way. The gate contract is: **every skill verdict recorded, no silent skips**. Provide evidence (commands run and outcomes). Run commands only through the profile's `make.*` target map. Do not claim the feature is complete until this gate is finished.
 
 ### Step 1: Understand Your Task
 
@@ -117,11 +117,11 @@ Complex skills have a multi-file structure:
 └── examples/             # Complete working examples (when present)
 ```
 
-**When to read supporting files:**
+**When to read supporting files** (only a few skills ship them):
 
-- Encountering errors → `reference/` troubleshooting docs
-- Need detailed patterns → `reference/*.md`
-- Want complete examples → `examples/*.md`
+- Encountering load-test errors → `load-testing/reference/` troubleshooting docs
+- Need detailed patterns → `implementing-ddd-architecture/REFERENCE.md`, `code-organization/DIRECTORY-STRUCTURE.md`
+- Want complete caching examples → `cache-management/examples/`
 
 ## Available Skills (21 Total)
 
@@ -164,12 +164,12 @@ Complex skills have a multi-file structure:
 
 ### API & Performance Skills
 
-| Skill                 | File                                     | When to Use                                                                           |
-| --------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
-| **API Platform CRUD** | `api-platform-crud/SKILL.md`             | Create complete REST API CRUD with DDD/CQRS                                           |
-| **Load Testing**      | `load-testing/SKILL.md`                  | Create K6 performance tests (gated by `capabilities.load_testing`, `make.load_tests`) |
-| **Cache Management**  | `cache-management/SKILL.md`              | Cache keys, TTLs, invalidation, decorators                                            |
-| **Observability**     | `observability-instrumentation/SKILL.md` | Business metrics via EMF (gated by `capabilities.observability_emf`)                  |
+| Skill                 | File                                     | When to Use                                                                                          |
+| --------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **API Platform CRUD** | `api-platform-crud/SKILL.md`             | Create complete REST API CRUD with DDD/CQRS                                                          |
+| **Load Testing**      | `load-testing/SKILL.md`                  | Create K6 performance tests (gated by `capabilities.load_testing`, `make.load_tests`)                |
+| **Cache Management**  | `cache-management/SKILL.md`              | Cache keys, TTLs, invalidation, decorators                                                           |
+| **Observability**     | `observability-instrumentation/SKILL.md` | Business metrics — EMF when `capabilities.observability_emf` is `true`, generic backend when `false` |
 
 ## Practical Examples
 
@@ -188,7 +188,7 @@ Complex skills have a multi-file structure:
 
 1. **Identify skills**: Use `implementing-ddd-architecture` for the entity, `database-migrations` for persistence, `api-platform-crud` for REST endpoints, `testing-workflow` for tests, and `ci-workflow` for validation.
 2. **Read each skill** in order and execute steps.
-3. **Use examples**: Check the `examples/` directory of `api-platform-crud` when present.
+3. **Use examples**: Follow the inlined "Quick Start: Complete CRUD in 10 Steps" in `api-platform-crud/SKILL.md`; `cache-management/examples/` has complete working code if caching is involved.
 4. **After implementation**: Run the **New Feature Verification Gate** — every skill verdict recorded, no silent skips.
 
 ### Example 3: User asks to "plan a feature autonomously"
@@ -351,8 +351,8 @@ skills/
 
 If you encounter issues:
 
-1. **Read troubleshooting**: Many skills have `reference/` troubleshooting docs
-2. **Check examples**: Look in `examples/` directories for working patterns
+1. **Read troubleshooting**: only `load-testing/` ships a `reference/` directory (including troubleshooting docs); `implementing-ddd-architecture/REFERENCE.md` and `code-organization/DIRECTORY-STRUCTURE.md` carry the detailed patterns for those skills
+2. **Check examples**: only `cache-management/` ships an `examples/` directory (complete working cache patterns); other skills inline their examples in `SKILL.md`
 3. **Review the host repository's agent guidelines** (its `AGENTS.md`/`CLAUDE.md`) for repo-specific conventions
 4. **Check the profile**: `.claude/php-sdlc.yml` resolves every logical target and capability flag
 

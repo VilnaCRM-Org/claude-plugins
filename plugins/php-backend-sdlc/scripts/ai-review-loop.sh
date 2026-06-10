@@ -42,6 +42,7 @@ agents=()
 if [[ -n "$AGENTS_OVERRIDE" ]]; then
   IFS=', ' read -r -a agents <<<"$AGENTS_OVERRIDE"
 else
+  # shellcheck disable=SC2119  # profile_path's TARGET_REPO_DIR arg is optional
   profile="$(profile_path)"
   if [[ -f "$profile" ]]; then
     mapfile -t agents < <(yaml_get_list "$profile" review.ai_review_agents)
@@ -55,7 +56,7 @@ done
 agents=("${filtered[@]+"${filtered[@]}"}")
 [[ "${#agents[@]}" -eq 0 ]] && agents=(claude)
 
-REVIEW_PROMPT="${REVIEW_PROMPT:-Review the working tree changes of this repository (git diff against ${DIFF_BASE}) for correctness, security, and maintainability. Apply safe fixes directly. End your response with the mandatory verdict line: 'AI_REVIEW_VERDICT: PASS' if the changes are acceptable, otherwise 'AI_REVIEW_VERDICT: FAIL'.}"
+REVIEW_PROMPT="${REVIEW_PROMPT:-Review the working tree changes of this repository (git diff against ${DIFF_BASE}) for correctness, security, maintainability, FR/NFR coverage, and code health: system design tradeoffs, appropriate design pattern use, code smells, SOLID/DRY/KISS, DDD/CQRS, Hexagonal Architecture, and repository rules. Keep findings concrete and scoped to changed code or directly affected behavior. Apply safe fixes directly. End your response with the mandatory verdict line: 'AI_REVIEW_VERDICT: PASS' if the changes are acceptable, otherwise 'AI_REVIEW_VERDICT: FAIL'.}"
 
 # extract_result JSON -> .result string ('' when JSON is malformed)
 extract_result() {

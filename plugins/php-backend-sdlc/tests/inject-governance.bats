@@ -116,6 +116,34 @@ EOF
   [ "$(marker_pairs "$REPO/CLAUDE.md")" = "1 1" ]
 }
 
+@test "inverted markers (end before begin, counts balanced): user content preserved" {
+  cat > "$REPO/CLAUDE.md" <<EOF
+$END
+user line A
+$BEGIN
+user line B
+user line C
+EOF
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  grep -q 'user line A' "$REPO/CLAUDE.md"
+  grep -q 'user line B' "$REPO/CLAUDE.md"
+  grep -q 'user line C' "$REPO/CLAUDE.md"
+  [ "$(marker_pairs "$REPO/CLAUDE.md")" = "1 1" ]
+  # repaired block is well-ordered: begin before end
+  begin_line="$(grep -nxF "$BEGIN" "$REPO/CLAUDE.md" | cut -d: -f1)"
+  end_line="$(grep -nxF "$END" "$REPO/CLAUDE.md" | cut -d: -f1)"
+  [ "$begin_line" -lt "$end_line" ]
+}
+
+@test "created files honor the umask instead of mktemp's 0600" {
+  umask 022
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%a' "$REPO/CLAUDE.md")" = "644" ]
+  [ "$(stat -c '%a' "$REPO/AGENTS.md")" = "644" ]
+}
+
 @test "--diff previews without writing" {
   printf '# My project\n' > "$REPO/CLAUDE.md"
   before="$(cat "$REPO/CLAUDE.md")"

@@ -15,8 +15,12 @@ description: Overview of the protected quality thresholds and a quick-reference 
 Command convention: `make <make.X>` means "run `make` with the target the
 profile maps for key `make.X`". A `null` mapping means the capability is
 absent in this repository — skip that check with a capability-absent note
-instead of failing (NFR-4). Generic tooling (`composer`, `vendor/bin/*`,
-`git`, `gh`) is invoked directly.
+instead of failing (NFR-4). Generic tooling (`composer`, `git`, `gh`) is
+invoked directly. PHP quality tools without a `make.*` key still run
+through the containerized toolchain: prefer a repository `make` target
+that wraps the tool, else `docker compose exec <php-service>
+vendor/bin/<tool>`; never run them bare on the host, and note the gap if
+neither wrapper exists.
 
 ## Context (Input)
 
@@ -42,12 +46,12 @@ the profile or in tool config files.
 
 ### PHPInsights (source code)
 
-| Metric       | Profile key                        | Shipped floor | Fix With                                                         |
-| ------------ | ---------------------------------- | ------------- | ---------------------------------------------------------------- |
-| Quality      | `quality.phpinsights.quality`      | 100           | [complexity-management](../complexity-management/SKILL.md)       |
-| Complexity   | `quality.phpinsights.complexity`   | 94            | [complexity-management](../complexity-management/SKILL.md)       |
-| Architecture | `quality.phpinsights.architecture` | 100           | [deptrac-fixer](../deptrac-fixer/SKILL.md)                       |
-| Style        | `quality.phpinsights.style`        | 100           | Run the repository's style fixer (`vendor/bin/php-cs-fixer fix`) |
+| Metric       | Profile key                        | Shipped floor | Fix With                                                   |
+| ------------ | ---------------------------------- | ------------- | ---------------------------------------------------------- |
+| Quality      | `quality.phpinsights.quality`      | 100           | [complexity-management](../complexity-management/SKILL.md) |
+| Complexity   | `quality.phpinsights.complexity`   | 94            | [complexity-management](../complexity-management/SKILL.md) |
+| Architecture | `quality.phpinsights.architecture` | 100           | [deptrac-fixer](../deptrac-fixer/SKILL.md)                 |
+| Style        | `quality.phpinsights.style`        | 100           | Containerized style fixer (see the Code style row below)   |
 
 Some repositories configure a second PHPInsights pass with separate
 thresholds for test directories in their phpinsights config. Those values
@@ -79,15 +83,19 @@ above its `quality.*` floor.
 
 ### Individual quality checks
 
-| Check               | Command                                                           | Purpose                     |
-| ------------------- | ----------------------------------------------------------------- | --------------------------- |
-| Code quality        | `make <make.phpinsights>`                                         | All PHPInsights metrics     |
-| Complexity hotspots | `vendor/bin/phpmd <architecture.source_root> text <repo ruleset>` | Find high-CCN methods       |
-| Static analysis     | `make <make.psalm>`                                               | Type checking and errors    |
-| Security taint      | `vendor/bin/psalm --taint-analysis`                               | Security vulnerability scan |
-| Architecture        | `make <make.deptrac>`                                             | Layer boundary validation   |
-| Code style          | `vendor/bin/php-cs-fixer fix`                                     | Auto-fix coding standards   |
-| Composer validation | `composer validate --strict`                                      | Validate composer.json/lock |
+| Check               | Command                                                                                             | Purpose                     |
+| ------------------- | --------------------------------------------------------------------------------------------------- | --------------------------- |
+| Code quality        | `make <make.phpinsights>`                                                                           | All PHPInsights metrics     |
+| Complexity hotspots | `docker compose exec <php-service> vendor/bin/phpmd <architecture.source_root> text <repo ruleset>` | Find high-CCN methods       |
+| Static analysis     | `make <make.psalm>`                                                                                 | Type checking and errors    |
+| Security taint      | `docker compose exec <php-service> vendor/bin/psalm --taint-analysis`                               | Security vulnerability scan |
+| Architecture        | `make <make.deptrac>`                                                                               | Layer boundary validation   |
+| Code style          | `docker compose exec <php-service> vendor/bin/php-cs-fixer fix`                                     | Auto-fix coding standards   |
+| Composer validation | `composer validate --strict`                                                                        | Validate composer.json/lock |
+
+For the rows not backed by a `make.*` key (PHPMD, taint analysis, style
+fixer), prefer a repository `make` wrapper target when one exists — the
+`docker compose exec` form is the fallback (command convention above).
 
 ### Testing commands
 
@@ -124,7 +132,8 @@ When quality checks fail, use the appropriate specialized skill:
   - Vague variable or class names
   - Hardcoded config values that should be in `.env`
   - Namespace doesn't match directory structure
-- **Code style issues** → run `vendor/bin/php-cs-fixer fix`
+- **Code style issues** → run the repository's style-fixer `make` target
+  if one exists, else `docker compose exec <php-service> vendor/bin/php-cs-fixer fix`
   - Coding-standard violations per the repository's fixer config
   - Formatting and line-length issues
 

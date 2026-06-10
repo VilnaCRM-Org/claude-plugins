@@ -22,7 +22,7 @@ If you created or modified a **NEW feature**, you MUST evaluate **every** skill 
 1. Open each `SKILL.md` file listed below.
 2. Follow its steps exactly. If a skill is not applicable, explicitly record **"Not applicable"** with a concrete reason. The gate contract is: **every skill verdict recorded, no silent skips**.
 3. Run required commands only through the profile's `make.*` target map (generic tooling like `composer` and `gh` is allowed directly).
-4. Capability-gated skills (`structurizr-architecture-sync` via `capabilities.structurizr`, `observability-instrumentation` via `capabilities.observability_emf`, `load-testing` via `capabilities.load_testing` + `make.load_tests`) are skipped **with a recorded note** when the capability is `false` or the target maps to `null`.
+4. Capability-gated skills (`structurizr-architecture-sync` via `capabilities.structurizr`, `load-testing` via `capabilities.load_testing` + `make.load_tests`) are skipped **with a recorded note** when the capability is `false` or the target maps to `null`. `observability-instrumentation` is **not** skip-gated: `capabilities.observability_emf` only selects its emission backend — when `false`, evaluate the skill through its generic metrics-backend branch instead of skipping.
 5. Provide evidence in your response: commands run and outcomes. If you cannot run a command, stop and explain why.
 6. Do not claim the feature is complete until this gate is finished.
 
@@ -315,7 +315,7 @@ This skill covers OpenAPI factories, processors, and validation (Spectral, OpenA
 
 **Use**: [observability-instrumentation](observability-instrumentation/SKILL.md)
 
-This skill guides adding EMF business metrics via event subscribers. Gated by `capabilities.observability_emf`.
+This skill guides adding type-safe business metrics via event subscribers. `capabilities.observability_emf` selects the emission backend: AWS EMF when `true`, the skill's generic metrics-backend branch (Prometheus/StatsD/OTel/structured logs) when `false` — the flag never makes the skill skippable.
 
 **NOT**: load-testing (that's for performance under load)
 **NOT**: testing-workflow (that's for functional tests)
@@ -383,7 +383,7 @@ Some tasks benefit from multiple skills:
 2. **clean-architecture-llm** - Design provider/prompt boundaries when the feature uses LLMs
 3. **api-platform-crud** - Create API endpoints
 4. **database-migrations** - Configure persistence
-5. **observability-instrumentation** - Add business metrics (if `capabilities.observability_emf`)
+5. **observability-instrumentation** - Add business metrics (EMF or the generic-backend branch per `capabilities.observability_emf`)
 6. **testing-workflow** - Write tests
 7. **structurizr-architecture-sync** - Update architecture diagrams (if `capabilities.structurizr`)
 8. **documentation-sync** - Update docs

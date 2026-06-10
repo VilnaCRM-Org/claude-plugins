@@ -112,8 +112,10 @@ SKIPPED rows (capability absent) never flip the verdict (NFR-4).
   config/output files to localize findings and explain root causes.
 - `Bash`: ONLY
   - `make <target>` for the four resolved targets above, and
-  - read-only output handling (parsing report files the tools wrote,
-    `composer show` style introspection).
+  - read-only output handling: parsing report files the tools wrote,
+    plus in-container introspection
+    (`docker compose exec php composer show` style) — never host-level
+    `php`, `composer`, or `vendor/bin/*` (container-only rule).
 - Forbidden, without exception: writing or editing any file; git
   commands of any kind; package installation; editing tool configs,
   baselines, or thresholds; re-running tools with weakened flags

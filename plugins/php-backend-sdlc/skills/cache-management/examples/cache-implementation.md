@@ -51,6 +51,9 @@ declare(strict_types=1);
 
 namespace App\Shared\Infrastructure\Cache;
 
+use Symfony\Component\Serializer\Encoder\JsonEncoder;
+use Symfony\Component\Serializer\SerializerInterface;
+
 /**
  * Cache Key Builder Service
  *
@@ -58,9 +61,16 @@ namespace App\Shared\Infrastructure\Cache;
  * - Centralized cache key generation
  * - Consistent email hashing strategy
  * - Eliminates duplication across repository and event handlers
+ *
+ * Filters are serialized through the framework serializer — plain
+ * json_encode in production source is forbidden (see code-organization).
  */
 final readonly class CacheKeyBuilder
 {
+    public function __construct(private SerializerInterface $serializer)
+    {
+    }
+
     public function build(string $namespace, string ...$parts): string
     {
         return $namespace . '.' . implode('.', $parts);
@@ -86,7 +96,7 @@ final readonly class CacheKeyBuilder
         return $this->build(
             'customer',
             'collection',
-            hash('sha256', json_encode($filters, \JSON_THROW_ON_ERROR))
+            hash('sha256', $this->serializer->serialize($filters, JsonEncoder::FORMAT))
         );
     }
 

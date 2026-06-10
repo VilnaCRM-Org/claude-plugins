@@ -272,7 +272,7 @@ $this->addSql('CREATE INDEX idx_orders_customer_email ON orders (customer_email)
 ```
 
 ```bash
-bin/console doctrine:mongodb:schema:update --index
+bin/console doctrine:mongodb:schema:update
 ```
 
 See [database-migrations](../database-migrations/SKILL.md) for the full
@@ -355,7 +355,7 @@ collections still consume I/O; schedule them during low traffic.
 **Production strategy**:
 
 1. Declare the index in the ODM XML mapping (keeps code and schema in sync)
-2. Apply it: `bin/console doctrine:mongodb:schema:update --index`
+2. Apply it: `bin/console doctrine:mongodb:schema:update`
 3. Verify the index exists: `db.<collection>.getIndexes()`
 4. Verify it is used: `explain("executionStats")` shows `IXSCAN` and a
    `totalDocsExamined`/`nReturned` ratio near 1
@@ -429,7 +429,7 @@ db.setProfilingLevel(0)                           // IMPORTANT in production
 ```
 
 ```bash
-bin/console doctrine:mongodb:schema:update --index   # apply ODM-mapped indexes
+bin/console doctrine:mongodb:schema:update      # apply ODM-mapped indexes
 ```
 
 ---

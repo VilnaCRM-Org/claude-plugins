@@ -78,6 +78,24 @@ FINDINGS_JSON='{"result":"- FR-3 issue creation not covered by the change set\n-
   grep -q -- '--output-format json' "$CLAUDE_LOG"
 }
 
+@test "no origin remote: slug falls back to gh repo view" {
+  git remote remove origin
+  # the stub prints STUB_GH_OUTPUT for every non-version call; for
+  # `repo view --jq .nameWithOwner` that is the slug itself
+  STUB_GH_OUTPUT="acme/fallback-api" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 0 ]
+  grep -q 'repo view --json nameWithOwner' "$GH_LOG"
+  grep -q "api repos/acme/fallback-api/statuses/$SHA" "$GH_LOG"
+}
+
+@test "no origin remote and empty gh fallback: dies before running claude" {
+  git remote remove origin
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot resolve repository"* ]]
+  [ ! -f "$CLAUDE_LOG" ]
+}
+
 @test "missing spec path: dies with remediation before any gh call" {
   STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path /nonexistent
   [ "$status" -eq 1 ]

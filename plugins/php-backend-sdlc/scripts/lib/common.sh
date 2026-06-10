@@ -66,7 +66,10 @@ yaml_get() {
   local file=$1 keypath=$2
   [[ -f "$file" ]] || die "yaml_get: no such file: $file"
   if have_yq; then
-    yq ".${keypath} // \"\"" "$file"
+    # NOT `// ""`: yq's alternative operator treats false like null, so an
+    # explicit `false` would read back as '' and diverge from the python
+    # backend. select() drops only null/absent and keeps booleans intact.
+    yq ".${keypath} | select(. != null)" "$file"
   else
     python3 - "$file" "$keypath" <<'PYEOF'
 import sys, yaml

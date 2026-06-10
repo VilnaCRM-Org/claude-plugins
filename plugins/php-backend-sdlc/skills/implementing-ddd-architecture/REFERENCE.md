@@ -379,7 +379,7 @@ and its dialect follows `persistence.mapper`.
 <?xml version="1.0" encoding="UTF-8"?>
 <doctrine-mongo-mapping xmlns="http://doctrine-project.org/schemas/odm/doctrine-mongo-mapping">
     <document name="App\Catalog\Domain\Entity\Product" collection="products">
-        <field name="id" type="ulid" id="true" strategy="NONE"/>
+        <id type="ulid" strategy="NONE"/>
         <field name="name" type="string"/>
         <embed-one target-document="App\Catalog\Domain\ValueObject\Money" field="price"/>
         <field name="createdAt" type="date_immutable"/>
@@ -913,7 +913,7 @@ all follow `persistence.mapper`.
 
     <document name="App\{Context}\Domain\Entity\{Entity}" collection="{collection_name}">
         <!-- ID field -->
-        <field name="id" type="ulid" id="true" strategy="NONE"/>
+        <id type="ulid" strategy="NONE"/>
 
         <!-- Simple fields -->
         <field name="name" type="string"/>

@@ -199,15 +199,20 @@ The loop:
 
 1. Runs the review agent(s) from `review.ai_review_agents` against the diff
    from the given base (v1 supports `claude` only; other entries warn+skip)
-2. On a `FAIL` verdict, lets the reviewer/fixer apply remediations
-3. Verifies fixes with the target mapped by `make.ci`
-4. Repeats up to the iteration cap (plugin script: `--max-iterations`,
-   default 5)
+2. On a `FAIL` verdict, lets the reviewer apply safe fixes in the same
+   iteration (the plugin script runs `claude` with
+   `--permission-mode acceptEdits`)
+3. Re-reviews until a `PASS` verdict or the iteration cap (plugin script:
+   `--max-iterations`, default 5)
 
-The reviewer covers FR/NFR coverage and code health: system design tradeoffs,
-appropriate design pattern use, code smells, SOLID/DRY/KISS, DDD/CQRS,
-Hexagonal Architecture, and repository rules. Review failures must stay
-concrete and scoped to changed code or directly affected behavior.
+The loop itself runs no CI between iterations — verify the fixed tree with
+the target mapped by `make.ci` afterwards (Step 6). The plugin script's
+default prompt covers correctness, security, FR/NFR coverage, and code
+health: system design tradeoffs, appropriate design pattern use, code
+smells, SOLID/DRY/KISS, DDD/CQRS, Hexagonal Architecture, and repository
+rules; set the `REVIEW_PROMPT` environment variable to override the scope.
+Review failures must stay concrete and scoped to changed code or directly
+affected behavior.
 
 **Success contract**: the loop exits `0` with a final
 `AI_REVIEW_VERDICT: PASS` line (plugin script contract). Repo-provided loops

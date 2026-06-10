@@ -7,6 +7,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ['php-backend-sdlc-v*']
 
 jobs:
   manifest-validate:
@@ -49,6 +50,24 @@ jobs:
               || { echo "FAIL: plugin name '$name' != dir '$(basename "$dir")' (FR-19)"; fail=1; }
           done
           exit "$fail"
+      # Release gate (architecture §6, docs/release-process.md): on tag
+      # builds the tag version must equal the plugin manifest version.
+      # Tag namespace is <plugin-name>-vX.Y.Z, one plugin per namespace.
+      - name: Assert tag version equals plugin.json version (tag builds)
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          plugin="${GITHUB_REF_NAME%-v*}"
+          tag_version="${GITHUB_REF_NAME##*-v}"
+          pj="plugins/$plugin/.claude-plugin/plugin.json"
+          [ -f "$pj" ] \
+            || { echo "FAIL: tag '$GITHUB_REF_NAME' has no plugin manifest at $pj"; exit 1; }
+          manifest_version=$(jq -r .version "$pj")
+          if [ "$tag_version" != "$manifest_version" ]; then
+            echo "FAIL: tag version '$tag_version' != $pj version '$manifest_version'"
+            exit 1
+          fi
+          echo "OK: tag '$GITHUB_REF_NAME' matches $pj version $manifest_version"
 
   markdown-lint:
     runs-on: ubuntu-latest
@@ -111,7 +130,7 @@ jobs:
           # yq with python3+PyYAML fallback (ADR-2 toolchain convention).
           fm_get() {
             if command -v yq >/dev/null 2>&1; then
-              yq ".\"$1\" // \"\"" -
+              yq ".\"$1\" | select(. != null)" -
             else
               python3 -c '
           import sys, yaml

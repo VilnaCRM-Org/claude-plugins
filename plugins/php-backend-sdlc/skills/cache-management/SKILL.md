@@ -221,7 +221,7 @@ final readonly class CacheKeyBuilder
         return $this->build(
             'customer',
             'collection',
-            hash('sha256', $this->serializer->encode($filters, JsonEncoder::FORMAT))
+            hash('sha256', $this->serializer->serialize($filters, JsonEncoder::FORMAT))
         );
     }
 

@@ -146,10 +146,10 @@ final class Customer
 
 ```xml
 <document name="App\Customer\Domain\Entity\Customer" collection="customers">
-    <field name="id" id="true" strategy="NONE" type="ulid"/>
-    <field name="name" type="string"/>
-    <field name="email" type="string"/>
-    <field name="createdAt" fieldName="created_at" type="date_immutable"/>
+    <id type="ulid" strategy="NONE"/>
+    <field field-name="name" type="string"/>
+    <field field-name="email" type="string"/>
+    <field field-name="createdAt" name="created_at" type="date_immutable"/>
     <indexes>
         <index>
             <key name="email" order="asc"/>
@@ -193,7 +193,7 @@ bin/console doctrine:schema:validate      # expect: "Mapping files are correct."
 bin/console cache:clear
 bin/console doctrine:mongodb:mapping:info        # mappings load without error
 bin/console doctrine:mongodb:schema:create       # new collections + indexes
-bin/console doctrine:mongodb:schema:update --index   # sync indexes on changes
+bin/console doctrine:mongodb:schema:update      # sync indexes + validators on changes
 ```
 
 ---
@@ -204,7 +204,7 @@ bin/console doctrine:mongodb:schema:update --index   # sync indexes on changes
 2. Update the XML mapping
 3. `bin/console cache:clear`
 4. Apply: Path A — `doctrine:migrations:diff` → review → `migrate`;
-   Path B — `doctrine:mongodb:schema:update --index`
+   Path B — `doctrine:mongodb:schema:update`
 5. Validate (Path A `doctrine:schema:validate`; Path B `doctrine:mongodb:mapping:info`)
 6. Path B only: field renames and backfills do not happen automatically —
    write an explicit console command/script for the data migration
@@ -374,7 +374,7 @@ may tighten the floor, never lower it).
 - [ ] API resource configured (when `framework.api_platform` is enabled)
 - [ ] Repository interface in Domain, implementation in Infrastructure, alias in `services.yaml`
 - [ ] Path A: migration reviewed + applied; `doctrine:schema:validate` passes
-- [ ] Path B: `doctrine:mongodb:schema:update --index` applied; mappings load
+- [ ] Path B: `doctrine:mongodb:schema:update` applied; mappings load
 - [ ] Test database recreates cleanly; all integration tests pass
 - [ ] Target mapped by `make.deptrac` passes (no violations)
 - [ ] Target mapped by `make.ci` passes

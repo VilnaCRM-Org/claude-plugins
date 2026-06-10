@@ -131,11 +131,16 @@ setup() {
   if ! command -v yq >/dev/null 2>&1; then
     skip "yq not installed here; python fallback is the active backend"
   fi
-  for key in php.version framework.graphql persistence.mapper quality.infection_msi; do
+  # capabilities.structurizr is explicitly false and make.ai_review_loop is
+  # explicitly null: yq's `// ""` operator used to swallow false, so keep
+  # falsy values in this loop to catch backend divergence.
+  for key in php.version framework.graphql persistence.mapper \
+             quality.infection_msi capabilities.structurizr make.ai_review_loop; do
     yq_val="$(yaml_get "$VALID_PROFILE" "$key")"
     py_val="$(SDLC_FORCE_PYTHON_YAML=1 yaml_get "$VALID_PROFILE" "$key")"
     [ "$yq_val" = "$py_val" ]
   done
+  [ "$(yaml_get "$VALID_PROFILE" capabilities.structurizr)" = "false" ]
   yaml_has "$VALID_PROFILE" make.ai_review_loop
   ! yaml_has "$VALID_PROFILE" make.undeclared_target
 }

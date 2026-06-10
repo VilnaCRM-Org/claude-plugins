@@ -82,6 +82,12 @@ strip_constraint() {
   printf '%s\n' "$1" | sed -E 's/^[^0-9]*//; s/[^0-9.].*$//'
 }
 
+# sanitize_inline VALUE — drop control characters (incl. newline/CR) from
+# repo-derived text; profile values are emitted on a single YAML line.
+sanitize_inline() {
+  printf '%s' "$1" | tr -d '\000-\037\177'
+}
+
 json_available || die "need jq or python3 to read composer.json"
 
 # --- project ------------------------------------------------------------------
@@ -94,10 +100,12 @@ if git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     project_repo="$(printf '%s\n' "$origin" | sed -E 's#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')"
   fi
 fi
-pkg_name="$(composer_name)"
+pkg_name="$(sanitize_inline "$(composer_name)")"
 [[ -z "$project_repo" ]] && project_repo="$pkg_name"
+project_repo="$(sanitize_inline "$project_repo")"
 project_name="${pkg_name##*/}"
 [[ -z "$project_name" ]] && project_name="$(basename "$TARGET")"
+project_name="$(sanitize_inline "$project_name")"
 
 # --- php / framework ------------------------------------------------------------
 
@@ -159,7 +167,7 @@ if [[ -d "$TARGET/src" ]]; then
   source_root="src"
   for d in "$TARGET"/src/*/; do
     [[ -d "$d" ]] || continue
-    ctx="$(basename "$d")"
+    ctx="$(sanitize_inline "$(basename "$d")")"
     if [[ "$ctx" == "Shared" || "$ctx" == "Common" ]]; then
       shared_context="$ctx"
     else
@@ -207,7 +215,7 @@ if [[ -d "$TARGET/.github/workflows" ]]; then
   for wf in "$TARGET"/.github/workflows/*.yml "$TARGET"/.github/workflows/*.yaml; do
     [[ -f "$wf" ]] || continue
     ci_provider="github-actions"
-    name="$(yaml_get "$wf" name)"
+    name="$(sanitize_inline "$(yaml_get "$wf" name)")"
     [[ -z "$name" ]] && name="$(basename "$wf" | sed -E 's/\.(yml|yaml)$//')"
     workflows+=("$name")
   done
@@ -226,24 +234,40 @@ load_testing="false"
 
 # --- YAML emission ---------------------------------------------------------------------
 
-# scalar VALUE — emits null when empty
+# Repo-derived strings (composer name, src/ dir names, workflow names) are
+# untrusted: quote them on emission and strip control characters so they
+# cannot inject YAML structure into the profile or break parsing.
+
+# scalar VALUE — emits null when empty (use only for detector-constrained
+# values: enums, digit-sanitized versions, ^[A-Za-z0-9_-]+ make targets)
 scalar() { if [[ -z "$1" ]]; then printf 'null'; else printf '%s' "$1"; fi; }
 
-# qscalar VALUE — quoted scalar, null when empty
-qscalar() { if [[ -z "$1" ]]; then printf 'null'; else printf '"%s"' "$1"; fi; }
+# yaml_quote VALUE — double-quoted YAML scalar, \ and " escaped
+yaml_quote() {
+  local v=${1//\\/\\\\}
+  v=${v//\"/\\\"}
+  printf '"%s"' "$v"
+}
 
-# flow_list ITEM... — [a, b] flow-style list
+# qscalar VALUE — quoted scalar, null when empty
+qscalar() { if [[ -z "$1" ]]; then printf 'null'; else yaml_quote "$1"; fi; }
+
+# flow_list ITEM... — ["a", "b"] flow-style list, every item quoted
 flow_list() {
-  local IFS=', '
-  printf '[%s]' "$*"
+  local out="" item
+  for item in "$@"; do
+    [[ -n "$out" ]] && out+=", "
+    out+="$(yaml_quote "$item")"
+  done
+  printf '[%s]' "$out"
 }
 
 emit_profile() {
   cat <<PROFILE
 schema_version: 1
 project:
-  name: $(scalar "$project_name")
-  repo: $(scalar "$project_repo")
+  name: $(qscalar "$project_name")
+  repo: $(qscalar "$project_repo")
 php:
   version: $(qscalar "$php_version")
 framework:
@@ -302,16 +326,17 @@ tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 emit_profile >"$tmp"
 
+# cat-through-redirect, not mv: mv would carry mktemp's 0600 mode onto the
+# repo file; redirect honors the umask on create and keeps the existing
+# file's mode on --refresh.
 if [[ ! -f "$PROFILE_FILE" ]]; then
   mkdir -p "$(dirname "$PROFILE_FILE")"
-  mv "$tmp" "$PROFILE_FILE"
-  trap - EXIT
+  cat "$tmp" >"$PROFILE_FILE"
   log_info "profile created: $PROFILE_FILE"
 elif diff -q "$PROFILE_FILE" "$tmp" >/dev/null 2>&1; then
   log_info "profile unchanged: $PROFILE_FILE"
 elif (( REFRESH )); then
-  mv "$tmp" "$PROFILE_FILE"
-  trap - EXIT
+  cat "$tmp" >"$PROFILE_FILE"
   log_info "profile refreshed: $PROFILE_FILE"
 else
   log_warn "detected profile differs from existing $PROFILE_FILE (kept existing; use --refresh to overwrite)"

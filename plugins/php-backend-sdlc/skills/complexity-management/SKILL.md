@@ -77,11 +77,12 @@ REQUIRED:  refactoring code to meet the standards.
 
 Read the complexity section of the PHPInsights failure output — it names
 the offending classes and methods. If the repository wraps a dedicated
-hotspot analyzer, prefer it; otherwise PHPMD's codesize ruleset works
-anywhere:
+hotspot analyzer in a `make` target, prefer it; otherwise run PHPMD's
+codesize ruleset through the containerized toolchain (never bare on the
+host):
 
 ```bash
-vendor/bin/phpmd <architecture.source_root> text codesize
+docker compose exec <php-service> vendor/bin/phpmd <architecture.source_root> text codesize
 ```
 
 ```bash # profile-example
@@ -155,9 +156,9 @@ architectural violations — always fix the code, never edit `deptrac.yaml`.
 
 **Problem**: code doesn't meet PSR-12 / framework coding standards.
 
-**Fix**: run the repository's style auto-fixer (commonly
-`vendor/bin/php-cs-fixer fix`), then re-run the target mapped by
-`make.phpinsights` to verify.
+**Fix**: run the repository's style auto-fixer `make` target if one
+exists, else `docker compose exec <php-service> vendor/bin/php-cs-fixer fix`,
+then re-run the target mapped by `make.phpinsights` to verify.
 
 ### Line length over the configured limit
 

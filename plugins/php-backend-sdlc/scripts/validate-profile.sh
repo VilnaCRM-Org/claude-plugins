@@ -17,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$SCRIPT_DIR/lib/common.sh"
 
+# shellcheck disable=SC2119  # profile_path's TARGET_REPO_DIR arg is optional
 PROFILE="${1:-$(profile_path)}"
 [[ -f "$PROFILE" ]] || die "profile not found: $PROFILE (run /sdlc-setup to generate it)"
 require_yaml_toolchain

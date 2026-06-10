@@ -36,13 +36,19 @@ done
 command -v claude >/dev/null 2>&1 || die "claude CLI not found on PATH"
 command -v gh >/dev/null 2>&1 || die "gh CLI not found on PATH"
 
-# repo slug + HEAD sha for the commit status
+# repo slug + HEAD sha for the commit status: owner/name from the origin
+# remote; gh repo view as fallback (mirrors get-pr-comments.sh — CI
+# checkouts and forks may lack an 'origin' remote).
 origin="$(git remote get-url origin 2>/dev/null || true)"
 repo_slug=""
 if [[ -n "$origin" ]]; then
   repo_slug="$(printf '%s\n' "$origin" | sed -E 's#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')"
 fi
-[[ -n "$repo_slug" ]] || die "cannot resolve repository from the origin remote"
+if [[ -z "$repo_slug" ]]; then
+  repo_slug="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" \
+    || die "cannot resolve repository (no origin remote and gh repo view failed)"
+fi
+[[ -n "$repo_slug" ]] || die "cannot resolve repository (no origin remote and gh repo view failed)"
 head_sha="$(git rev-parse HEAD)" || die "cannot resolve HEAD (need at least one commit)"
 
 GATE_PROMPT="Verify this change set against the functional and non-functional requirements documented under '${SPEC_PATH}'. Inspect the repository diff and the requirement documents; report every NEW violation or uncovered requirement introduced by this change as a finding (one bullet per finding, citing the requirement ID)."

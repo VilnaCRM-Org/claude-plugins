@@ -156,6 +156,51 @@ PYEOF
   [ "$(pget project.repo)" = "acme/real-service" ]
 }
 
+@test "workflow names with YAML special characters survive emission intact" {
+  cat > "$REPO/.github/workflows/release.yml" <<'EOF'
+name: "CI: build, test"
+on: push
+EOF
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  run yaml_get_list "$PROFILE" ci.workflows
+  [ "$status" -eq 0 ]
+  printf '%s\n' "${lines[@]}" | grep -qxF 'CI: build, test'
+  run "$VALIDATE" "$PROFILE"
+  [ "$status" -eq 0 ]
+}
+
+@test "composer name with quote/newline cannot inject profile keys (NFR-3)" {
+  python3 - "$REPO/composer.json" <<'PYEOF'
+import json, sys
+data = json.load(open(sys.argv[1]))
+data['name'] = 'acme/evil"\nmalicious: true'
+json.dump(data, open(sys.argv[1], 'w'))
+PYEOF
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  [ -z "$(pget malicious)" ]
+  [ -z "$(pget project.malicious)" ]
+  run "$VALIDATE" "$PROFILE"
+  [ "$status" -eq 0 ]
+}
+
+@test "created profile honors the umask instead of mktemp's 0600" {
+  umask 022
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%a' "$PROFILE")" = "644" ]
+}
+
+@test "--refresh preserves the existing profile's mode" {
+  run "$GENERATE" "$REPO"
+  chmod 664 "$PROFILE"
+  sed -i 's/complexity: 94/complexity: 97/' "$PROFILE"
+  run "$GENERATE" --refresh "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c '%a' "$PROFILE")" = "664" ]
+}
+
 @test "unknown flag: usage error" {
   run "$GENERATE" --bogus "$REPO"
   [ "$status" -eq 1 ]

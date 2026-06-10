@@ -9,10 +9,11 @@
 # '<!-- php-backend-sdlc:end -->' is replaced in place on every run;
 # content outside the markers is never touched (NFR-3). A missing file
 # is created holding only the block. Corrupted marker states are
-# repaired to exactly one block: balanced duplicate pairs collapse into
-# the first block's position; unbalanced (orphaned) markers have only
-# the marker lines removed — surrounding user content is preserved —
-# and a fresh block is appended.
+# repaired to exactly one block: well-ordered duplicate pairs collapse
+# into the first block's position; unbalanced or out-of-order markers
+# (orphans, an END before its BEGIN) have only the marker lines removed
+# — surrounding user content is preserved — and a fresh block is
+# appended.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -66,6 +67,19 @@ Never invoke composer, php, or test runners directly on the host.
 $END_MARKER
 BLOCK
 
+# markers_paired FILE — success only when every BEGIN is closed by an END
+# before the next BEGIN or EOF. Counts alone cannot catch an END that
+# precedes its BEGIN: that state is count-balanced, but the replacement
+# awk below would treat BEGIN..EOF as the managed region and swallow all
+# user content after it.
+markers_paired() {
+  awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
+    $0 == begin { if (inblock) bad = 1; inblock = 1; next }
+    $0 == end   { if (!inblock) bad = 1; inblock = 0; next }
+    END { exit (bad || inblock) ? 1 : 0 }
+  ' "$1"
+}
+
 # render_managed FILE -> writes the post-injection content to $new_file
 render_managed() {
   local file=$1
@@ -76,7 +90,7 @@ render_managed() {
   local begins ends
   begins="$(grep -cxF "$BEGIN_MARKER" "$file" || true)"
   ends="$(grep -cxF "$END_MARKER" "$file" || true)"
-  if [[ "$begins" == "$ends" && "$begins" -gt 0 ]]; then
+  if [[ "$begins" == "$ends" && "$begins" -gt 0 ]] && markers_paired "$file"; then
     # Balanced markers: drop every managed region, leave a placeholder at
     # the first region's position, then splice the fresh block there.
     awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
@@ -100,9 +114,9 @@ render_managed() {
     printf '\n' >>"$new_file"
     cat "$block_file" >>"$new_file"
   else
-    # Unbalanced/orphaned markers: removing a begin..EOF span could
-    # swallow user content, so drop ONLY the marker lines and append one
-    # fresh block at the end.
+    # Unbalanced/orphaned/out-of-order markers: removing a begin..EOF
+    # span could swallow user content, so drop ONLY the marker lines and
+    # append one fresh block at the end.
     awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
       $0 == begin || $0 == end { next }
       { print }
@@ -131,7 +145,10 @@ for name in CLAUDE.md AGENTS.md; do
     continue
   fi
   overall_changed=1
-  cp "$new_file" "$file"
+  # cat-through-redirect, not cp: cp from the mktemp file would create a
+  # new CLAUDE.md/AGENTS.md with mktemp's 0600 mode; redirect honors the
+  # umask on create and keeps the existing mode on overwrite.
+  cat "$new_file" >"$file"
   log_info "$name: managed block written"
 done
 

@@ -90,8 +90,11 @@ Three non-negotiable disciplines:
   integrating it is the other half.
 - The story checkbox toggled `- [ ]` → `- [x]` on its exact line in
   `.ralph/@fix_plan.md` when (and only when) the acceptance criteria
-  are met and tests pass. Never remove, rewrite, or reorder story
-  lines.
+  are met and tests pass — or, when the profile maps
+  `make.tests: null`, when the acceptance criteria are met by spec
+  conformance plus the completed self-review checklist (the skipped
+  run is a capability-absent degrade per NFR-4, not a blocker). Never
+  remove, rewrite, or reorder story lines.
 - Capability-absent and degrade notes for every skipped check.
 - A completed self-review checklist, run before the status block:
   re-read the diff of every file modified this run for bugs, typos,
@@ -117,8 +120,9 @@ Three non-negotiable disciplines:
 
   Rules: `TASKS_COMPLETED_THIS_LOOP` is the exact number of fix-plan
   checkboxes toggled this run (0 or 1, never more). `EXIT_SIGNAL: true`
-  only when the story is done, tests pass, and nothing meaningful
-  remains for this dispatch. On a blocker, set `STATUS: BLOCKED` and
+  only when the story is done, tests pass (or are `NOT_RUN` solely
+  because `make.tests` is null — see Degrade paths), and nothing
+  meaningful remains for this dispatch. On a blocker, set `STATUS: BLOCKED` and
   put the blocker in `RECOMMENDATION` instead of asking the user
   questions — this agent runs autonomously.
 
@@ -155,7 +159,7 @@ note and continue, or a BLOCKED status when no work is possible.
 | Condition | Behavior |
 | --- | --- |
 | `make.<key>: null` in profile | Capability absent: skip that check, record a one-line note, continue. Never substitute a host command. |
-| `make.tests: null` | Implement against the story spec, set `TESTS_STATUS: NOT_RUN`, note that verification was impossible; keep `EXIT_SIGNAL: false` so the dispatcher decides. |
+| `make.tests: null` | The test run is a skipped check, not a blocker (NFR-4): implement against the story spec, complete the story on spec conformance plus the self-review checklist, toggle its checkbox, set `TESTS_STATUS: NOT_RUN` with a capability-absent note naming the unverifiable checks, and report `STATUS: COMPLETE` with `EXIT_SIGNAL: true` when nothing else remains — the stage still ends SUCCESS-WITH-REPORT. |
 | Containers not running | Run the `make.start` target once; if it is `null` or fails, report `STATUS: BLOCKED` with the failure output — do not install or run a host PHP stack. |
 | Profile missing/unreadable | No sanctioned command surface exists: make NO code changes, report `STATUS: BLOCKED`, `RECOMMENDATION: run /sdlc-setup`. |
 | Story spec ambiguous | Prefer the smallest reversible interpretation, note the assumption, continue; only consult `specs/` when the ambiguity is real. |
@@ -216,6 +220,8 @@ reporting `STATUS: COMPLETE`, `TASKS_COMPLETED_THIS_LOOP: 1`,
 
 Expected: implementation proceeds from the spec, no host `phpunit` or
 `psalm` is ever invoked, both skips are recorded as capability-absent
-notes, and the final block reports `TESTS_STATUS: NOT_RUN` with
-`EXIT_SIGNAL: false` and a `RECOMMENDATION` naming the unverifiable
-checks.
+notes, the story checkbox is toggled on spec conformance plus the
+self-review checklist, and the final block reports `STATUS: COMPLETE`,
+`TASKS_COMPLETED_THIS_LOOP: 1`, `TESTS_STATUS: NOT_RUN`, and
+`EXIT_SIGNAL: true`, with a `RECOMMENDATION` naming the unverifiable
+checks (SUCCESS-WITH-REPORT, NFR-4).

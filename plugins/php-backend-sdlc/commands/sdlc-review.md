@@ -58,19 +58,28 @@ excludes Write); remediation between gate iterations is delegated.
      with a capability-absent note, NFR-4) and reports observed values
      against the profile `quality.*` thresholds. It never proposes
      suppressions or threshold cuts.
-   - `fr-nfr-reviewer`: builds the per-requirement PASS/FAIL matrix
-     against `specs/<slug>/` and tracks the new-findings count.
-4. **FR/NFR gate loop** — run:
-
-   ```bash
-   "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --spec-path "specs/<slug>" --impact-context "<one-line change summary>"
-   ```
-
-   Exit 0 means zero new findings — the stage exit condition. On
-   findings: this command cannot write fixes (no Write tool), so
+   - `fr-nfr-reviewer`: owns the FR/NFR gate run — it resolves the
+     gate runner from the profile (`make.fr_nfr_gate`, `null` → the
+     plugin's `fr-nfr-gate.sh`), executes it, builds the
+     per-requirement PASS/FAIL matrix against `specs/<slug>/`, and
+     reports the new-findings count. Its Task prompt must carry the
+     spec bundle path, the changed-file list plus a one-line change
+     summary, and — on re-invocation — the prior iteration ledger.
+     Never run the gate script directly from this command: the agent
+     is the single gate owner, so each iteration pays for exactly one
+     gate run and yields exactly one new-findings count.
+4. **FR/NFR gate loop** — read the convergence signal from the
+   `fr-nfr-reviewer` report's mandatory last line
+   (`FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=...`).
+   `new_findings=0` with `verdict=PASS` is the stage exit condition.
+   On findings: this command cannot write fixes (no Write tool), so
    dispatch the findings as a remediation task to a `php-implementer`
-   subagent (Task tool), wait for its completion, then re-run the gate.
-   That dispatch-fix-rerun cycle is one iteration of the loop below.
+   subagent (Task tool), wait for its completion, then re-invoke
+   `fr-nfr-reviewer`, passing the prior iteration ledger (findings
+   list and counts from all iterations so far) so the agent computes
+   "new" as a delta and resumes — never resets — its iteration
+   counter. That dispatch-fix-reinvoke cycle is one iteration of the
+   loop below.
 5. **Report** — render the report template below. Every section is
    mandatory; verdicts must cover 21/21 skills, and threshold rows must
    cite the actual values read from the profile.
@@ -106,6 +115,7 @@ excludes Write); remediation between gate iterations is delegated.
 | iteration | new findings |
 |---|---|
 | <n> | <count> |
+(copied verbatim from the fr-nfr-reviewer iteration ledger)
 
 ## Verdict: PASS | ESCALATED
 ```
@@ -113,15 +123,18 @@ excludes Write); remediation between gate iterations is delegated.
 ## Loop & exit condition
 
 Each iteration: remediation dispatch (if findings), then a fresh
-`fr-nfr-gate.sh` run; record the new-findings count in the report.
+`fr-nfr-reviewer` invocation (which performs the iteration's single
+gate run); record its reported new-findings count in the report.
 Exit condition (FR-1 stage table): **zero new findings in last gate
 iteration**.
 
 ## Iteration guard
 
-`MAX_ITERATIONS=5`. One iteration = one gate run (plus the preceding
-remediation dispatch after the first). Keep an explicit counter and
-restate it every turn (`review iteration <n>/5`).
+`MAX_ITERATIONS=5`. One iteration = one `fr-nfr-reviewer` invocation —
+exactly one gate run, executed inside the agent — plus the preceding
+remediation dispatch after the first. Keep an explicit counter in
+lockstep with the agent's own (`iteration <n>/5` in its report header)
+and restate it every turn (`review iteration <n>/5`).
 
 ## Failure escalation
 
