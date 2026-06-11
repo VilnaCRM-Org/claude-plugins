@@ -205,8 +205,10 @@ The loop:
 3. Re-reviews until a `PASS` verdict or the iteration cap (plugin script:
    `--max-iterations`, default 5)
 
-The loop itself runs no CI between iterations — verify the fixed tree with
-the target mapped by `make.ci` afterwards (Step 6). The plugin script's
+The plugin script runs no CI between iterations — verify the fixed tree with
+the target mapped by `make.ci` afterwards (Step 6); a repo-mapped
+`make.ai_review_loop` may run its own verification command per iteration
+(commonly the CI target). The plugin script's
 default prompt covers correctness, security, FR/NFR coverage, and code
 health: system design tradeoffs, appropriate design pattern use, code
 smells, SOLID/DRY/KISS, DDD/CQRS, Hexagonal Architecture, and repository
@@ -394,13 +396,35 @@ if printf '%s\n' "$diff_output" | rg '^\+[^+]' | rg -n "$(forbidden_suppression_
   exit 1
 fi
 
+# Gate-definition isolation: detect whether this is a dedicated
+# gate-definition PR (only gate-definition files changed vs the trusted
+# base). When so, the quality-config hard block is skipped — those changes
+# are the legitimate subject of the PR and are reviewed on their own (see
+# the Gate-definition isolation rule below). The forbidden-suppression line
+# scan above still runs, and any threshold change must be raise-only.
+GATE_DEFINITION_FILE_PATTERN='(^|/)(Makefile|\.github/|.*baseline.*|deptrac\.ya?ml|psalm\.xml(\.dist)?|phpstan\.(neon|neon\.dist)|phpmd.*\.xml(\.dist)?|phpinsights.*\.php|infection\.(json|json5)(\.dist)?|phpcs\.xml(\.dist)?|\.php-cs-fixer\.dist\.php|\.claude/skills/.*\.md)'
+all_changes="$(git diff --name-only "$TRUSTED_BASE_REF"...HEAD)"
+gate_definition_changes="$(printf '%s\n' "$all_changes" | rg "$GATE_DEFINITION_FILE_PATTERN" || true)"
+non_gate_definition_changes="$(printf '%s\n' "$all_changes" | rg -v "$GATE_DEFINITION_FILE_PATTERN" || true)"
+GATE_DEFINITION_CHANGES_PRESENT=false
+if [ -n "$gate_definition_changes" ] && [ -z "$non_gate_definition_changes" ]; then
+  GATE_DEFINITION_CHANGES_PRESENT=true
+fi
+
 quality_config_changes="$(git diff --name-only "$TRUSTED_BASE_REF"...HEAD | rg '(^|/)(.*baseline.*|deptrac\.ya?ml|psalm\.xml(\.dist)?|phpstan\.(neon|neon\.dist)|phpmd.*\.xml(\.dist)?|phpinsights.*\.php|infection\.(json|json5)(\.dist)?|phpcs\.xml(\.dist)?|\.php-cs-fixer\.dist\.php)$' || true)"
-if [ -n "$quality_config_changes" ]; then
+if [ -n "$quality_config_changes" ] && [ "$GATE_DEFINITION_CHANGES_PRESENT" != "true" ]; then
   printf '%s\n' "$quality_config_changes"
   echo "Quality tool suppression/baseline/config changes block completion; remove suppression/ignore changes instead" >&2
   exit 1
 fi
 ```
+
+On a dedicated gate-definition PR (`GATE_DEFINITION_CHANGES_PRESENT=true`,
+i.e. only gate-definition files changed vs `$TRUSTED_BASE_REF`) the
+quality-config hard block is skipped so the PR can legitimately tighten
+quality-tool configs, while the forbidden-suppression line scan still runs
+and any threshold change must be raise-only (see Thresholds below). A PR that
+mixes gate-definition and product changes does not qualify and is blocked.
 
 **Gate-definition isolation rule**: changes to CI/review gate definitions
 (Makefile, CI workflow files, quality-tool configs, lint/formatter configs,

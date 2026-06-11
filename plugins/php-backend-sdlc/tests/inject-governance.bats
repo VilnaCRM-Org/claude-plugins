@@ -162,6 +162,35 @@ EOF
   grep -q '`make.\*`' "$REPO/CLAUDE.md"
 }
 
+@test "symlinked CLAUDE.md is refused, the symlink target outside the repo is untouched" {
+  # Threat model: an untrusted cloned repo plants CLAUDE.md -> a file
+  # outside the target. The tool must refuse to follow it rather than
+  # rewrite the outside file (write-outside-target).
+  outside="$BATS_TEST_TMPDIR/outside/important.md"
+  mkdir -p "$(dirname "$outside")"
+  printf 'PRECIOUS USER CONTENT\n' > "$outside"
+  ln -s "$outside" "$REPO/CLAUDE.md"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refusing to follow symlink"* ]]
+  # the outside file is byte-identical: no managed block leaked into it
+  cmp "$outside" <(printf 'PRECIOUS USER CONTENT\n')
+  ! grep -q 'Skill-triage gate' "$outside"
+}
+
+@test "symlinked AGENTS.md is refused even after CLAUDE.md is processed" {
+  # CLAUDE.md is a normal new file; AGENTS.md is the malicious symlink.
+  # The loop must still die when it reaches the symlinked second file.
+  outside="$BATS_TEST_TMPDIR/outside/agents-target.md"
+  mkdir -p "$(dirname "$outside")"
+  printf 'agents outside content\n' > "$outside"
+  ln -s "$outside" "$REPO/AGENTS.md"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refusing to follow symlink"* ]]
+  cmp "$outside" <(printf 'agents outside content\n')
+}
+
 @test "unknown flag: usage error" {
   run "$INJECT" --bogus "$REPO"
   [ "$status" -eq 1 ]

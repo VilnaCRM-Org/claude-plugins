@@ -129,6 +129,24 @@ FINDINGS_JSON='{"result":"- FR-3 issue creation not covered by the change set\n-
   grep -q -- '-f state=failure' "$GH_LOG"
 }
 
+@test "is_error=true with exit 0: one retry, transport-failure status, not the malformed-output status" {
+  # claude exits 0 but reports is_error=true with .result holding an API
+  # error string. The truthful classification is the transport-failure path
+  # (one retry, then 'transport failure' status) — NOT the misleading
+  # 'gate output malformed' commit status that the FR_NFR regex would
+  # otherwise trigger on the error text.
+  STUB_CLAUDE_OUTPUT='{"is_error":true,"result":"API Error: 529 Overloaded"}' run "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is_error"* ]]
+  [[ "$output" == *"retrying once"* ]]
+  [[ "$output" == *"transport failure after"* ]]
+  [ "$(grep -c '^claude ' "$CLAUDE_LOG")" -eq 2 ]
+  grep -q -- '-f state=failure' "$GH_LOG"
+  grep -q 'claude transport failure after retry' "$GH_LOG"
+  # the error text must NOT be reported as a malformed-contract violation
+  ! grep -q 'gate output malformed' "$GH_LOG"
+}
+
 @test "unknown flag: usage error" {
   run "$GATE" --bogus
   [ "$status" -eq 1 ]

@@ -138,6 +138,69 @@ PYEOF
   fi
 }
 
+# --- claude -p JSON driver (ADR-8) ---------------------------------------
+#
+# The canonical `claude -p --output-format json` shape is a top-level
+# `.result` string plus an `.is_error` bool. Shared by ai-review-loop.sh
+# and fr-nfr-gate.sh so the transport-failure contract (architecture §8:
+# exactly one retry on a non-zero exit, malformed JSON, OR an is_error=true
+# response) stays identical in both loops.
+
+# claude_is_error JSON — exit 0 when the JSON reports `.is_error == true`.
+# claude can exit 0 while setting is_error=true with `.result` holding an
+# error string (e.g. 'API Error: 529 Overloaded'); that is a transport
+# failure, not reviewer output, and must take the retry path.
+claude_is_error() {
+  local json=$1
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$json" | jq -e '.is_error == true' >/dev/null 2>&1
+  else
+    printf '%s' "$json" | python3 -c '
+import json, sys
+try:
+    sys.exit(0 if json.load(sys.stdin).get("is_error") is True else 1)
+except Exception:
+    sys.exit(1)' >/dev/null 2>&1
+  fi
+}
+
+# claude_extract_result JSON -> .result string ('' when JSON is malformed)
+claude_extract_result() {
+  local json=$1
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$json" | jq -r '.result // empty' 2>/dev/null || true
+  else
+    printf '%s' "$json" | python3 -c '
+import json, sys
+try:
+    print(json.load(sys.stdin).get("result") or "")
+except Exception:
+    pass' 2>/dev/null || true
+  fi
+}
+
+# claude_run_once PROMPT -> prints .result on stdout; returns 1 on a
+# non-zero claude exit, an is_error=true response, OR malformed JSON
+# (all three are transport-level failures that earn one retry).
+claude_run_once() {
+  local prompt=$1 raw result
+  if ! raw="$(claude -p "$prompt" --output-format json \
+              --permission-mode acceptEdits --max-turns 30)"; then
+    log_warn "claude exited non-zero"
+    return 1
+  fi
+  if claude_is_error "$raw"; then
+    log_warn "claude reported is_error (transport failure)"
+    return 1
+  fi
+  result="$(claude_extract_result "$raw")"
+  if [[ -z "$result" ]]; then
+    log_warn "malformed JSON from claude (no .result)"
+    return 1
+  fi
+  printf '%s\n' "$result"
+}
+
 # --- project profile helpers (architecture §4) ---------------------------
 
 # Canonical profile location inside the target repository.

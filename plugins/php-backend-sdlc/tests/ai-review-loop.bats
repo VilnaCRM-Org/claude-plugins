@@ -141,6 +141,33 @@ FAIL_JSON='{"result":"found issues\nAI_REVIEW_VERDICT: FAIL"}'
   [ "$(calls_made)" -eq 1 ]
 }
 
+@test "is_error=true with exit 0 takes the one-retry transport path, no contract log" {
+  # claude can exit 0 while reporting is_error=true with .result holding an
+  # error string ('API Error: 529 Overloaded'). That is a transport
+  # failure, not reviewer output: it must retry once (architecture §8), not
+  # be misrouted to the no-retry 'AI_REVIEW_VERDICT contract' path.
+  STUB_CLAUDE_OUTPUT='{"is_error":true,"result":"API Error: 529 Overloaded"}' \
+    STUB_CLAUDE_LOG="$CALLS" run "$LOOP" --max-iterations 1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is_error"* ]]
+  [[ "$output" == *"retrying once"* ]]
+  [[ "$output" == *"retry failed too"* ]]
+  # the error text must NOT be treated as a review verdict
+  [[ "$output" != *"contract"* ]]
+  # attempt + exactly one retry = 2 calls for the single iteration
+  [ "$(calls_made)" -eq 2 ]
+}
+
+@test "is_error=true recovers when the retry returns a clean PASS" {
+  seq_claude '{"is_error":true,"result":"API Error"}' "$PASS_JSON"
+  run "$LOOP" --max-iterations 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"is_error"* ]]
+  [[ "$output" == *"retrying once"* ]]
+  [[ "$output" == *"PASS on iteration 1"* ]]
+  [ "$(calls_made)" -eq 2 ]
+}
+
 @test "--agents codex: warns and skips, exit 0, claude never called" {
   STUB_CLAUDE_LOG="$CALLS" run "$LOOP" --agents codex
   [ "$status" -eq 0 ]

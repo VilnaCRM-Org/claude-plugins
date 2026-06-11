@@ -145,6 +145,51 @@ setup() {
   ! yaml_has "$VALID_PROFILE" make.undeclared_target
 }
 
+# --- claude -p JSON driver (ADR-8, shared by ai-review-loop + fr-nfr-gate) -
+
+@test "claude_extract_result pulls .result, empty on malformed JSON" {
+  run claude_extract_result '{"result":"hello\nAI_REVIEW_VERDICT: PASS","is_error":false}'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hello"* ]]
+  run claude_extract_result 'not json at all'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "claude_is_error true only when .is_error == true" {
+  run claude_is_error '{"is_error":true,"result":"API Error"}'
+  [ "$status" -eq 0 ]
+  run claude_is_error '{"is_error":false,"result":"ok"}'
+  [ "$status" -ne 0 ]
+  run claude_is_error '{"result":"ok"}'
+  [ "$status" -ne 0 ]
+  run claude_is_error 'garbage'
+  [ "$status" -ne 0 ]
+}
+
+@test "claude_run_once returns 1 on is_error, non-zero exit, and malformed JSON" {
+  local bin="$BATS_TEST_TMPDIR/claude-bin"
+  mkdir -p "$bin"
+  ln -sf "$FIXTURES/bin/claude" "$bin/claude"
+  PATH="$bin:$PATH"
+  # is_error=true, exit 0 -> transport failure
+  STUB_CLAUDE_OUTPUT='{"is_error":true,"result":"API Error"}' run claude_run_once "prompt"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is_error"* ]]
+  # non-zero exit -> transport failure
+  STUB_CLAUDE_OUTPUT='{"result":"x"}' STUB_CLAUDE_EXIT=2 run claude_run_once "prompt"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"non-zero"* ]]
+  # malformed JSON (no .result) -> transport failure
+  STUB_CLAUDE_OUTPUT='no result here' run claude_run_once "prompt"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"malformed JSON"* ]]
+  # clean result -> success, prints .result
+  STUB_CLAUDE_OUTPUT='{"is_error":false,"result":"reviewed"}' run claude_run_once "prompt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"reviewed"* ]]
+}
+
 # --- profile helpers ------------------------------------------------------
 
 @test "profile_path defaults to PWD and accepts explicit repo dir" {

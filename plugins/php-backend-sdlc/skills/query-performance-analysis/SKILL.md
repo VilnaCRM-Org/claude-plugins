@@ -272,7 +272,7 @@ $this->addSql('CREATE INDEX idx_orders_customer_email ON orders (customer_email)
 ```
 
 ```bash
-bin/console doctrine:mongodb:schema:update
+docker compose exec <php-service> bin/console doctrine:mongodb:schema:update
 ```
 
 See [database-migrations](../database-migrations/SKILL.md) for the full
@@ -341,7 +341,7 @@ public function up(Schema $schema): void
 1. Create the migration with the index (see [database-migrations](../database-migrations/SKILL.md))
 2. Use `ALGORITHM=INPLACE LOCK=NONE` for non-blocking creation
 3. Schedule during low traffic for large tables
-4. Run the migration (`bin/console doctrine:migrations:migrate`)
+4. Run the migration (`docker compose exec <php-service> bin/console doctrine:migrations:migrate`)
 5. Verify the index exists: `SHOW INDEX FROM <table>`
 6. Verify the index is used: re-run `EXPLAIN` on the queries
 7. Measure the performance improvement
@@ -355,7 +355,7 @@ collections still consume I/O; schedule them during low traffic.
 **Production strategy**:
 
 1. Declare the index in the ODM XML mapping (keeps code and schema in sync)
-2. Apply it: `bin/console doctrine:mongodb:schema:update`
+2. Apply it: `docker compose exec <php-service> bin/console doctrine:mongodb:schema:update`
 3. Verify the index exists: `db.<collection>.getIndexes()`
 4. Verify it is used: `explain("executionStats")` shows `IXSCAN` and a
    `totalDocsExamined`/`nReturned` ratio near 1
@@ -415,7 +415,8 @@ SET GLOBAL slow_query_log = 'OFF';                -- IMPORTANT in production
 ```
 
 ```bash
-bin/console doctrine:schema:validate              # validate ORM mapping vs schema
+# validate ORM mapping vs schema
+docker compose exec <php-service> bin/console doctrine:schema:validate
 ```
 
 ### Path B: MongoDB
@@ -429,7 +430,8 @@ db.setProfilingLevel(0)                           // IMPORTANT in production
 ```
 
 ```bash
-bin/console doctrine:mongodb:schema:update      # apply ODM-mapped indexes
+# apply ODM-mapped indexes
+docker compose exec <php-service> bin/console doctrine:mongodb:schema:update
 ```
 
 ---

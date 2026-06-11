@@ -7,8 +7,12 @@
 # Checks, in order: git repository, claude CLI >= 2.1, gh CLI >= 2,
 # gh authentication, bmalph >= 2.11.0 (ADR-10 floor), `bmalph doctor`
 # against an existing `_bmad/` workspace (FR-2; deferred on fresh repos
-# where /sdlc-setup runs `bmalph init` right after preflight), and a
-# YAML toolchain (yq, or python3 with PyYAML — ADR-2).
+# where /sdlc-setup runs `bmalph init` right after preflight), a
+# YAML toolchain (yq, or python3 with PyYAML — ADR-2), and a JSON
+# toolchain (jq or python3) that ai-review-loop.sh, fr-nfr-gate.sh,
+# get-pr-comments.sh and generate-profile.sh hard-depend on for parsing
+# claude/gh JSON — without it those scripts fail mid-loop with a
+# misleading diagnosis instead of at setup.
 #
 # Default mode aborts on the FIRST failing check, printing its named
 # remediation, so /sdlc-setup can halt early with one actionable error.
@@ -145,6 +149,21 @@ elif python3 -c 'import yaml' >/dev/null 2>&1; then
 else
   record FAIL "yaml-toolchain" "neither yq nor python3+PyYAML is available" \
     "install yq (https://github.com/mikefarah/yq) or PyYAML (pip install pyyaml)"
+fi
+
+# --- 8. JSON toolchain (jq or python3) -----------------------------------------
+# ai-review-loop.sh / fr-nfr-gate.sh extract claude's `.result`,
+# get-pr-comments.sh normalizes the gh GraphQL payload, and
+# generate-profile.sh emits JSON — all need jq OR python3. A machine that
+# satisfies the YAML check via yq alone (no python3, no jq) would pass
+# preflight yet break those scripts mid-loop, so verify it here.
+if command -v jq >/dev/null 2>&1; then
+  record PASS "json-toolchain" "jq available" "-"
+elif command -v python3 >/dev/null 2>&1; then
+  record PASS "json-toolchain" "python3 available" "-"
+else
+  record FAIL "json-toolchain" "neither jq nor python3 is available" \
+    "install jq (https://jqlang.github.io/jq/) or python3"
 fi
 
 # --- report table --------------------------------------------------------------

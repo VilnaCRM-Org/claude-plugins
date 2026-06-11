@@ -40,15 +40,18 @@ report instead of failing (NFR-4).
    and treat the CI half of the exit condition as satisfied-with-report
    (NFR-4 — a degrade path never loops and never hard-fails).
 
-   Otherwise dispatch the `ci-fixer` agent (Task tool): poll
-   `gh pr checks`; for each failing check, fetch the failure logs
-   (`gh run view --log-failed`), diagnose the root cause, fix the
-   CAUSE — never suppress findings, never edit quality thresholds
-   (governance-protected) — push, and re-poll. One
-   poll-diagnose-fix-push cycle is one iteration of counter A
-   (`ci_fix iteration <a>/5`). Loop until every check (at minimum the
-   profile's `ci.required_checks`) is green, or counter A is exhausted
-   → escalate.
+   Otherwise dispatch the `ci-fixer` agent (Task tool): it polls
+   `gh pr checks`; for each failing check, fetches the failure logs
+   (`gh run view --log-failed`), diagnoses the root cause, and fixes the
+   CAUSE in the working tree — never suppressing findings, never editing
+   quality thresholds (governance-protected). The agent runs NO git; it
+   returns `ALL-GREEN` (nothing to fix) or `FIXES-READY` (working-tree
+   edits await commit/push). When it returns `FIXES-READY`, THE COMMAND
+   commits the working-tree fixes and pushes, then re-polls
+   `gh pr checks`. That command-owned commit-push-repoll is one iteration
+   of counter A (`ci_fix iteration <a>/5`). Loop until every check (at
+   minimum the profile's `ci.required_checks`) is green, or counter A is
+   exhausted → escalate.
 
 3. **Comment source selection** — if `review.coderabbit` is true (or
    any AI reviewer app posts review comments on the PR), the PR's own
@@ -71,13 +74,17 @@ report instead of failing (NFR-4).
    "${CLAUDE_PLUGIN_ROOT}/scripts/get-pr-comments.sh" --pr <n> --unresolved-only --json
    ```
 
-   For every unresolved thread: a code fix (then push) OR a reasoned
-   reply — never a silent dismissal — then mark the thread resolved.
-   Re-fetch after the pass. One fetch-resolve-refetch cycle is one
-   iteration of counter B (`comment_resolution iteration <b>/5`). Loop
-   until the script reports zero unresolved threads (degraded source:
-   the agent reports `AI_REVIEW_VERDICT: PASS`), or counter B is
-   exhausted → escalate.
+   For every unresolved thread the agent applies a working-tree code fix
+   OR posts a reasoned reply (via `gh`) — never a silent dismissal — then
+   marks the thread resolved. The agent runs NO git: code fixes land in
+   the working tree and its report flags `push required: yes`. When it
+   returns with `push required: yes`, THE COMMAND commits the code fixes
+   and pushes (replies are already posted by the agent via `gh` and need
+   no push), then re-fetches. One command-owned
+   resolve-commit-push-refetch cycle is one iteration of counter B
+   (`comment_resolution iteration <b>/5`). Loop until the script reports
+   zero unresolved threads (degraded source: the agent reports
+   `AI_REVIEW_VERDICT: PASS`), or counter B is exhausted → escalate.
 
    Pushes made while resolving comments can re-trigger CI: after
    counter B completes with new pushes, re-check `gh pr checks` once —

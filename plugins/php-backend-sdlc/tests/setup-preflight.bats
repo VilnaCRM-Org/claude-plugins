@@ -44,7 +44,7 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
 @test "all-pass: exit 0, every check reports PASS" {
   run "$PREFLIGHT"
   [ "$status" -eq 0 ]
-  for check in git-repo claude-cli gh-cli gh-auth bmalph bmalph-doctor yaml-toolchain; do
+  for check in git-repo claude-cli gh-cli gh-auth bmalph bmalph-doctor yaml-toolchain json-toolchain; do
     [[ "$output" == *"PASS: $check"* ]]
   done
   [[ "$output" == *"preflight OK"* ]]
@@ -55,7 +55,7 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
   run "$PREFLIGHT" --report
   [ "$status" -eq 0 ]
   [[ "$output" == *CHECK*RESULT* ]]
-  for check in git-repo claude-cli gh-cli gh-auth bmalph bmalph-doctor yaml-toolchain; do
+  for check in git-repo claude-cli gh-cli gh-auth bmalph bmalph-doctor yaml-toolchain json-toolchain; do
     [[ "$output" == *"$check"* ]]
   done
   [[ "$output" != *FAIL* ]]
@@ -147,6 +147,33 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
   [[ "$output" =~ yaml-toolchain[[:space:]]+FAIL ]]
   [[ "$output" == *"install yq"* ]]
   [[ "$output" == *PyYAML* ]]
+}
+
+@test "no JSON toolchain (no jq, no python3): FAIL with jq-or-python3 remediation" {
+  # sandbox with a YAML backend (yq) but neither jq nor python3, so the
+  # yaml-toolchain check passes while json-toolchain must FAIL — the exact
+  # yq-only machine that previously slipped past preflight.
+  if ! command -v yq >/dev/null 2>&1; then
+    skip "yq not installed here; cannot isolate the json-toolchain failure from yaml-toolchain"
+  fi
+  # shellcheck disable=SC2086
+  sandbox="$(sandbox_path $SCRIPT_DEPS claude gh bmalph yq)"
+  PATH="$sandbox" run "$PREFLIGHT" --report
+  [ "$status" -eq 1 ]
+  [[ "$output" =~ yaml-toolchain[[:space:]]+PASS ]]
+  [[ "$output" =~ json-toolchain[[:space:]]+FAIL ]]
+  [[ "$output" == *"install jq"* ]]
+  [[ "$output" == *"python3"* ]]
+}
+
+@test "json-toolchain passes on python3 alone (no jq)" {
+  # sandbox with python3 but no jq and no yq: json-toolchain must still
+  # PASS via the python3 fallback (yaml passes via python3+PyYAML).
+  # shellcheck disable=SC2086
+  sandbox="$(sandbox_path $SCRIPT_DEPS claude gh bmalph python3)"
+  PATH="$sandbox" run "$PREFLIGHT" --report
+  [[ "$output" =~ json-toolchain[[:space:]]+PASS ]]
+  [[ "$output" == *"python3 available"* ]]
 }
 
 @test "--report with multiple failures lists every FAIL row, exit 1" {

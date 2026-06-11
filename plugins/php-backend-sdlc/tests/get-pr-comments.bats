@@ -97,6 +97,27 @@ assert a == b, "backends disagree"
 print("backends agree")' "$jq_out" "$py_out"
 }
 
+@test "python human-render path (no jq, no --json) matches jq listing" {
+  # sandbox PATH without jq AND without --json: exercises the python
+  # human-render branch (the jq branch and the --json early-return both
+  # bypass it), which the json-only fallback test never reaches.
+  dir="$BATS_TEST_TMPDIR/nojq-human-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname python3 cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  ln -sf "$STUBS/gh" "$dir/gh"
+  PATH="$dir" run "$SCRIPT" --pr 7
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PR #7"* ]]
+  [[ "$output" == *"[unresolved] src/Catalog/Handler.php:42"* ]]
+  [[ "$output" == *"[resolved] src/Order/Service.php:17"* ]]
+  [[ "$output" == *"(coderabbitai) Consider validating the input length here."* ]]
+  [[ "$output" == *"(maintainer) Good catch, will fix."* ]]
+  [[ "$output" == *"(ci-bot) Overall summary"* ]]
+  [[ "$output" == *"unresolved threads: 1"* ]]
+}
+
 @test "default PR resolved via gh pr view when --pr omitted" {
   dir="$BATS_TEST_TMPDIR/route-bin"
   mkdir -p "$dir"
@@ -122,6 +143,42 @@ EOF
   CLAUDE_PLUGIN_ROOT="$CACHE" run "$CACHE/scripts/get-pr-comments.sh" --pr 7
   [ "$status" -eq 0 ]
   [[ "$output" == *"unresolved threads: 1"* ]]
+}
+
+@test "more than one page of review threads: dies clearly, never reports a truncated count" {
+  # hasNextPage=true means the single 100-item page is incomplete; the
+  # script must refuse rather than compute 'unresolved threads: N' on a
+  # truncated set (which could read 0 while unresolved threads remain).
+  STUB_GH_OUTPUT="$(cat "$BATS_TEST_DIRNAME/fixtures/gh/pr-comments-truncated.json")" \
+    run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"more than 100 review threads"* ]]
+  [[ "$output" == *"pagination is not supported"* ]]
+  [[ "$output" != *"unresolved threads:"* ]]
+}
+
+@test "pagination guard fires in --json mode too" {
+  STUB_GH_OUTPUT="$(cat "$BATS_TEST_DIRNAME/fixtures/gh/pr-comments-truncated.json")" \
+    run "$SCRIPT" --pr 7 --json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pagination is not supported"* ]]
+}
+
+@test "pagination guard fires on the python fallback path (no jq)" {
+  dir="$BATS_TEST_TMPDIR/nojq-page-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname python3 cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  # route gh to the truncated fixture
+  cat > "$dir/gh" <<EOF
+#!/usr/bin/env bash
+cat "$BATS_TEST_DIRNAME/fixtures/gh/pr-comments-truncated.json"
+EOF
+  chmod +x "$dir/gh"
+  PATH="$dir" run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pagination is not supported"* ]]
 }
 
 @test "non-numeric --pr: usage error" {

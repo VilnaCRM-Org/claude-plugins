@@ -57,19 +57,28 @@ fi
 OWNER="${repo_slug%%/*}"
 NAME="${repo_slug##*/}"
 
+# pageInfo is requested on every connection so a PR exceeding any first:100
+# page can be detected and refused, never silently truncated: the FR-8 loop
+# treats this script as the single source of truth for "what is unresolved",
+# so a truncated fetch could report "0 unresolved" while unresolved threads
+# remain past the first page and let /sdlc-finish-pr exit early on incomplete
+# data. (Minimal guard: fetch one page, die clearly when more pages exist.)
 # shellcheck disable=SC2016  # $owner/$name/$pr are GraphQL variables, not shell
 QUERY='query($owner: String!, $name: String!, $pr: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $pr) {
       reviewThreads(first: 100) {
+        pageInfo { hasNextPage }
         nodes {
           isResolved
           comments(first: 100) {
+            pageInfo { hasNextPage }
             nodes { author { login } body path line url }
           }
         }
       }
       comments(first: 100) {
+        pageInfo { hasNextPage }
         nodes { author { login } body url }
       }
     }
@@ -78,6 +87,34 @@ QUERY='query($owner: String!, $name: String!, $pr: Int!) {
 
 raw="$(gh api graphql -f query="$QUERY" -f owner="$OWNER" -f name="$NAME" -F pr="$PR")" \
   || die "gh api graphql failed for PR #$PR in $OWNER/$NAME"
+
+# Refuse truncated data: if any connection reports hasNextPage, the single
+# 100-item page is incomplete and the unresolved count would be unreliable.
+has_next_page() {
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$raw" | jq -e '
+      [ .data.repository.pullRequest
+        | (.reviewThreads.pageInfo.hasNextPage // false),
+          (.comments.pageInfo.hasNextPage // false),
+          ((.reviewThreads.nodes // [])[] | .comments.pageInfo.hasNextPage // false)
+      ] | any' >/dev/null 2>&1
+  else
+    printf '%s' "$raw" | python3 -c '
+import json, sys
+p = (json.load(sys.stdin).get("data") or {}).get("repository", {}).get("pullRequest") or {}
+flags = [
+    ((p.get("reviewThreads") or {}).get("pageInfo") or {}).get("hasNextPage"),
+    ((p.get("comments") or {}).get("pageInfo") or {}).get("hasNextPage"),
+]
+for t in (p.get("reviewThreads") or {}).get("nodes") or []:
+    flags.append(((t.get("comments") or {}).get("pageInfo") or {}).get("hasNextPage"))
+sys.exit(0 if any(flags) else 1)' >/dev/null 2>&1
+  fi
+}
+
+if has_next_page; then
+  die "PR #$PR has more than 100 review threads, thread comments, or issue comments — GraphQL pagination is not supported; the unresolved count would be truncated and unreliable"
+fi
 
 # normalize RAW -> canonical JSON, honoring the unresolved-only filter
 normalize() {
@@ -146,17 +183,26 @@ else
   printf '%s' "$canonical" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-print(f"PR #{d[\"pr\"]}")
+pr = d["pr"]
+print(f"PR #{pr}")
 print("== Review threads ==")
 for t in d["review_threads"]:
     state = "resolved" if t["is_resolved"] else "unresolved"
     first = t["comments"][0] if t["comments"] else {}
-    print(f"[{state}] {first.get(\"path\") or \"?\"}:{first.get(\"line\") or 0} {first.get(\"url\") or \"\"}")
+    path = first.get("path") or "?"
+    line = first.get("line") or 0
+    url = first.get("url") or ""
+    print(f"[{state}] {path}:{line} {url}")
     for c in t["comments"]:
-        print(f"    ({c[\"author\"]}) {c[\"body\"]}")
+        author = c["author"]
+        body = c["body"]
+        print(f"    ({author}) {body}")
 print("== Issue comments ==")
 for c in d["issue_comments"]:
-    print(f"  ({c[\"author\"]}) {c[\"body\"]} {c.get(\"url\") or \"\"}")
+    author = c["author"]
+    body = c["body"]
+    url = c.get("url") or ""
+    print(f"  ({author}) {body} {url}")
 unresolved = sum(1 for t in d["review_threads"] if not t["is_resolved"])
 print(f"unresolved threads: {unresolved}")
 '

@@ -17,10 +17,18 @@ All make/CLI invocations below go through the profile's logical target map (`mak
 
 If you created or modified a **NEW feature**, you MUST evaluate **every** skill in this directory **after implementation**. The decision tree below is for choosing the primary skill during the work. It does **not** replace this gate.
 
-**Execution rules:**
+**Execution rules (triage-first — ADR-5/NFR-5):**
 
-1. Open each `SKILL.md` file listed below.
-2. Follow its steps exactly. If a skill is not applicable, explicitly record **"Not applicable"** with a concrete reason. The gate contract is: **every skill verdict recorded, no silent skips**.
+1. Decide each skill's verdict from its frontmatter `description` (in the
+   listed `SKILL.md`) plus this guide alone — never load a skill body to
+   decide a verdict. Record one verdict per skill: **EXECUTE** (with a
+   concrete one-line trigger) or **NOT-APPLICABLE** (with a concrete
+   reason). The gate contract is: **every skill verdict recorded, no
+   silent skips**.
+2. Open a `SKILL.md` body only **after** recording an EXECUTE verdict for
+   it; then follow its steps exactly. NOT-APPLICABLE verdicts are recorded
+   without loading the body — this keeps the token cost bounded (NFR-5:
+   full bodies + reference files load only for EXECUTE verdicts).
 3. Run required commands only through the profile's `make.*` target map (generic tooling like `composer` and `gh` is allowed directly).
 4. Capability-gated skills (`structurizr-architecture-sync` via `capabilities.structurizr`, `load-testing` via `capabilities.load_testing` + `make.load_tests`) are skipped **with a recorded note** when the capability is `false` or the target maps to `null`. `observability-instrumentation` is **not** skip-gated: `capabilities.observability_emf` only selects its emission backend — when `false`, evaluate the skill through its generic metrics-backend branch instead of skipping.
 5. Provide evidence in your response: commands run and outcomes. If you cannot run a command, stop and explain why.

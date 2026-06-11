@@ -62,6 +62,9 @@ pr-comment-resolver) and a 21-skill library with applicability triage.
 
 ## Documentation
 
+- [`/sdlc-setup` walkthrough](docs/setup-walkthrough.md) — the six setup
+  steps, what each produces, `--refresh` semantics, and what a failing
+  preflight looks like with its remediation
 - [Project profile schema](docs/profile-schema.md) — every
   `.claude/php-sdlc.yml` key, defaults, enums, raise-only rules
 - [The SDLC loop](docs/sdlc-loop.md) — stage diagram, exit conditions,

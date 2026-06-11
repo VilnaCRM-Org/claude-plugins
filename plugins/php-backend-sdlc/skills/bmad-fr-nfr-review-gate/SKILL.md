@@ -246,6 +246,16 @@ risk blocks PASS.
 
 ## Required PASS Markers
 
+**The reviewing agent authors the review report** that carries these markers
+— they are a contract on the report you write, not output emitted by the
+shipped `fr-nfr-gate.sh`. The shipped script enforces only the mechanical
+`FR_NFR_NEW_FINDINGS: <n>` contract (see the note after the marker list); it
+never emits or validates any `*_SCORECARD`, `*_MIN_SCORE`, or `STATUS:` line.
+So produce the marker-bearing scorecard report yourself from the scoring work
+above; do not expect the script's stdout or its commit status to contain them.
+(A repo wrapper mapped via `make.fr_nfr_gate` may additionally enforce these
+markers on reviewer output — when one is mapped, follow its contract too.)
+
 The review report produced for the gate must include:
 
 ```text

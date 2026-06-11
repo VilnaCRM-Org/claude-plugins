@@ -8,9 +8,12 @@ allowed-tools: ["Bash", "Read", "Glob", "Grep", "Task"]
 
 Stage 4 of the SDLC loop. Every shipped skill receives a recorded
 applicability verdict, two reviewer agents examine the change set from
-independent lenses, and the FR/NFR gate loops until it reports zero new
-findings. This command never writes files itself (`allowed-tools`
-excludes Write); remediation between gate iterations is delegated.
+independent lenses (FR/NFR and code quality), and the gate loops until
+BOTH lenses are clean — zero new FR/NFR findings AND every quality
+threshold met. This command never writes files itself (`allowed-tools`
+excludes Write): remediation is delegated to a `php-implementer`
+subagent, and this command commits that remediation between iterations
+(the dispatching loop owns commits — `php-implementer` runs no git).
 
 ## Inputs
 
@@ -57,36 +60,69 @@ excludes Write); remediation between gate iterations is delegated.
      `make.phpinsights`, `make.infection` — skipping `null` entries
      with a capability-absent note, NFR-4) and reports observed values
      against the profile `quality.*` thresholds. It never proposes
-     suppressions or threshold cuts.
+     suppressions or threshold cuts. Its Task prompt must carry the
+     one-line change summary, the changed-file list, the skill-triage
+     verdicts, and — on re-invocation — the prior iteration ledger, so
+     its `file:line` findings are scoped to the change set and the
+     iteration counter resumes rather than resets.
    - `fr-nfr-reviewer`: owns the FR/NFR gate run — it resolves the
      gate runner from the profile (`make.fr_nfr_gate`, `null` → the
      plugin's `fr-nfr-gate.sh`), executes it, builds the
      per-requirement PASS/FAIL matrix against `specs/<slug>/`, and
      reports the new-findings count. Its Task prompt must carry the
      spec bundle path, the changed-file list plus a one-line change
-     summary, and — on re-invocation — the prior iteration ledger.
+     summary, the latest stage-3 test outcome (so "implemented AND
+     tested" PASS rows cite it instead of re-running the
+     `make.tests`/`make.e2e` evidence targets the agent is permitted to
+     run), and — on re-invocation — the prior iteration ledger.
      Never run the gate script directly from this command: the agent
      is the single gate owner, so each iteration pays for exactly one
      gate run and yields exactly one new-findings count.
-4. **FR/NFR gate loop** — read the convergence signal from the
-   `fr-nfr-reviewer` report's mandatory last line
-   (`FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=...`).
-   `new_findings=0` with `verdict=PASS` is the stage exit condition.
-   `verdict=DEGRADED` (spec bundle missing or empty) is a blocking
-   finding, not a loop state: nothing exists to remediate and
-   re-invoking cannot change the outcome, so escalate immediately —
-   do NOT re-invoke the agent — with `recommended_action` "re-run
+4. **Remediation gate loop (both lenses)** — read the convergence
+   signal from the `fr-nfr-reviewer` report's mandatory last line
+   (`FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=...`)
+   and the `code-quality-reviewer` report's `Verdict: PASS | FAIL`
+   plus its FAIL threshold rows. The stage exit condition is BOTH
+   lenses clean in the last iteration: `fr-nfr-reviewer`
+   `new_findings=0 verdict=PASS` AND every non-SKIPPED
+   `code-quality-reviewer` threshold row PASS. A `code-quality-reviewer`
+   FAIL row (e.g. phpinsights complexity below the profile `quality.*`
+   floor, deptrac violations over threshold) blocks the stage verdict
+   exactly like an FR/NFR finding — it never silently defers to stage 6
+   CI.
+   `fr-nfr-reviewer` `verdict=DEGRADED` (spec bundle missing or empty)
+   is a blocking finding, not a loop state: nothing exists to remediate
+   and re-invoking cannot change the outcome, so escalate immediately —
+   do NOT re-invoke either agent — with `recommended_action` "re-run
    /sdlc-plan". (A gate-runner-unavailable degrade is different: the
    agent still reports PASS/FAIL from its manually built matrix, so
    the loop proceeds normally with the degrade note.)
-   On findings: this command cannot write fixes (no Write tool), so
-   dispatch the findings as a remediation task to a `php-implementer`
-   subagent (Task tool), wait for its completion, then re-invoke
-   `fr-nfr-reviewer`, passing the prior iteration ledger (findings
-   list and counts from all iterations so far) so the agent computes
-   "new" as a delta and resumes — never resets — its iteration
-   counter. That dispatch-fix-reinvoke cycle is one iteration of the
-   loop below.
+   On findings from EITHER lens: this command cannot write fixes (no
+   Write tool), so it owns the remediation cycle:
+   1. **Dispatch** the combined findings — FR/NFR findings AND
+      `code-quality-reviewer` FAIL-row root-cause fixes — as a single
+      remediation task to a `php-implementer` subagent (Task tool) and
+      wait for its completion. The agent lands fixes in the working
+      tree only; it runs NO git (`php-implementer` forbids it — the
+      dispatching loop owns commits).
+   2. **Commit** the remediation via Bash (`allowed-tools` includes
+      Bash), e.g. `git add -A && git commit -m "review: gate iteration
+      <n> remediation"`, BEFORE re-invoking the reviewers. The gate
+      runner inside `fr-nfr-reviewer` resolves `head_sha=$(git
+      rev-parse HEAD)` and posts the "BMAD FR/NFR Review Gate" commit
+      status to that SHA — committing here is what makes the status
+      land on a tree that actually contains the fixes the gate is
+      about to verify, and it hands committed work to downstream
+      stages.
+   3. **Re-invoke** BOTH `fr-nfr-reviewer` and `code-quality-reviewer`
+      (in parallel, as in step 3), passing each its prior iteration
+      ledger (findings list and counts from all iterations so far) so
+      every agent computes "new" as a delta and resumes — never
+      resets — its iteration counter. A lens already clean in the prior
+      iteration is still re-invoked so the verdict is computed on the
+      committed post-fix tree, not stale output.
+   That dispatch-commit-reinvoke cycle is one iteration of the loop
+   below.
 5. **Report** — render the report template below. Every section is
    mandatory; verdicts must cover 21/21 skills, and threshold rows must
    cite the actual values read from the profile.
@@ -112,6 +148,7 @@ excludes Write); remediation between gate iterations is delegated.
 | psalm errors | <quality.psalm_errors> | <observed> | PASS/FAIL |
 | infection MSI | <quality.infection_msi> | <observed> | PASS/FAIL |
 (null make targets: listed as capability-absent, skipped)
+(any FAIL row blocks the stage verdict and joins the next remediation dispatch)
 
 ## fr-nfr-reviewer
 | requirement | verdict | note |
@@ -125,36 +162,41 @@ excludes Write); remediation between gate iterations is delegated.
 (copied verbatim from the fr-nfr-reviewer iteration ledger)
 
 ## Verdict: PASS | ESCALATED
+(PASS requires BOTH lenses clean: fr-nfr-reviewer new_findings=0
+verdict=PASS AND every non-SKIPPED code-quality-reviewer row PASS)
 ```
 
 ## Loop & exit condition
 
-Each iteration: remediation dispatch (if findings), then a fresh
-`fr-nfr-reviewer` invocation (which performs the iteration's single
-gate run); record its reported new-findings count in the report.
-Exit condition (FR-1 stage table): **zero new findings in last gate
-iteration**.
+Each iteration: remediation dispatch (if findings from either lens),
+then a commit of that remediation, then a fresh parallel invocation of
+`fr-nfr-reviewer` (which performs the iteration's single gate run) and
+`code-quality-reviewer`; record the reported new-findings count and the
+quality threshold table in the report. Exit condition (FR-1 stage
+table): **zero new findings in last gate iteration AND every
+non-SKIPPED quality threshold row PASS** — both lenses clean.
 
 ## Iteration guard
 
-`MAX_ITERATIONS=5`. One iteration = one `fr-nfr-reviewer` invocation —
-exactly one gate run, executed inside the agent — plus the preceding
-remediation dispatch after the first. Keep an explicit counter in
-lockstep with the agent's own (`iteration <n>/5` in its report header)
-and restate it every turn (`review iteration <n>/5`).
+`MAX_ITERATIONS=5`. One iteration = one parallel re-invocation of
+`fr-nfr-reviewer` (exactly one gate run, executed inside the agent) and
+`code-quality-reviewer`, plus the preceding remediation dispatch and
+its commit after the first. Keep an explicit counter in lockstep with
+the agents' own (`iteration <n>/5` in each report header) and restate
+it every turn (`review iteration <n>/5`).
 
 ## Failure escalation
 
-On guard breach or a blocking finding (e.g. a SPECS-MISSING
-`verdict=DEGRADED` report), emit the canonical report (with the review
-report above attached) and stop:
+On guard breach (either lens still dirty at iteration 5) or a blocking
+finding (e.g. a SPECS-MISSING `verdict=DEGRADED` report), emit the
+canonical report (with the review report above attached) and stop:
 
 ```text
 === SDLC ESCALATION ===
 stage: review            iteration: <n>/5
-exit_condition: zero new findings in last gate iteration
+exit_condition: zero new gate findings AND every quality threshold PASS
 status: NOT MET
-blocking_finding: <first unresolved gate finding>
+blocking_finding: <first unresolved gate finding or quality FAIL row>
 iteration_log: <one line per iteration: findings count + remediation summary>
 recommended_action: <human next step>
 === END ===

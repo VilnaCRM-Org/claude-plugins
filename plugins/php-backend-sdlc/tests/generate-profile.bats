@@ -214,6 +214,33 @@ PYEOF
   [ "$(stat -c '%a' "$PROFILE")" = "664" ]
 }
 
+@test "symlinked .claude dir does not redirect the write outside the repo" {
+  OUTSIDE="$BATS_TEST_TMPDIR/outside"
+  mkdir -p "$OUTSIDE"
+  rm -rf "$REPO/.claude"
+  ln -s "$OUTSIDE" "$REPO/.claude"
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"symlink"* ]]
+  # the write must NOT have leaked through the symlink into $OUTSIDE
+  [ ! -e "$OUTSIDE/php-sdlc.yml" ]
+}
+
+@test "--refresh through a symlinked profile file does not clobber the target" {
+  OUTSIDE="$BATS_TEST_TMPDIR/outside-file"
+  mkdir -p "$OUTSIDE"
+  printf 'precious: keep-me\n' > "$OUTSIDE/p.yml"
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  rm -f "$PROFILE"
+  ln -s "$OUTSIDE/p.yml" "$PROFILE"
+  run "$GENERATE" --refresh "$REPO"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"symlink"* ]]
+  # the symlink target's prior contents survive
+  grep -q 'precious: keep-me' "$OUTSIDE/p.yml"
+}
+
 @test "unknown flag: usage error" {
   run "$GENERATE" --bogus "$REPO"
   [ "$status" -eq 1 ]

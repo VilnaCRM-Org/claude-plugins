@@ -61,10 +61,12 @@ that a dispatched `php-implementer` can fix them without re-discovery.
 ## Inputs
 
 1. The dispatch prompt from `/sdlc-review` (Task tool): a one-line
-   change summary and, when available, the list of changed files and
-   the stage's skill-triage verdicts — those focus the `file:line`
-   analysis on the lenses already judged applicable, but never excuse
-   skipping a threshold measurement.
+   change summary and, when available, the list of changed files, the
+   stage's skill-triage verdicts, and — on re-invocation after a
+   remediation commit — the prior iteration ledger (so the counter
+   resumes rather than resets). Those focus the `file:line` analysis on
+   the lenses already judged applicable, but never excuse skipping a
+   threshold measurement.
 2. The project profile at `.claude/php-sdlc.yml` (read it first; the
    dispatching command has already validated it).
 3. The repository source tree, via Read/Glob/Grep, to attach

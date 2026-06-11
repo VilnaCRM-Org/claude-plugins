@@ -101,8 +101,14 @@ touch tests/Load/scripts/graphQLYourOperation.js  # GraphQL
 
 ### 3. Follow Script Structure
 
-See **Quick Reference** and **Supporting Files** below for detailed
-templates and examples.
+Use the script-structure template and operation patterns for your test type:
+
+- REST: [reference/rest-api-patterns.md](reference/rest-api-patterns.md)
+- GraphQL (when `framework.graphql` is true):
+  [reference/graphql-patterns.md](reference/graphql-patterns.md)
+
+The **Quick Reference** below summarizes the step order; **Supporting Files**
+cover configuration, Utils extension, and troubleshooting.
 
 ### 4. Add Configuration
 
@@ -166,6 +172,9 @@ export function teardown(data) {
 ### During Creation
 
 - [ ] Follow the appropriate script structure template
+      ([reference/rest-api-patterns.md](reference/rest-api-patterns.md) for
+      REST, [reference/graphql-patterns.md](reference/graphql-patterns.md) for
+      GraphQL)
 - [ ] Implement proper setup/teardown functions
 - [ ] Use deterministic operations (no random)
 - [ ] Handle IRI/ID paths correctly
@@ -200,6 +209,8 @@ export function teardown(data) {
 
 For detailed patterns, examples, and reference documentation:
 
+- **[reference/rest-api-patterns.md](reference/rest-api-patterns.md)** - REST script-structure template and CRUD operation patterns
+- **[reference/graphql-patterns.md](reference/graphql-patterns.md)** - GraphQL script-structure template and query/mutation patterns
 - **[reference/configuration.md](reference/configuration.md)** - Configuration patterns and guidelines
 - **[reference/utils-extensions.md](reference/utils-extensions.md)** - Extending the Utils class
 - **[reference/troubleshooting.md](reference/troubleshooting.md)** - Common issues and solutions

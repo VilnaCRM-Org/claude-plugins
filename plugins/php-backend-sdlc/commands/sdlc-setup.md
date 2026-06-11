@@ -92,10 +92,14 @@ never overwritten unless the user passed `--refresh` (NFR-3).
    opt-in only — `/sdlc-setup` never writes it and nothing in this
    plugin defaults to it.
 
-7. **Diff summary** — finish by listing exactly what changed this run
-   (`git status --short` plus the profile diff from step 3 and the
-   governance diff from step 5). On an unchanged re-run, state that the
-   run was a no-op.
+7. **Diff summary** — finish by listing exactly what changed this run:
+   `git status --short`, the profile diff from step 3, and the
+   governance change from step 5 — reported as the script's own change
+   log (the `managed block written` / `unchanged` lines it printed in
+   apply mode; `inject-governance.sh` emits no diff there, only behind
+   the `--diff` preview flag) plus the actual content delta from
+   `git diff -- CLAUDE.md AGENTS.md`. On an unchanged re-run (every
+   managed file reported `unchanged`), state that the run was a no-op.
 
 ## Loop & exit condition
 

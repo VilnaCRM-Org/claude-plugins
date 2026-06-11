@@ -9,7 +9,9 @@
 # Runs the FR/NFR verification prompt through the claude driver (ADR-8
 # conventions: --output-format json, .result extraction,
 # --permission-mode acceptEdits (the ADR-6 plugin-wide default),
-# --max-turns 30, one retry on transport failure). The prompt demands a
+# --max-turns 30, one retry on transport failure — a non-zero exit, an
+# is_error=true response, or malformed JSON all count as transport
+# failures, shared with ai-review-loop.sh via lib/common.sh). The prompt demands a
 # mandatory last line
 # 'FR_NFR_NEW_FINDINGS: <n>'. Always posts the 'BMAD FR/NFR Review
 # Gate' commit status for HEAD; posts a PR comment carrying the
@@ -59,35 +61,6 @@ if [[ -n "$IMPACT_CONTEXT" ]]; then
 fi
 GATE_PROMPT+=" End your response with the mandatory last line 'FR_NFR_NEW_FINDINGS: <n>' where <n> is the number of new findings (0 when the change set is clean)."
 
-extract_result() {
-  local json=$1
-  if command -v jq >/dev/null 2>&1; then
-    printf '%s' "$json" | jq -r '.result // empty' 2>/dev/null || true
-  else
-    printf '%s' "$json" | python3 -c '
-import json, sys
-try:
-    print(json.load(sys.stdin).get("result") or "")
-except Exception:
-    pass' 2>/dev/null || true
-  fi
-}
-
-run_claude_once() {
-  local raw result
-  if ! raw="$(claude -p "$GATE_PROMPT" --output-format json \
-              --permission-mode acceptEdits --max-turns 30)"; then
-    log_warn "claude exited non-zero"
-    return 1
-  fi
-  result="$(extract_result "$raw")"
-  if [[ -z "$result" ]]; then
-    log_warn "malformed JSON from claude (no .result)"
-    return 1
-  fi
-  printf '%s\n' "$result"
-}
-
 post_status() {
   local state=$1 description=$2
   gh api "repos/${repo_slug}/statuses/${head_sha}" \
@@ -109,9 +82,9 @@ post_comment() {
 }
 
 # --- run the gate (one retry on transport failure, architecture §8) -----------
-if ! result="$(run_claude_once)"; then
+if ! result="$(claude_run_once "$GATE_PROMPT")"; then
   log_warn "retrying once"
-  if ! result="$(run_claude_once)"; then
+  if ! result="$(claude_run_once "$GATE_PROMPT")"; then
     post_status failure "gate could not run: claude transport failure after retry"
     die "FR/NFR gate failed: claude transport failure after one retry"
   fi

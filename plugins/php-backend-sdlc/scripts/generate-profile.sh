@@ -330,17 +330,47 @@ tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 emit_profile >"$tmp"
 
-# cat-through-redirect, not mv: mv would carry mktemp's 0600 mode onto the
-# repo file; redirect honors the umask on create and keeps the existing
-# file's mode on --refresh.
+# Reject symlinked write targets: a committed symlink in a processed
+# (untrusted/forked) repo would otherwise let `cat >` follow it and
+# create/overwrite a file outside the repo boundary. Refuse both a
+# symlinked profile file and a symlinked .claude dir, and require the
+# resolved parent dir to live inside $TARGET.
+[[ -L "$PROFILE_FILE" ]] && die "profile path is a symlink; refusing to write: $PROFILE_FILE"
+PROFILE_DIR="$(dirname "$PROFILE_FILE")"
+mkdir -p "$PROFILE_DIR"
+[[ -L "$PROFILE_DIR" ]] && die "profile parent (.claude) is a symlink; refusing to write: $PROFILE_DIR"
+target_real="$(realpath "$TARGET")" || die "cannot resolve target directory: $TARGET"
+dir_real="$(realpath "$PROFILE_DIR")" || die "cannot resolve profile directory: $PROFILE_DIR"
+case "$dir_real/" in
+  "$target_real"/*) : ;;
+  *) die "profile directory escapes the target repo (symlink redirect?): $dir_real" ;;
+esac
+
+# Write a temp file in the SAME real directory and mv it into place. The
+# in-dir mktemp + mv replaces the destination atomically (so a symlinked
+# destination would be replaced, not followed); chmod restores umask-
+# honoring perms that mktemp's 0600 would otherwise clobber. On --refresh
+# we preserve the existing file's mode instead.
+write_profile() {
+  local out mode
+  out="$(mktemp "$dir_real/.php-sdlc.yml.XXXXXX")" || die "cannot create temp file in $dir_real"
+  cat "$tmp" >"$out"
+  if [[ -f "$PROFILE_FILE" ]]; then
+    chmod --reference="$PROFILE_FILE" "$out" 2>/dev/null || true
+  else
+    printf -v mode '%o' "$(( 0666 & ~0$(umask) ))"
+    chmod "$mode" "$out" 2>/dev/null || true
+  fi
+  mv -f "$out" "$PROFILE_FILE"
+}
+
 if [[ ! -f "$PROFILE_FILE" ]]; then
-  mkdir -p "$(dirname "$PROFILE_FILE")"
-  cat "$tmp" >"$PROFILE_FILE"
+  write_profile
   log_info "profile created: $PROFILE_FILE"
 elif diff -q "$PROFILE_FILE" "$tmp" >/dev/null 2>&1; then
   log_info "profile unchanged: $PROFILE_FILE"
 elif (( REFRESH )); then
-  cat "$tmp" >"$PROFILE_FILE"
+  write_profile
   log_info "profile refreshed: $PROFILE_FILE"
 else
   log_warn "detected profile differs from existing $PROFILE_FILE (kept existing; use --refresh to overwrite)"

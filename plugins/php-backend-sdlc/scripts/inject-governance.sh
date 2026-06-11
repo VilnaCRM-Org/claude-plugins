@@ -80,9 +80,23 @@ markers_paired() {
   ' "$1"
 }
 
+# reject_symlink FILE — refuse to read/write through a symlink. A managed
+# file that is a symlink would let `cat ... >"$file"` rewrite the link's
+# target, which can be anywhere on disk (outside the target repo). The
+# threat model runs this tool against untrusted cloned repos, so a planted
+# `CLAUDE.md -> ~/.bashrc` (or any user-writable file) must be refused,
+# not followed (NFR-3: content outside the target is never touched).
+reject_symlink() {
+  local file=$1
+  if [[ -L "$file" ]]; then
+    die "refusing to follow symlink: $file (managed governance files must be regular files inside the target repo)"
+  fi
+}
+
 # render_managed FILE -> writes the post-injection content to $new_file
 render_managed() {
   local file=$1
+  reject_symlink "$file"
   if [[ ! -f "$file" ]]; then
     cat "$block_file" >"$new_file"
     return 0

@@ -32,7 +32,7 @@ Skills never name repository-specific Make targets directly. They reference the 
 
 ### Step 0: New Feature Verification Gate (Mandatory)
 
-If you implement a **NEW feature**, you MUST evaluate **every** skill in this directory **after implementation**. If a skill is not applicable (including capability-gated skills whose `capabilities.*` flag is `false`), explicitly record **"Not applicable"** with a concrete reason. Exception: `observability-instrumentation` is not skip-gated — `capabilities.observability_emf: false` selects its generic metrics-backend branch, so evaluate the skill either way. The gate contract is: **every skill verdict recorded, no silent skips**. Provide evidence (commands run and outcomes). Run commands only through the profile's `make.*` target map. Do not claim the feature is complete until this gate is finished.
+If you implement a **NEW feature**, you MUST evaluate **every** skill in this directory **after implementation**. Triage first (ADR-5/NFR-5): decide each skill's verdict from its frontmatter `description` plus `SKILL-DECISION-GUIDE.md` alone, and record **EXECUTE** (with a concrete trigger) or **"Not applicable"** (with a concrete reason) for each. Open a skill's `SKILL.md` body only after recording an EXECUTE verdict — NOT-APPLICABLE verdicts are decided without loading the body, so full bodies and reference files load only for EXECUTE skills (the NFR-5 token bound). Capability-gated skills whose `capabilities.*` flag is `false` are recorded NOT-APPLICABLE without loading. Exception: `observability-instrumentation` is not skip-gated — `capabilities.observability_emf: false` selects its generic metrics-backend branch, so evaluate the skill either way. The gate contract is: **every skill verdict recorded, no silent skips**. Provide evidence (commands run and outcomes) for EXECUTE skills. Run commands only through the profile's `make.*` target map. Do not claim the feature is complete until this gate is finished.
 
 ### Step 1: Understand Your Task
 
@@ -187,7 +187,7 @@ Complex skills have a multi-file structure:
 **Your workflow:**
 
 1. **Identify skills**: Use `implementing-ddd-architecture` for the entity, `database-migrations` for persistence, `api-platform-crud` for REST endpoints, `testing-workflow` for tests, and `ci-workflow` for validation.
-2. **Read each skill** in order and execute steps.
+2. **Triage, then read EXECUTE skills only**: record an EXECUTE verdict for each from its frontmatter description plus the decision guide, then open and execute the body of each EXECUTE skill in order (do not load bodies you have ruled NOT-APPLICABLE).
 3. **Use examples**: Follow the inlined "Quick Start: Complete CRUD in 10 Steps" in `api-platform-crud/SKILL.md`; `cache-management/examples/` has complete working code if caching is involved.
 4. **After implementation**: Run the **New Feature Verification Gate** — every skill verdict recorded, no silent skips.
 

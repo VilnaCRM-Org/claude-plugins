@@ -80,8 +80,9 @@ For each code change:
 
 ### REST endpoints
 
-Applies when `framework.api_platform` is a version string (any REST
-API qualifies even when it is `false`). Update `docs/api-endpoints.md`
+Applies to any REST API regardless of `framework.api_platform`; when
+`framework.api_platform` is a version string, also regenerate the API
+Platform OpenAPI spec. Update `docs/api-endpoints.md`
 with: endpoint definition (method + path), request body example,
 response example with status code, and an error table (status code +
 meaning, e.g. 400 invalid input, 401 unauthorized, 409 conflict). Add

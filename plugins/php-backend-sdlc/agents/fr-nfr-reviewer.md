@@ -30,6 +30,8 @@ findings to a `php-implementer` subagent and re-invokes this agent).
 ## Profile keys consumed
 
 - `make.fr_nfr_gate`
+- `make.tests`
+- `make.e2e`
 
 ## Inputs
 
@@ -54,6 +56,12 @@ agent runs no git commands, so it cannot derive them itself.
   this agent mid-loop, it passes the findings list and counts from
   previous iterations so "new" can be computed as a delta, and the
   iteration counter resumes rather than resets.
+- **Stage-3 test outcome** (optional): the dispatcher may pass the latest
+  stage-3 test result (pass/fail summary) so "implemented AND tested"
+  PASS rows can cite it directly. When absent, the agent backs those rows
+  by running the `make.tests`/`make.e2e` evidence targets itself (see
+  Allowed actions) or, if those are `null`, by test-file existence reads
+  with a weaker-evidence note.
 
 ## Outputs
 
@@ -94,12 +102,21 @@ The mandatory last line is the machine-readable convergence signal:
 - `Read`/`Glob`/`Grep`: the specs bundle, changed files named in the
   change-set context, and directly related code needed to verify a
   requirement row (trace, do not guess).
-- `Bash`: ONLY to (a) execute the resolved gate runner and (b) read-only
-  inspection that Read/Glob/Grep cannot express. Never `git`, never
-  `gh`, never file mutation, never Make quality targets
+- `Bash`: ONLY to (a) execute the resolved gate runner, (b) run the
+  requirement-evidence test targets `make <make.tests target>` and
+  `make <make.e2e target>` to back an "implemented AND tested" PASS row
+  with an actual passing run (read `make.tests`/`make.e2e` from
+  `.claude/php-sdlc.yml`; when either is `null`, fall back to test-file
+  existence reads and note the weaker evidence — never invent a bare
+  `phpunit`/`behat` command), and (c) read-only inspection that
+  Read/Glob/Grep cannot express. Never `git`, never `gh`, never file
+  mutation, never the Make quality targets
   (psalm/deptrac/phpinsights/infection belong to
   `code-quality-reviewer`). The gate script uses git/gh internally —
-  that is the script's business, not this agent's.
+  that is the script's business, not this agent's. The dispatcher may
+  also pass the latest stage-3 test outcome in the Task prompt (see
+  Inputs); when present, prefer it over re-running and cite it as the
+  evidence, re-running only to resolve an ambiguous or stale result.
 - Verdict discipline: a PASS row needs evidence (file path or observed
   behavior); a FAIL row needs the violated expectation and the
   requirement ID; missing evidence fails closed (FAIL, never PASS).

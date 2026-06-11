@@ -124,7 +124,7 @@ it:
 | Key | Required | Type | Default | Notes |
 | --- | --- | --- | --- | --- |
 | `capabilities.structurizr` | no | bool | `false` | Gates the architecture-sync skill (skip-with-note when false). |
-| `capabilities.observability_emf` | no | bool | `false` | Gates observability skills. |
+| `capabilities.observability_emf` | no | bool | `false` | Selects the metrics emission backend for the observability skill: AWS EMF when `true`, generic backend (Prometheus/StatsD/OTel/structured logs) when `false`. Never skip-gates the skill. |
 | `capabilities.load_testing` | no | bool | `false` | Gates load-test skills; pair with `make.load_tests`. |
 
 ## Annotated example
