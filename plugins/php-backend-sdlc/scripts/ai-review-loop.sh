@@ -10,7 +10,9 @@
 # extract .result, and parse the mandatory last-line verdict
 # 'AI_REVIEW_VERDICT: PASS|FAIL'. FAIL re-reviews (acceptEdits lets the
 # reviewer apply fixes) until PASS or --max-iterations (default 5,
-# NFR-6). The v1 agent matrix is claude-only: other agents warn+skip.
+# NFR-6). The v1 agent matrix is claude-only: other agents warn+skip,
+# but a run where NO supported agent ran exits non-zero — an
+# all-skipped matrix produces no verdict and must not pass silently.
 #
 # Fault contract (architecture §8): a non-zero claude exit, an
 # is_error=true response, or malformed JSON gets exactly ONE retry, then
@@ -60,11 +62,13 @@ agents=("${filtered[@]+"${filtered[@]}"}")
 REVIEW_PROMPT="${REVIEW_PROMPT:-Review the working tree changes of this repository (git diff against ${DIFF_BASE}) for correctness, security, maintainability, FR/NFR coverage, and code health: system design tradeoffs, appropriate design pattern use, code smells, SOLID/DRY/KISS, DDD/CQRS, Hexagonal Architecture, and repository rules. Keep findings concrete and scoped to changed code or directly affected behavior. Apply safe fixes directly. End your response with the mandatory verdict line: 'AI_REVIEW_VERDICT: PASS' if the changes are acceptable, otherwise 'AI_REVIEW_VERDICT: FAIL'.}"
 
 overall_fail=0
+ran_any=0
 for agent in "${agents[@]}"; do
   if [[ "$agent" != "claude" ]]; then
     log_warn "agent '$agent' is not supported in v1 (claude-only matrix, ADR-8); skipping"
     continue
   fi
+  ran_any=1
   command -v claude >/dev/null 2>&1 || die "claude CLI not found on PATH"
 
   passed=0
@@ -99,5 +103,11 @@ for agent in "${agents[@]}"; do
     overall_fail=1
   fi
 done
+
+# A run where every configured agent was skipped (no supported agent ran)
+# is a failure, not a silent success: it produced no review verdict.
+if (( ! ran_any )); then
+  die "no supported review agent ran (v1 supports only 'claude', ADR-8); configure 'claude' in review.ai_review_agents or pass --agents claude"
+fi
 
 exit "$overall_fail"

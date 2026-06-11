@@ -54,9 +54,14 @@ never overwritten unless the user passed `--refresh` (NFR-3).
    "${CLAUDE_PLUGIN_ROOT}/scripts/validate-profile.sh"
    ```
 
-   On exit 1, ABORT and show every `VIOLATION:` line. Tell the user to
-   either fix the profile by hand or re-run `/sdlc-setup --refresh`
-   after correcting the repository signals the detector reads.
+   On exit 1, show every `VIOLATION:` line, then enter the bounded
+   fix-retry loop below: if a violation is a detection gap the user can
+   fix in place, regenerate (step 3) and re-validate (step 4), counting
+   the attempt against `MAX_ITERATIONS`. Only ABORT once the loop is
+   exhausted or a violation is not fixable by re-detection — then tell
+   the user to either fix the profile by hand or re-run
+   `/sdlc-setup --refresh` after correcting the repository signals the
+   detector reads.
 
 5. **Inject governance blocks** — run:
 

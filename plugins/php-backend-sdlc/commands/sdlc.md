@@ -47,7 +47,8 @@ condition is not yet met.
 | issue exists; `specs/<slug>/` incomplete or readiness not PASS | stage 2 |
 | readiness PASS; stories not all done (no Ralph `EXIT_SIGNAL` success) | stage 3 |
 | stories done; no zero-findings review-gate record | stage 4 |
-| review clean; QA verdict absent or FAIL | stage 5 |
+| review clean; QA verdict absent | stage 5 |
+| review clean; QA verdict FAIL (loop-back, stage 3 budget remaining) | stage 3 |
 | QA PASS; PR missing, checks not green, or comments unresolved | stage 6 |
 | finish-pr exit condition met | nothing to do → SUCCESS report |
 

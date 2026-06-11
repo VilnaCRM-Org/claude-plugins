@@ -21,9 +21,12 @@ a recorded assumption.
   On exit 1, ABORT and instruct the user to run `/sdlc-setup`.
 - The issue: the URL argument, or the `ISSUE_URL:` line emitted by
   `/sdlc-issue`. Resolve it with
-  `gh issue view <url> --json url,number,title,body` — title, problem
-  statement, and acceptance criteria seed the chain. A missing or
-  closed issue is a blocking finding.
+  `gh issue view <url> --json url,number,title,body,state` — fetch
+  `state` so a closed issue is detected, not assumed open. Title,
+  problem statement, and acceptance criteria seed the chain. A missing
+  issue (the `gh` call fails) or an issue whose `state` is not `OPEN` is
+  a blocking finding — escalate before planning, never plan against a
+  closed or unresolvable issue.
 - `<slug>`: kebab-case of the issue title (prefix with the issue
   number, e.g. `42-currency-crud`); all artifacts live under
   `specs/<slug>/`.

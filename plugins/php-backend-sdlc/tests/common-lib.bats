@@ -117,6 +117,15 @@ setup() {
   [ "${#lines[@]}" -eq 2 ]
 }
 
+@test "yaml_is_list is true only for sequences, false for scalars/absent" {
+  SDLC_FORCE_PYTHON_YAML=1 run yaml_is_list "$VALID_PROFILE" architecture.bounded_contexts
+  [ "$status" -eq 0 ]
+  SDLC_FORCE_PYTHON_YAML=1 run yaml_is_list "$VALID_PROFILE" php.version
+  [ "$status" -eq 1 ]
+  SDLC_FORCE_PYTHON_YAML=1 run yaml_is_list "$VALID_PROFILE" architecture.missing_key
+  [ "$status" -eq 1 ]
+}
+
 @test "yaml_has distinguishes explicit null from undeclared (NFR-4)" {
   SDLC_FORCE_PYTHON_YAML=1 run yaml_has "$VALID_PROFILE" make.ai_review_loop
   [ "$status" -eq 0 ]

@@ -64,8 +64,12 @@ duplicate).
    are missing or vague, derive them from the issue body and append an
    `## Acceptance criteria` section via `gh issue edit` — amend the
    existing issue, never open a duplicate.
-3. Ensure the `php-backend-sdlc` marker label is attached
-   (`gh issue edit --add-label php-backend-sdlc`).
+3. Ensure the `php-backend-sdlc` marker label exists, then attach it:
+   first `gh label list` — if absent, `gh label create php-backend-sdlc
+   --description "Created by the php-backend-sdlc SDLC loop"` (same as
+   create-mode step 2; `--add-label` fails on a repo that never ran the
+   create flow if the label is missing). Then
+   `gh issue edit <url> --add-label php-backend-sdlc`.
 
 ### Output (both modes)
 

@@ -105,6 +105,30 @@ yaml_get_list() {
   fi
 }
 
+# yaml_is_list FILE DOTTED.PATH — exit 0 when the value at PATH is a YAML
+# sequence (list). A scalar, mapping, null, or absent key all exit 1, so
+# callers can reject scalars that would otherwise read back non-empty via
+# yaml_get (e.g. a single bounded context written as a bare string).
+yaml_is_list() {
+  local file=$1 keypath=$2
+  [[ -f "$file" ]] || die "yaml_is_list: no such file: $file"
+  if have_yq; then
+    [[ "$(yq ".${keypath} | type" "$file" 2>/dev/null)" == "!!seq" ]]
+  else
+    python3 - "$file" "$keypath" <<'PYEOF'
+import sys, yaml
+
+cur = yaml.safe_load(open(sys.argv[1])) or {}
+for part in sys.argv[2].split('.'):
+    if isinstance(cur, dict) and part in cur:
+        cur = cur[part]
+    else:
+        sys.exit(1)
+sys.exit(0 if isinstance(cur, list) else 1)
+PYEOF
+  fi
+}
+
 # yaml_has FILE DOTTED.PATH — exit 0 when the key EXISTS, even with a null
 # value. Distinct from yaml_get returning '': the profile schema gives
 # `make.<key>: null` capability-absent semantics (NFR-4), so callers need

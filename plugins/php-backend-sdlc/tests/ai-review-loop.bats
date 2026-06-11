@@ -168,10 +168,11 @@ FAIL_JSON='{"result":"found issues\nAI_REVIEW_VERDICT: FAIL"}'
   [ "$(calls_made)" -eq 2 ]
 }
 
-@test "--agents codex: warns and skips, exit 0, claude never called" {
+@test "--agents codex: warns, skips, then FAILS (no supported agent ran)" {
   STUB_CLAUDE_LOG="$CALLS" run "$LOOP" --agents codex
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
   [[ "$output" == *"'codex' is not supported in v1"* ]]
+  [[ "$output" == *"no supported review agent ran"* ]]
   [ "$(calls_made)" -eq 0 ]
 }
 
@@ -188,8 +189,9 @@ FAIL_JSON='{"result":"found issues\nAI_REVIEW_VERDICT: FAIL"}'
   mkdir -p .claude
   printf 'review:\n  ai_review_agents: [gemini]\n' > .claude/php-sdlc.yml
   STUB_CLAUDE_LOG="$CALLS" run "$LOOP"
-  [ "$status" -eq 0 ]
+  [ "$status" -ne 0 ]
   [[ "$output" == *"'gemini' is not supported in v1"* ]]
+  [[ "$output" == *"no supported review agent ran"* ]]
   [ "$(calls_made)" -eq 0 ]
 }
 

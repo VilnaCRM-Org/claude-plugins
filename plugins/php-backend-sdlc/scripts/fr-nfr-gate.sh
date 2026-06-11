@@ -37,6 +37,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -e "$SPEC_PATH" ]] || die "spec path not found: $SPEC_PATH (pass --spec-path)"
+
+# Confine --spec-path to the repository: the gate feeds the resolved
+# requirement docs into the review prompt, so a path outside the repo
+# (absolute, or escaping via '..'/symlink) would route out-of-tree
+# context into the gate. Canonicalize both and require containment.
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" \
+  || die "not inside a git work tree (cannot bound --spec-path)"
+repo_root="$(cd "$repo_root" && pwd -P)"
+spec_abs="$(cd "$(dirname "$SPEC_PATH")" && pwd -P)/$(basename "$SPEC_PATH")"
+# Strip a trailing /. that dirname+basename can leave for a "specs/." arg.
+spec_abs="${spec_abs%/.}"
+case "$spec_abs" in
+  "$repo_root" | "$repo_root"/*) : ;;
+  *) die "spec path escapes the repository boundary: $SPEC_PATH (must resolve inside $repo_root)" ;;
+esac
+
 command -v claude >/dev/null 2>&1 || die "claude CLI not found on PATH"
 command -v gh >/dev/null 2>&1 || die "gh CLI not found on PATH"
 

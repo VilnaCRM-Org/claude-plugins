@@ -102,6 +102,18 @@ PYEOF
   [[ "$output" == *"'architecture.bounded_contexts' must list at least one"* ]]
 }
 
+@test "scalar bounded_contexts (not a list): exit 1" {
+  python3 - "$PROFILES/valid.yml" "$BATS_TEST_TMPDIR/scalar-contexts.yml" <<'PYEOF'
+import sys, yaml
+p = yaml.safe_load(open(sys.argv[1]))
+p['architecture']['bounded_contexts'] = 'Catalog'
+yaml.safe_dump(p, open(sys.argv[2], 'w'), sort_keys=False)
+PYEOF
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/scalar-contexts.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"'architecture.bounded_contexts' must be a list"* ]]
+}
+
 @test "non-integer quality value: exit 1, named" {
   python3 - "$PROFILES/valid.yml" "$BATS_TEST_TMPDIR/garbage.yml" <<'PYEOF'
 import sys, yaml

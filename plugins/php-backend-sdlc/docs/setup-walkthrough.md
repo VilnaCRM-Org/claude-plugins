@@ -1,9 +1,10 @@
 # `/sdlc-setup` Walkthrough
 
 `/sdlc-setup` (stage 0) prepares a PHP backend repository for the SDLC loop.
-Run it once per repository from the repo root; re-running is safe. Only the
-managed artifacts — the project profile, the governance blocks, and the
-permissions allowlist — are ever touched, and an existing profile is kept
+Run it once per repository from the repo root; re-running is safe. The only
+files/directories it may touch are the project profile, the governance
+blocks, the permissions allowlist, and — on a fresh repo only — a `_bmad/`
+workspace created during the bootstrap step. An existing profile is kept
 unless you pass `--refresh`.
 
 ```bash
@@ -18,8 +19,9 @@ The command runs the following in order, aborting on the first hard failure.
 
 1. **Preflight** — runs `scripts/setup-preflight.sh --report`. Checks the git
    work tree, the `claude` and `gh` CLIs (with version floors), `gh`
-   authentication, the bmalph version/doctor state, and the YAML toolchain
-   (`yq` or `python3` + PyYAML). On any FAIL the command aborts before
+   authentication, the bmalph version/doctor state, the YAML toolchain
+   (`yq` or `python3` + PyYAML), and the JSON toolchain (`jq` or `python3`).
+   On any FAIL the command aborts before
    touching the repository (see [failing preflight](#what-a-failing-preflight-looks-like)).
 2. **BMAD bootstrap (fresh repo only)** — if `_bmad/` is absent, runs
    `bmalph init` non-interactively. If `_bmad/` already exists, the step is
@@ -102,8 +104,8 @@ remediation: run: gh auth login
 When any row is FAIL the command **aborts immediately** — it does not run
 bootstrap, profile generation, governance, or permissions. Apply the named
 remediation (for example install or upgrade `claude`/`gh`/`bmalph` to the
-required floor, run `gh auth login`, or install `yq` / PyYAML) and re-run
-`/sdlc-setup`.
+required floor, run `gh auth login`, or install `yq` / PyYAML / `jq`) and
+re-run `/sdlc-setup`.
 
 A profile that fails validation (step 4) aborts the same way, printing every
 `VIOLATION:` line; fix the profile or re-run with `--refresh` after correcting

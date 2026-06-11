@@ -111,6 +111,19 @@ FINDINGS_JSON='{"result":"- FR-3 issue creation not covered by the change set\n-
   [ ! -f "$GH_LOG" ]
 }
 
+@test "spec path outside the repo boundary: dies before any gh or claude call" {
+  # An existing path that resolves outside the repo work tree must be
+  # rejected — the gate must not route out-of-tree requirement context.
+  outside="$BATS_TEST_TMPDIR/outside-spec"
+  mkdir -p "$outside"
+  echo spec > "$outside/prd.md"
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path "$outside"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"escapes the repository boundary"* ]]
+  [ ! -f "$GH_LOG" ]
+  [ ! -f "$CLAUDE_LOG" ]
+}
+
 @test "malformed gate output: exit 1, failure status names the contract" {
   STUB_CLAUDE_OUTPUT='{"result":"prose without the mandatory line"}' run "$GATE"
   [ "$status" -eq 1 ]

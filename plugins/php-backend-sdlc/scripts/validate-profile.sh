@@ -120,10 +120,17 @@ require_nonnull architecture.source_root
 check_enum persistence.mapper doctrine-orm doctrine-odm
 check_enum persistence.engine mysql mariadb postgresql mongodb
 
-# --- bounded contexts (≥1) -------------------------------------------------
-contexts="$(yaml_get_list "$PROFILE" architecture.bounded_contexts)"
-if [[ -z "$contexts" ]]; then
-  violation "key 'architecture.bounded_contexts' must list at least one bounded context"
+# --- bounded contexts (must be a list with ≥1 entry) -----------------------
+# Type-check first: a bare scalar (e.g. `bounded_contexts: core`) reads back
+# non-empty via yaml_get_list and would otherwise pass — reject it as a
+# schema error so the key is always a sequence.
+if ! yaml_is_list "$PROFILE" architecture.bounded_contexts; then
+  violation "key 'architecture.bounded_contexts' must be a list (sequence) of bounded contexts"
+else
+  contexts="$(yaml_get_list "$PROFILE" architecture.bounded_contexts)"
+  if [[ -z "$contexts" ]]; then
+    violation "key 'architecture.bounded_contexts' must list at least one bounded context"
+  fi
 fi
 
 # --- make map completeness (null = capability absent, NFR-4) ----------------
