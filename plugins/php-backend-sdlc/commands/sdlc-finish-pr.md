@@ -67,8 +67,15 @@ report instead of failing (NFR-4).
    dispatch prompt.
 
 4. **Comment resolution loop — counter B** — dispatch the
-   `pr-comment-resolver` agent (Task tool). The single source of truth
-   for what is unresolved:
+   `pr-comment-resolver` agent (Task tool). Its Task prompt must carry
+   the PR number, the default branch name, the current counter-B
+   iteration number (`comment_resolution iteration <b>/5` — this
+   command owns counter B; the agent cannot derive `<b>` itself, and
+   without it the agent's exhaustion escalation can never fire
+   truthfully), and the comment source selected in step 3. Increment
+   `<b>` in the prompt on every re-dispatch so the agent's counter
+   resumes rather than resets. The single source of truth for what is
+   unresolved:
 
    ```bash
    "${CLAUDE_PLUGIN_ROOT}/scripts/get-pr-comments.sh" --pr <n> --unresolved-only --json

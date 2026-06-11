@@ -58,6 +58,21 @@ require_yaml_toolchain() {
   fi
 }
 
+# yaml_parses FILE — exit 0 when FILE is syntactically valid YAML. Backend
+# parse diagnostics (yq errors, PyYAML tracebacks) are suppressed so callers
+# can fail with their own clean, remediation-bearing message instead of a
+# raw traceback from set -e killing the script mid-yaml_get.
+yaml_parses() {
+  local file=$1
+  [[ -f "$file" ]] || die "yaml_parses: no such file: $file"
+  if have_yq; then
+    yq '.' "$file" >/dev/null 2>&1
+  else
+    python3 -c 'import sys, yaml
+yaml.safe_load(open(sys.argv[1]))' "$file" >/dev/null 2>&1
+  fi
+}
+
 # yaml_get FILE DOTTED.PATH
 # Prints the scalar at DOTTED.PATH ('' when absent or null). Booleans are
 # normalized to true/false in both backends; lists print one item per line

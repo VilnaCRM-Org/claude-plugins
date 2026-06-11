@@ -1,0 +1,349 @@
+# Test Plan — scripts-cli (round 1)
+
+Surface: the 7 shipped `scripts/*.sh` plus `scripts/lib/common.sh`, exercised
+as real CLI invocations against disposable sandboxes under
+`/tmp/sdlc-test-scripts-cli/`. Contracts: each script's header comment, the
+bats suites in `tests/`, and the PRD
+(`specs/autonomous/2026-06-09-php-backend-sdlc-plugin/prd.md`).
+
+Conventions:
+
+- Stub `claude`/`gh`/`bmalph` come from `tests/fixtures/bin` (or purpose-built
+  routing/stateful wrappers where one static response is not enough).
+- "PATH sandbox" = a minimal `PATH` containing only an allowlisted set of
+  tools, used to simulate missing `yq`/`jq`/`python3`/`gh`/`claude`.
+- The host lacks `yq`; yq-backend cases ran against a downloaded real
+  `yq v4.44.3` binary prepended to `PATH`.
+- Every case records PASS/FAIL in the Result column. FAIL rows reference the
+  bug list at the bottom. OBSERVE-style cases record the observed behavior
+  inline.
+
+## lib/common.sh (CL)
+
+### CL — positive cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| CL-P1 | `log_info` output | tagged `[php-sdlc][INFO]` line on stdout | PASS |
+| CL-P2 | `log_warn`/`log_error` | tagged lines on stderr only, stdout empty | PASS |
+| CL-P3 | `yaml_get` scalar + boolean via yq backend | scalar verbatim; booleans `true`/`false` | PASS |
+| CL-P4 | `yaml_get` forced python fallback (`SDLC_FORCE_PYTHON_YAML=1`) | identical scalar and normalized booleans | PASS |
+| CL-P5 | `yaml_has` explicit-null vs undeclared; `yaml_is_list` seq vs scalar | null key exists (0), undeclared (1); list 0, scalar 1 | PASS |
+| CL-P6 | `profile_get` with default; `profile_require` present key | default printed when absent; value printed when present | PASS |
+| CL-P7 | `resolve_plugin_root` with and without `CLAUDE_PLUGIN_ROOT` | env dir wins; falls back to lib-derived root | PASS |
+
+### CL — negative cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| CL-N1 | execute `common.sh` directly | refusal message, exit 64 | PASS |
+| CL-N2 | `yaml_get` on missing file | `die` exit 1, names the file | PASS |
+| CL-N3 | `CLAUDE_PLUGIN_ROOT` → missing dir | `resolve_plugin_root` dies | PASS |
+| CL-N4 | `profile_require` on missing key | dies naming the key | PASS |
+| CL-N5 | `require_yaml_toolchain`, PATH sandbox without yq/PyYAML | dies with install hint | PASS |
+
+### CL — edge cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| CL-E1 | `yaml_get` on CRLF YAML file (yq and python backends) | scalar parses, no `\r` artifacts | PASS |
+| CL-E2 | YAML file path with spaces + unicode | reads normally | PASS |
+| CL-E3 | `claude_run_once`: non-zero exit / `is_error:true` / malformed JSON | returns 1 with the matching WARN for each | PASS |
+| CL-E4 | `claude_extract_result` with jq vs without jq (python3 only) | identical `.result` text | PASS |
+| CL-E5 | `yaml_get` on 10k-key YAML | correct value, completes quickly | PASS |
+
+## setup-preflight.sh (SP)
+
+### SP — positive cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| SP-P1 | all checks green (stubs + git repo) | every check PASS, exit 0, `preflight OK` | PASS |
+| SP-P2 | `--report` all green | full table, exit 0 | PASS |
+| SP-P3 | fresh repo without `_bmad/` | bmalph-doctor PASS as "deferred" | PASS |
+| SP-P4 | `_bmad/` present, doctor exit 0 | bmalph-doctor PASS | PASS |
+
+### SP — negative cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| SP-N1 | unknown argument | usage `die`, exit 1 | PASS |
+| SP-N2 | not a git repo | first-FAIL abort with clone/init remediation, exit 1 | PASS |
+| SP-N3 | claude 2.0 (< 2.1 floor) | FAIL with npm remediation; later checks not printed (default mode) | PASS |
+| SP-N4 | gh unauthenticated (`STUB_GH_AUTH_EXIT=1`) | FAIL gh-auth, remediation `gh auth login` | PASS |
+| SP-N5 | bmalph missing from PATH | FAIL naming the binary | PASS |
+| SP-N6 | `_bmad/` present, doctor exit 1 | FAIL with doctor/init remediation | PASS |
+| SP-N7 | PATH sandbox without yq and PyYAML | yaml-toolchain FAIL, remediation | PASS |
+| SP-N8 | PATH sandbox without jq and python3 | json-toolchain FAIL, remediation | PASS |
+
+### SP — edge cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| SP-E1 | run inside a bare git repository | git-repo check should not claim "inside a git work tree" | FAIL → Bug 1 |
+| SP-E2 | exact floor versions (claude 2.1, bmalph 2.11.0, gh 2.0.0) | inclusive floors: PASS | PASS |
+| SP-E3 | `--report` with multiple failures | every FAIL row listed with remediation, exit 1 | PASS |
+| SP-E4 | extra argument after `--report` | ignored or usage error — observe | PASS (observed: silently ignored; `case "${1:-}"` checks only `$1`; cosmetic) |
+| SP-E5 | `claude --version` prints garbage (no digits) | FAIL "cannot parse a version" | PASS |
+| SP-E6 | run from inside `.git/` of a normal repo | same class as SP-E1 — observe | FAIL → Bug 1 (same root cause) |
+
+## generate-profile.sh (GP)
+
+### GP — positive cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| GP-P1 | stub-repo fixture detection | php 8.4, symfony 7.3, api_platform "4.2", graphql true, doctrine-odm/mongodb (fixture declares the ODM bundle), contexts Catalog+Order, shared Shared, full make map, github-actions workflows, coderabbit true | PASS |
+| GP-P2 | second run, no flags | `profile unchanged`, file byte-identical, exit 0 | PASS |
+| GP-P3 | existing differing profile, no flags | unified diff printed, file kept, exit 0 | PASS |
+| GP-P4 | `--refresh` over differing profile | file overwritten, `profile refreshed` | PASS |
+| GP-P5 | generated profile → `validate-profile.sh` | valid, exit 0 (FR-17 AC) | PASS |
+
+### GP — negative cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| GP-N1 | unknown flag `--bogus` | usage `die` | PASS |
+| GP-N2 | nonexistent TARGET_DIR | `die` target not found | PASS |
+| GP-N3 | TARGET_DIR is a regular file | `die` target not found | PASS |
+| GP-N4 | PATH sandbox without YAML toolchain | `die` no YAML toolchain | PASS |
+| GP-N5 | yq only, no jq/python3 | `die` need jq or python3 | PASS |
+| GP-N6 | read-only `.claude/` dir | clean `die` "cannot create temp file" | PASS |
+
+### GP — edge cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| GP-E1 | empty dir, not a git repo | everything null/false, exit 0 (A3) | PASS |
+| GP-E2 | bare git repo as TARGET | no crash, profile written into bare-repo dir | PASS |
+| GP-E3 | TARGET path with spaces + unicode | profile written at correct path, exit 0 | PASS |
+| GP-E4 | malformed `composer.json` | nulls, exit 0, no crash | PASS |
+| GP-E5 | CRLF `composer.json`/`Makefile`/`.env` (ORM flavor, commented pgsql DSN + active mysql DSN) | detection still correct (engine mysql, no `\r` leakage into values) | PASS |
+| GP-E6 | Makefile with 20k targets | completes < 10 s, map correct | PASS (268 ms) |
+| GP-E7 | two TARGET_DIR args | usage contract says one — observe | PASS (observed: last wins silently; cosmetic, logged as note) |
+| GP-E8 | symlinked `.claude` dir / profile file | refused, symlink target untouched | PASS |
+| GP-E9 | no stray `.php-sdlc.yml.*` temp files after create/refresh runs | none left | PASS |
+| GP-E10 | unicode bounded-context dir names | emitted quoted, profile validates | PASS |
+
+## validate-profile.sh (VP)
+
+### VP — positive cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| VP-P1 | valid fixture profile | exit 0, `profile valid`, zero VIOLATION lines | PASS |
+| VP-P2 | valid fixture, forced python fallback | exit 0 | PASS |
+| VP-P3 | no-arg run from repo cwd | resolves `$PWD/.claude/php-sdlc.yml` | PASS |
+
+### VP — negative cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| VP-N1 | missing profile file | `die` with `/sdlc-setup` hint, exit 1 | PASS |
+| VP-N2 | bad enum (`persistence.mapper: eloquent`) | VIOLATION names key + value, exit 1 | PASS |
+| VP-N3 | lowered threshold | VIOLATION cites ADR-7 raise-only, exit 1 | PASS |
+| VP-N4 | `schema_version: 2` | VIOLATION names schema_version, exit 1 | PASS |
+| VP-N5 | make map missing a key | VIOLATION names `make.<key>`, exit 1 | PASS |
+| VP-N6 | scalar `bounded_contexts` | VIOLATION "must be a list", exit 1 | PASS |
+| VP-N7 | non-integer quality value | VIOLATION "is not an integer", exit 1 | PASS |
+| VP-N8 | 0-byte profile file | violations (not a crash), exit 1 | PASS |
+
+### VP — edge cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| VP-E1 | profile path with spaces + unicode | validates normally | PASS |
+| VP-E2 | CRLF profile file | parses on available backends, exit 0 | PASS |
+| VP-E3 | directory passed as PROFILE_FILE | `die` profile not found | PASS |
+| VP-E4 | extra positional args | contract is one arg — observe | PASS (observed: `$2+` silently ignored; cosmetic, logged as note) |
+| VP-E5 | leading-zero value `complexity: 094` | no octal parse error; 94 ≥ floor passes | PASS |
+| VP-E6 | raised thresholds above defaults | accepted, exit 0 | PASS |
+| VP-E7 | uint64-overflow ceiling value `psalm_errors: 18446744073709551615` | should be rejected (> 0) — observe bash arithmetic wrap | FAIL → Bug 2 (exit 0, "profile valid", twice; floor-side wrap `infection_msi: 2^64` rejects, but with a misleading "lowered below" message) |
+
+## inject-governance.sh (IG)
+
+### IG — positive cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| IG-P1 | empty target dir | CLAUDE.md + AGENTS.md created, exactly one block each | PASS |
+| IG-P2 | existing user content | block appended; bytes outside markers identical | PASS |
+| IG-P3 | second run | `unchanged`, zero diff (NFR-3) | PASS |
+| IG-P4 | stale block content | replaced in place, position preserved | PASS |
+| IG-P5 | `--diff` | preview printed, files not written | PASS |
+
+### IG — negative cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| IG-N1 | unknown flag | usage `die` | PASS |
+| IG-N2 | missing TARGET_DIR | `die` target not found | PASS |
+| IG-N3 | symlinked CLAUDE.md | refused; symlink target byte-identical | PASS |
+
+### IG — edge cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| IG-E1 | duplicate balanced blocks | collapse to one at first position | PASS |
+| IG-E2 | orphan BEGIN marker | marker line removed, user content kept, fresh block appended | PASS |
+| IG-E3 | END before BEGIN (count-balanced) | user content preserved, repaired to one block | PASS |
+| IG-E4 | file without trailing newline | separator added, content intact | PASS |
+| IG-E5 | CRLF file containing a CRLF managed block | markers should still be recognized — observe | FAIL → Bug 3 (2 begin markers + stale block after run; second run reports "unchanged"; reproduced twice in fresh sandboxes) |
+| IG-E6 | target path with spaces + unicode | normal operation | PASS |
+| IG-E7 | 30 MB CLAUDE.md (400k lines) | completes, user bytes preserved | PASS (67 ms) |
+| IG-E8 | CLAUDE.md is a directory | non-zero exit — observe error quality | PASS (exit 1, raw bash "Is a directory"; UX-only, logged as note) |
+| IG-E9 | read-only CLAUDE.md (chmod 444) | non-zero exit, file untouched | PASS |
+| IG-E10 | SIGKILL mid-write on a huge file | partial-state risk of non-atomic `cat >` — observe | PASS (window not reproducible: kill landed before/after write; no truncation observed in 20 attempts; noted as design observation) |
+| IG-E11 | existing 0-byte CLAUDE.md | block written, no stray leading garbage | PASS |
+
+## ai-review-loop.sh (AR)
+
+### AR — positive cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| AR-P1 | stub claude returns PASS verdict | exit 0 on iteration 1 | PASS |
+| AR-P2 | FAIL then PASS (stateful stub) | exit 0 after exactly 2 iterations | PASS |
+| AR-P3 | `--agents codex,claude` | codex warn+skip, claude runs, exit 0 | PASS |
+| AR-P4 | agents from profile `review.ai_review_agents` | profile list honored | PASS |
+| AR-P5 | ADR-8 flag set | `-p --output-format json --permission-mode acceptEdits --max-turns 30` in stub log | PASS |
+| AR-P6 | `--diff-base release` in default prompt; `REVIEW_PROMPT` env override wins | both visible in stub log | PASS |
+
+### AR — negative cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| AR-N1 | unknown argument | usage `die` | PASS |
+| AR-N2 | `--max-iterations` 0 / -1 / abc / 05 | rejected as not a positive integer | PASS |
+| AR-N3 | `--agents` with no value (end of argv) | clean parameter error, non-zero | PASS |
+| AR-N4 | claude absent from PATH | `die` claude CLI not found | PASS |
+| AR-N5 | `--agents codex` only | warn+skip, then die "no supported review agent ran", non-zero | PASS |
+
+### AR — edge cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| AR-E1 | perpetual FAIL verdict | stops at 5 iterations, exit 1, escalation message (NFR-6) | PASS |
+| AR-E2 | malformed JSON every call | exactly one retry per iteration: 2×5 stub calls, exit 1 | PASS |
+| AR-E3 | `is_error:true` then clean PASS on retry | transport retry path, exit 0 | PASS |
+| AR-E4 | missing verdict line | contract violation: failed iteration, NO retry (1 call/iteration) | PASS |
+| AR-E5 | `--agents ","` (only separators) | empty override — observe (defaults to claude?) | PASS (observed: falls back to claude; matches "drop empty entries; default to claude"; logged as note) |
+| AR-E6 | 1 MB result body ending in PASS verdict | verdict parsed, exit 0 | PASS |
+| AR-E7 | verdict line with trailing space | strict per ADR-8: counted as malformed — observe | PASS (treated as contract violation; consistent with header) |
+| AR-E8 | PATH sandbox without jq and python3 | degraded "malformed JSON" warnings, exit 1, never a silent PASS (preflight owns the diagnosis) | PASS |
+
+## fr-nfr-gate.sh (FG)
+
+### FG — positive cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| FG-P1 | verdict `FR_NFR_NEW_FINDINGS: 0` | exit 0, success status posted, NO PR comment | PASS |
+| FG-P2 | verdict `FR_NFR_NEW_FINDINGS: 2` | exit 1, failure status, PR comment with findings | PASS |
+| FG-P3 | `--spec-path` + `--impact-context` | both reach the claude prompt | PASS |
+| FG-P4 | no origin remote | repo slug via `gh repo view` fallback | PASS |
+
+### FG — negative cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| FG-N1 | unknown flag | usage `die` | PASS |
+| FG-N2 | missing spec path | `die` with `--spec-path` remediation, before gh/claude | PASS |
+| FG-N3 | `--spec-path /etc` (outside repo) | `die` boundary escape | PASS |
+| FG-N4 | symlinked spec path | refused | PASS |
+| FG-N5 | non-git directory | `die` "not inside a git work tree" | PASS |
+| FG-N6 | claude absent | `die` claude CLI not found | PASS |
+| FG-N7 | gh absent | `die` gh CLI not found | PASS |
+| FG-N8 | repo with zero commits | `die` cannot resolve HEAD | PASS |
+
+### FG — edge cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| FG-E1 | transport failure on both attempts | one retry, failure status "transport failure", exit 1 | PASS |
+| FG-E2 | output without `FR_NFR_NEW_FINDINGS` line | failure status "malformed", exit 1 | PASS |
+| FG-E3 | `FR_NFR_NEW_FINDINGS: 00` | parsed as 0 → success | PASS |
+| FG-E4 | verdict line with trailing space | strict regex: malformed, exit 1 | PASS |
+| FG-E5 | gh status/comment posts fail (exit 1) | warns, gate verdict still decides exit code | PASS |
+| FG-E6 | spec dir name with spaces | containment math still correct, runs | PASS |
+| FG-E7 | bare repo | `die` (no work tree) | PASS |
+| FG-E8 | `--spec-path specs/../specs` | resolves inside → allowed | PASS |
+
+## get-pr-comments.sh (PC)
+
+### PC — positive cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| PC-P1 | full listing (fixture PR 7) | threads + issue comment + `unresolved threads: 1` | PASS |
+| PC-P2 | `--unresolved-only` | resolved thread + issue comments dropped | PASS |
+| PC-P3 | `--json` | canonical shape (pr, review_threads, issue_comments) | PASS |
+| PC-P4 | `--json --unresolved-only` | filtered threads, `issue_comments: []` | PASS |
+| PC-P5 | no `--pr` (routing gh wrapper) | PR number from `gh pr view` | PASS |
+
+### PC — negative cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| PC-N1 | unknown flag | usage `die` | PASS |
+| PC-N2 | `--pr abc` and `--pr ''` | usage / parameter error, non-zero | PASS |
+| PC-N3 | gh absent from PATH | `die` gh CLI not found | PASS |
+| PC-N4 | no PR for branch (gh pr view fails) | `die` "pass --pr" | PASS |
+| PC-N5 | `gh api graphql` non-zero | `die` names PR and repo | PASS |
+
+### PC — edge cases
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| PC-E1 | truncated fixture (`hasNextPage: true`) | `die` pagination guard, both human and `--json` modes | PASS |
+| PC-E2 | PATH sandbox without jq (python fallback) | byte-equivalent canonical JSON | PASS |
+| PC-E3 | thread with empty `comments.nodes` | human render `?:0`, no crash (jq + python paths) | PASS |
+| PC-E4 | unicode + control chars in body | body survives both render paths | PASS |
+| PC-E5 | `--pr 0` | passes numeric guard, gh decides — observe | PASS (gh error surfaces as `die gh api graphql failed`) |
+| PC-E6 | no git repo, no origin | repo slug via `gh repo view` fallback | PASS |
+| PC-E7 | 1 MB comment body | renders, no crash | PASS |
+
+## Execution summary
+
+- Cases executed: 149 (CL 17, SP 18, GP 21, VP 18, IG 19, AR 19, FG 20,
+  PC 17); several IDs bundle multiple sub-assertions.
+- Result: 145 PASS, 4 FAIL rows (SP-E1 and SP-E6 share one root cause) →
+  3 confirmed bugs, each reproduced twice.
+- Sandboxes under `/tmp/sdlc-test-scripts-cli/` removed after the run.
+
+## Confirmed bugs
+
+1. **SP-E1/SP-E6 — `setup-preflight.sh` git-repo check passes in a bare
+   repo and inside `.git/`** (S3). `git rev-parse --is-inside-work-tree`
+   exits 0 while printing `false` in both locations; the script tests only
+   the exit code, so the check reports `PASS: git-repo — inside a git work
+   tree` where there is no work tree. Repro:
+   `git init --bare /tmp/b.git && cd /tmp/b.git && setup-preflight.sh`.
+2. **VP-E7 — `validate-profile.sh` accepts `quality.psalm_errors:
+   18446744073709551615`** (S2 per the strategy's own example: "validate
+   passes invalid profile"). The 64-bit bash arithmetic in `check_ceiling`
+   wraps the value to `-1`, so `-1 > 0` is false and the relaxed ceiling
+   validates with exit 0 (`profile valid`) — a crafted value defeats the
+   ADR-7 raise-only protection that the governance block promises
+   (`validate-profile.sh rejects lowered values`).
+3. **IG-E5 — `inject-governance.sh` duplicates the governance block in
+   CRLF files** (S3). CRLF marker lines (`<!-- ...begin -->\r`) fail the
+   exact-match tests, so a CRLF file that already carries the managed block
+   is treated as marker-free and a second LF block is appended; the stale
+   CRLF block (including the "do not edit" banner) survives every
+   subsequent run, and re-runs report "unchanged" — contradicting the
+   header contract "replaced in place on every run" / "repaired to exactly
+   one block" (NFR-3).
+
+## Notes (observations, not defects)
+
+- SP-E4 / VP-E4 / GP-E7: extra positional arguments are silently ignored
+  (or last-wins). Cosmetic divergence from single-arg usage strings.
+- IG-E8: a directory named `CLAUDE.md` produces a raw bash
+  "Is a directory" error (non-zero exit). UX-only.
+- IG-E10: `cat "$new_file" > "$file"` is non-atomic by design (mode
+  preservation); a kill in the truncate-write window could leave a partial
+  file, but the window was not hittable in 20 SIGKILL attempts against a
+  30 MB file.
+- AR-E5: `--agents ","` falls back to the default `claude` agent, matching
+  the in-code comment.

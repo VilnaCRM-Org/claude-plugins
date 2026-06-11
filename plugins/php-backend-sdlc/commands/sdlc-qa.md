@@ -40,7 +40,11 @@ they never fix.
    (NFR-4). If the start target exists but the service fails to come
    up, that is a blocking finding — escalate.
 3. **Dispatch `qa-manual-tester`** (Task tool) with the AC list, the
-   base URL, and the report contract. Restate the agent's rules in the
+   base URL, the report contract, and the current QA iteration number
+   from this command's iteration guard — on a re-dispatch after an
+   implement-stage fix round also attach the prior iteration ledger,
+   so the agent's counter resumes rather than resets (subagents are
+   stateless across dispatches). Restate the agent's rules in the
    dispatch prompt:
    - Verdicts from HTTP/API behavior ONLY (`curl` and friends). No
      source reading for verdicts — Read is limited to logs and specs

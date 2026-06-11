@@ -136,6 +136,53 @@ EOF
   [ "$begin_line" -lt "$end_line" ]
 }
 
+@test "CRLF managed block is recognized: replaced in place, no duplicate (IG-E5)" {
+  # Windows-edited CLAUDE.md: markers carry a trailing CR. Exact-line
+  # matching treated the block as absent, appended a second LF block,
+  # and kept the stale CRLF copy forever.
+  printf 'user\r\n%s\r\nOLD GOVERNANCE\r\n%s\r\nmore\r\n' "$BEGIN" "$END" > "$REPO/CLAUDE.md"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'php-backend-sdlc:begin' "$REPO/CLAUDE.md")" -eq 1 ]
+  ! grep -q 'OLD GOVERNANCE' "$REPO/CLAUDE.md"
+  [ "$(grep -c 'Skill-triage gate' "$REPO/CLAUDE.md")" -eq 1 ]
+  # user content outside the markers keeps its CRLF endings untouched
+  grep -q $'^user\r$' "$REPO/CLAUDE.md"
+  grep -q $'^more\r$' "$REPO/CLAUDE.md"
+  # second run is byte-stable on the repaired file
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CLAUDE.md: unchanged"* ]]
+}
+
+@test "fully CRLF-converted file (unix2dos): re-run keeps exactly one governance copy (E11)" {
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  sed -i 's/$/\r/' "$REPO/CLAUDE.md"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'Skill-triage gate' "$REPO/CLAUDE.md")" -eq 1 ]
+  [ "$(grep -c 'php-backend-sdlc:begin' "$REPO/CLAUDE.md")" -eq 1 ]
+}
+
+@test "10 concurrent runs: one block per file, user content preserved (NFR-3)" {
+  # Atomic in-dir mktemp+mv plus snapshot-once rendering: any
+  # serialization of complete renders must end well-formed — never
+  # duplicated/interleaved blocks, never lost user lines.
+  printf '# t\nuser line\n' > "$REPO/CLAUDE.md"
+  for _ in $(seq 10); do
+    "$INJECT" "$REPO" >/dev/null 2>&1 &
+  done
+  wait
+  [ "$(marker_pairs "$REPO/CLAUDE.md")" = "1 1" ]
+  [ "$(marker_pairs "$REPO/AGENTS.md")" = "1 1" ]
+  [ "$(grep -c 'Skill-triage gate' "$REPO/CLAUDE.md")" -eq 1 ]
+  [ "$(grep -c 'Skill-triage gate' "$REPO/AGENTS.md")" -eq 1 ]
+  grep -qx 'user line' "$REPO/CLAUDE.md"
+  # no leaked temp files from the atomic-write path
+  [ -z "$(find "$REPO" -name '.sdlc-governance.*' -print -quit)" ]
+}
+
 @test "created files honor the umask instead of mktemp's 0600" {
   umask 022
   run "$INJECT" "$REPO"

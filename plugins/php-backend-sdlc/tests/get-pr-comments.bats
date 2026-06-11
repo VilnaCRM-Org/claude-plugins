@@ -181,6 +181,31 @@ EOF
   [[ "$output" == *"pagination is not supported"* ]]
 }
 
+@test "gh exit 0 with non-JSON output: clean die naming the PR, no raw jq error (GPC-N3)" {
+  # gh can exit 0 yet print an HTML proxy error page; the script must
+  # diagnose it itself instead of surfacing a jq parse error (exit 5).
+  STUB_GH_OUTPUT='this is not json <html>502</html>' run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"[php-sdlc][ERROR]"* ]]
+  [[ "$output" == *"non-JSON"* ]]
+  [[ "$output" == *"PR #7"* ]]
+  [[ "$output" != *"jq: parse error"* ]]
+}
+
+@test "non-JSON gh output dies cleanly on the python fallback path too (no jq)" {
+  dir="$BATS_TEST_TMPDIR/nojq-nonjson-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname python3 cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  ln -sf "$STUBS/gh" "$dir/gh"
+  STUB_GH_OUTPUT='this is not json <html>502</html>' PATH="$dir" run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"non-JSON"* ]]
+  [[ "$output" != *Traceback* ]]
+  [[ "$output" != *JSONDecodeError* ]]
+}
+
 @test "non-numeric --pr: usage error" {
   run "$SCRIPT" --pr seven
   [ "$status" -eq 1 ]

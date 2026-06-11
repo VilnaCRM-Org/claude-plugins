@@ -92,10 +92,14 @@ check_version() {
 }
 
 # --- 1. git repository ------------------------------------------------------
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+# Compare the printed value, not just the exit code: `git rev-parse
+# --is-inside-work-tree` exits 0 while printing `false` inside a bare
+# repo or a normal repo's .git/ dir — locations with no work tree where
+# /sdlc-setup cannot operate.
+if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
   record PASS "git-repo" "inside a git work tree" "-"
 else
-  record FAIL "git-repo" "current directory is not a git repository" \
+  record FAIL "git-repo" "current directory is not inside a git work tree (bare repo, .git/ dir, or no repository)" \
     "run from inside the target repository (git clone, or git init)"
 fi
 

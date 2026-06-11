@@ -88,6 +88,22 @@ QUERY='query($owner: String!, $name: String!, $pr: Int!) {
 raw="$(gh api graphql -f query="$QUERY" -f owner="$OWNER" -f name="$NAME" -F pr="$PR")" \
   || die "gh api graphql failed for PR #$PR in $OWNER/$NAME"
 
+# raw_is_json — exit 0 when $raw parses as JSON. gh can exit 0 yet emit
+# non-JSON (proxy HTML error pages, prompts); without this guard that
+# output reaches the normalize step and surfaces as a raw jq parse error
+# or python traceback instead of a script-level diagnosis.
+raw_is_json() {
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "$raw" | jq empty >/dev/null 2>&1
+  else
+    printf '%s' "$raw" | python3 -c 'import json, sys
+json.load(sys.stdin)' >/dev/null 2>&1
+  fi
+}
+
+raw_is_json \
+  || die "gh api graphql returned non-JSON output for PR #$PR in $OWNER/$NAME (check 'gh auth status' and network/proxy, then retry)"
+
 # Refuse truncated data: if any connection reports hasNextPage, the single
 # 100-item page is incomplete and the unresolved count would be unreliable.
 has_next_page() {

@@ -21,6 +21,12 @@ source "$SCRIPT_DIR/lib/common.sh"
 PROFILE="${1:-$(profile_path)}"
 [[ -f "$PROFILE" ]] || die "profile not found: $PROFILE (run /sdlc-setup to generate it)"
 require_yaml_toolchain
+# Fail malformed YAML up front with a clean diagnostic: without this guard
+# the first yaml_get on an unparseable file dies via set -e with a raw
+# backend traceback (PyYAML scanner error / yq parse error) instead of a
+# [php-sdlc] message naming the file and a remediation.
+yaml_parses "$PROFILE" \
+  || die "profile is not valid YAML: $PROFILE (fix the syntax or regenerate it with /sdlc-setup)"
 
 violations=0
 violation() {
@@ -59,9 +65,35 @@ check_enum() {
   violation "key '$key' value '$val' not a legal enum value (expected one of: $*)"
 }
 
-# Thresholds are scores/counts: non-negative integers only. The 10# base
-# prefix at comparison sites keeps leading-zero values out of octal parsing.
+# Thresholds are scores/counts: non-negative integers only.
 is_int() { [[ "$1" =~ ^[0-9]+$ ]]; }
+
+# strip_zeros VALUE — drop leading zeros ('007' -> '7', '000' -> '0') so
+# magnitude comparison can go by digit-string length.
+strip_zeros() {
+  local v=$1
+  v="${v#"${v%%[!0]*}"}"
+  printf '%s' "${v:-0}"
+}
+
+# num_gt A B — true when A > B, comparing non-negative decimal integers as
+# digit strings (length, then lexicographic). NEVER use bash arithmetic
+# here: (( )) wraps values >= 2^63 to negative (e.g. 18446744073709551615
+# reads as -1), which would let a crafted huge ceiling value pass the
+# raise-only check and defeat a protected quality gate (ADR-7).
+num_gt() {
+  local a b
+  a="$(strip_zeros "$1")"
+  b="$(strip_zeros "$2")"
+  if (( ${#a} != ${#b} )); then
+    (( ${#a} > ${#b} ))
+  else
+    [[ "$a" > "$b" ]]
+  fi
+}
+
+# num_lt A B — true when A < B (same wrap-safe digit-string comparison).
+num_lt() { num_gt "$2" "$1"; }
 
 # Score thresholds: raise-only vs shipped default (ADR-7).
 check_floor() {
@@ -76,7 +108,7 @@ check_floor() {
     violation "key '$key' value '$val' is not an integer"
     return 0
   fi
-  if (( 10#$val < floor )); then
+  if num_lt "$val" "$floor"; then
     violation "key '$key' value $val lowered below shipped default $floor (ADR-7: raise-only)"
   fi
 }
@@ -94,7 +126,7 @@ check_ceiling() {
     violation "key '$key' value '$val' is not an integer"
     return 0
   fi
-  if (( 10#$val > ceiling )); then
+  if num_gt "$val" "$ceiling"; then
     violation "key '$key' value $val relaxed above shipped default $ceiling (ADR-7: raise-only)"
   fi
 }

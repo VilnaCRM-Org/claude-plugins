@@ -103,6 +103,25 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
   [[ "$output" == *"git clone, or git init"* ]]
 }
 
+@test "bare repository: git-repo FAIL — exit-code-0 'false' from rev-parse is not a pass (SP-E1)" {
+  # `git rev-parse --is-inside-work-tree` exits 0 while PRINTING 'false'
+  # in a bare repo; the check must compare the value, not the exit code.
+  mkdir -p "$BATS_TEST_TMPDIR/bare-repo"
+  git -C "$BATS_TEST_TMPDIR/bare-repo" init -q --bare
+  cd "$BATS_TEST_TMPDIR/bare-repo"
+  run "$PREFLIGHT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: git-repo"* ]]
+  [[ "$output" == *"git clone, or git init"* ]]
+}
+
+@test "inside .git/ of a normal repo: git-repo FAIL (no work tree, SP-E6)" {
+  cd "$REPO/.git"
+  run "$PREFLIGHT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: git-repo"* ]]
+}
+
 @test "bmalph doctor: fresh repo without _bmad/ passes as deferred (FR-2)" {
   run "$PREFLIGHT"
   [ "$status" -eq 0 ]

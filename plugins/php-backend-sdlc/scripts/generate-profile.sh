@@ -203,11 +203,18 @@ fi
 
 makefile_targets=""
 if [[ -f "$TARGET/Makefile" ]]; then
+  # A target line is `name:`/`name::` followed by nothing or a non-`=`
+  # prerequisite list. The `[^=:]` guard excludes make's colon-flavored
+  # variable assignments (`name:=v`, `name::=v`, `name:::=v`), which a
+  # bare `name:` prefix match would misreport as runnable targets —
+  # `make tests` then fails with 'No rule to make target' on a map the
+  # profile claimed was real.
   # `|| true`: a Makefile with no plain targets (only .PHONY/pattern
   # rules/variable assignments) makes grep exit 1, which pipefail+set -e
   # would turn into a silent abort — but a target-less Makefile must
   # yield null make.* keys, never a failure (A3, NFR-4).
-  makefile_targets="$(grep -oE '^[A-Za-z0-9_-]+:' "$TARGET/Makefile" | tr -d ':' | sort -u || true)"
+  makefile_targets="$(grep -E '^[A-Za-z0-9_-]+:{1,2}([^=:].*)?$' "$TARGET/Makefile" \
+    | sed -E 's/:.*$//' | sort -u || true)"
 fi
 
 # first existing Makefile target among candidates, else empty
@@ -243,7 +250,11 @@ if [[ -d "$TARGET/.github/workflows" ]]; then
     [[ -f "$wf" ]] || continue
     ci_provider="github-actions"
     name="$(sanitize_inline "$(yaml_get "$wf" name)")"
-    [[ -z "$name" ]] && name="$(basename "$wf" | sed -E 's/\.(yml|yaml)$//')"
+    # The basename fallback is repo-derived text too: a workflow FILENAME
+    # can carry control chars (even newlines), so it must pass through
+    # sanitize_inline like the name:-field path or the raw bytes leak
+    # into the emitted profile as a multi-line scalar.
+    [[ -z "$name" ]] && name="$(sanitize_inline "$(basename "$wf" | sed -E 's/\.(yml|yaml)$//')")"
     workflows+=("$name")
   done
 fi

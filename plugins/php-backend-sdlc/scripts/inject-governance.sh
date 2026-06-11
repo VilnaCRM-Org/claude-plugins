@@ -39,7 +39,9 @@ END_MARKER='<!-- php-backend-sdlc:end -->'
 # values, so the block stays byte-stable across profile edits (NFR-3).
 block_file="$(mktemp)"
 new_file="$(mktemp)"
-trap 'rm -f "$block_file" "$new_file"' EXIT
+snap_file="$(mktemp)"
+out_file=""
+trap 'rm -f "$block_file" "$new_file" "$snap_file" ${out_file:+"$out_file"}' EXIT
 cat >"$block_file" <<BLOCK
 $BEGIN_MARKER
 ## php-backend-sdlc governance (managed block — do not edit between markers)
@@ -67,6 +69,22 @@ Never invoke composer, php, or test runners directly on the host.
 $END_MARKER
 BLOCK
 
+# Marker matching tolerates a trailing CR everywhere (the awk norm()
+# helpers below): a Windows-edited CLAUDE.md carries CRLF endings, and an
+# exact-line match would treat its block as absent — every run would then
+# append a fresh duplicate while keeping the stale CRLF copy forever
+# (NFR-3 violation). The replacement block is always written with LF;
+# user content outside the markers keeps its original line endings.
+
+# count_marker_lines FILE MARKER — number of lines equal to MARKER,
+# ignoring a trailing CR.
+count_marker_lines() {
+  awk -v m="$2" '
+    { s = $0; sub(/\r$/, "", s); if (s == m) n++ }
+    END { print n + 0 }
+  ' "$1"
+}
+
 # markers_paired FILE — success only when every BEGIN is closed by an END
 # before the next BEGIN or EOF. Counts alone cannot catch an END that
 # precedes its BEGIN: that state is count-balanced, but the replacement
@@ -74,8 +92,9 @@ BLOCK
 # user content after it.
 markers_paired() {
   awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
-    $0 == begin { if (inblock) bad = 1; inblock = 1; next }
-    $0 == end   { if (!inblock) bad = 1; inblock = 0; next }
+    function norm(l) { sub(/\r$/, "", l); return l }
+    norm($0) == begin { if (inblock) bad = 1; inblock = 1; next }
+    norm($0) == end   { if (!inblock) bad = 1; inblock = 0; next }
     END { exit (bad || inblock) ? 1 : 0 }
   ' "$1"
 }
@@ -94,24 +113,34 @@ reject_symlink() {
 }
 
 # render_managed FILE -> writes the post-injection content to $new_file
+# and sets file_exists=0/1. FILE is read exactly ONCE, into $snap_file;
+# marker counts, pairing, the rewrite, and the caller's diff all work on
+# that snapshot. Re-reading the live file between those steps let a
+# concurrent run swap the content mid-render, producing duplicated or
+# interleaved governance blocks from a torn view.
+file_exists=0
 render_managed() {
   local file=$1
   reject_symlink "$file"
   if [[ ! -f "$file" ]]; then
+    file_exists=0
     cat "$block_file" >"$new_file"
     return 0
   fi
+  file_exists=1
+  cat "$file" >"$snap_file"
   local begins ends
-  begins="$(grep -cxF "$BEGIN_MARKER" "$file" || true)"
-  ends="$(grep -cxF "$END_MARKER" "$file" || true)"
-  if [[ "$begins" == "$ends" && "$begins" -gt 0 ]] && markers_paired "$file"; then
+  begins="$(count_marker_lines "$snap_file" "$BEGIN_MARKER")"
+  ends="$(count_marker_lines "$snap_file" "$END_MARKER")"
+  if [[ "$begins" == "$ends" && "$begins" -gt 0 ]] && markers_paired "$snap_file"; then
     # Balanced markers: drop every managed region, leave a placeholder at
     # the first region's position, then splice the fresh block there.
     awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
-      $0 == begin && !inblock { inblock = 1; if (!placed) { print "\x01MANAGED-BLOCK\x01"; placed = 1 }; next }
-      inblock { if ($0 == end) inblock = 0; next }
+      function norm(l) { sub(/\r$/, "", l); return l }
+      norm($0) == begin && !inblock { inblock = 1; if (!placed) { print "\x01MANAGED-BLOCK\x01"; placed = 1 }; next }
+      inblock { if (norm($0) == end) inblock = 0; next }
       { print }
-    ' "$file" | awk -v blockfile="$block_file" '
+    ' "$snap_file" | awk -v blockfile="$block_file" '
       $0 == "\x01MANAGED-BLOCK\x01" {
         while ((getline line < blockfile) > 0) print line
         close(blockfile)
@@ -121,8 +150,8 @@ render_managed() {
     ' >"$new_file"
   elif [[ "$begins" -eq 0 && "$ends" -eq 0 ]]; then
     # No block yet: append after a blank separator line.
-    cat "$file" >"$new_file"
-    if [[ -s "$file" && -n "$(tail -c 1 "$file")" ]]; then
+    cat "$snap_file" >"$new_file"
+    if [[ -s "$snap_file" && -n "$(tail -c 1 "$snap_file")" ]]; then
       printf '\n' >>"$new_file"  # file lacked trailing newline
     fi
     printf '\n' >>"$new_file"
@@ -132,37 +161,60 @@ render_managed() {
     # span could swallow user content, so drop ONLY the marker lines and
     # append one fresh block at the end.
     awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
-      $0 == begin || $0 == end { next }
+      function norm(l) { sub(/\r$/, "", l); return l }
+      norm($0) == begin || norm($0) == end { next }
       { print }
-    ' "$file" >"$new_file"
+    ' "$snap_file" >"$new_file"
     printf '\n' >>"$new_file"
     cat "$block_file" >>"$new_file"
   fi
+}
+
+# write_managed FILE — replace FILE with $new_file ATOMICALLY: write a
+# temp file in the target directory, then mv it into place (mirrors
+# generate-profile.sh). The previous truncate-and-rewrite (`cat >FILE`)
+# opened a window where a concurrent run read a half-written file and
+# appended duplicate/interleaved blocks — or lost user content outside
+# the markers entirely. With mv, every version a reader can open is
+# complete, so parallel runs serialize to a well-formed last-writer-wins
+# state (NFR-3). chmod keeps the existing file's mode on overwrite and
+# derives the create mode from the umask (mktemp's 0600 would clobber
+# both).
+write_managed() {
+  local file=$1 mode
+  out_file="$(mktemp "$TARGET/.sdlc-governance.XXXXXX")" \
+    || die "cannot create temp file in $TARGET"
+  cat "$new_file" >"$out_file"
+  if [[ -f "$file" ]]; then
+    chmod --reference="$file" "$out_file" 2>/dev/null || true
+  else
+    printf -v mode '%o' "$(( 0666 & ~0$(umask) ))"
+    chmod "$mode" "$out_file" 2>/dev/null || true
+  fi
+  mv -f "$out_file" "$file"
+  out_file=""
 }
 
 overall_changed=0
 for name in CLAUDE.md AGENTS.md; do
   file="$TARGET/$name"
   render_managed "$file"
-  if [[ -f "$file" ]] && diff -q "$file" "$new_file" >/dev/null 2>&1; then
+  if (( file_exists )) && diff -q "$snap_file" "$new_file" >/dev/null 2>&1; then
     log_info "$name: unchanged"
     continue
   fi
   if (( DIFF_ONLY )); then
     overall_changed=1
     log_info "$name: pending changes (--diff preview, file not written)"
-    if [[ -f "$file" ]]; then
-      diff -u "$file" "$new_file" || true
+    if (( file_exists )); then
+      diff -u --label "$file" --label "$file (pending)" "$snap_file" "$new_file" || true
     else
       log_info "$name does not exist; it would be created with the managed block"
     fi
     continue
   fi
   overall_changed=1
-  # cat-through-redirect, not cp: cp from the mktemp file would create a
-  # new CLAUDE.md/AGENTS.md with mktemp's 0600 mode; redirect honors the
-  # umask on create and keeps the existing mode on overwrite.
-  cat "$new_file" >"$file"
+  write_managed "$file"
   log_info "$name: managed block written"
 done
 

@@ -128,6 +128,34 @@ pget() { yaml_get "$PROFILE" "$1"; }
   [ "$(pget capabilities.load_testing)" = "false" ]
 }
 
+@test "no-space variable assignment 'name:=value' is not detected as a make target" {
+  # `tests:=unit src` is a := assignment, not a rule: claiming make.tests
+  # exists would hand downstream stages a target that fails with
+  # 'No rule to make target'. Real targets on other lines must survive.
+  printf 'tests:=unit src\nareas::=a b\nci:\n\ttrue\ne2e-tests: ; true\n' > "$REPO/Makefile"
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  [ -z "$(pget make.tests)" ]
+  [ "$(pget make.ci)" = "ci" ]
+  [ "$(pget make.e2e)" = "e2e-tests" ]
+}
+
+@test "workflow filename with embedded newline: basename fallback sanitized to one line" {
+  # A workflow with no name: key falls back to its FILENAME, which is
+  # repo-derived text too — control chars must be stripped via
+  # sanitize_inline, never leaked as a multi-line profile scalar.
+  printf 'on: [push]\n' > "$REPO/.github/workflows/$(printf 'evil\nINJECT: x\n').yml"
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  # ci.workflows stays on one physical line; the newline never reaches the file
+  grep -qE '^  workflows: \[' "$PROFILE"
+  ! grep -q '^INJECT' "$PROFILE"
+  run yaml_get_list "$PROFILE" ci.workflows
+  printf '%s\n' "${lines[@]}" | grep -qxF 'evilINJECT: x'
+  run "$VALIDATE" "$PROFILE"
+  [ "$status" -eq 0 ]
+}
+
 @test "empty repo: never errors, everything null/false (A3)" {
   EMPTY="$BATS_TEST_TMPDIR/empty"
   mkdir -p "$EMPTY"

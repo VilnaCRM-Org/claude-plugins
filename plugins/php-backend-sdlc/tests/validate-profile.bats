@@ -137,6 +137,47 @@ PYEOF
   [ "$status" -eq 0 ]
 }
 
+@test "uint64-wrap ceiling value (2^64-1) is rejected, never wrapped negative (ADR-7, VP-E7)" {
+  # 18446744073709551615 wraps to -1 in bash 64-bit arithmetic; a wrapped
+  # comparison would let a crafted huge value defeat the raise-only gate.
+  sed 's/^  psalm_errors:.*/  psalm_errors: 18446744073709551615/' \
+    "$PROFILES/valid.yml" > "$BATS_TEST_TMPDIR/wrap.yml"
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/wrap.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"'quality.psalm_errors' value 18446744073709551615 relaxed above shipped default 0"* ]]
+}
+
+@test "huge raised score threshold (>2^63) is still accepted as a raise (ADR-7)" {
+  # The wrap-safe comparison must not over-reject: an absurdly raised
+  # floor value is a (pointless but legal) raise, not a violation.
+  sed 's/^  infection_msi:.*/  infection_msi: 18446744073709551615/' \
+    "$PROFILES/valid.yml" > "$BATS_TEST_TMPDIR/huge-raise.yml"
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/huge-raise.yml"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *VIOLATION* ]]
+}
+
+@test "malformed YAML profile: clean [php-sdlc] diagnostic, no backend traceback" {
+  # Tab indentation is illegal YAML; without the up-front parse guard the
+  # first yaml_get dies via set -e with a raw PyYAML/yq parse error.
+  printf 'project:\n\tname: "x"\n' > "$BATS_TEST_TMPDIR/tabs.yml"
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/tabs.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"[php-sdlc][ERROR] profile is not valid YAML"* ]]
+  [[ "$output" == *"$BATS_TEST_TMPDIR/tabs.yml"* ]]
+  [[ "$output" == *"/sdlc-setup"* ]]
+  [[ "$output" != *Traceback* ]]
+  [[ "$output" != *"yaml.scanner"* ]]
+}
+
+@test "malformed YAML (unclosed quote): same clean diagnostic" {
+  printf 'a: "unclosed\n' > "$BATS_TEST_TMPDIR/unclosed.yml"
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/unclosed.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"profile is not valid YAML"* ]]
+  [[ "$output" != *Traceback* ]]
+}
+
 @test "no-arg invocation resolves <cwd>/.claude/php-sdlc.yml" {
   mkdir -p "$BATS_TEST_TMPDIR/repo/.claude"
   cp "$PROFILES/valid.yml" "$BATS_TEST_TMPDIR/repo/.claude/php-sdlc.yml"

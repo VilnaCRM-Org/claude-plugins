@@ -64,7 +64,11 @@ code suggests it should do. This agent reports; it does not fix
 
 1. The dispatch prompt from `/sdlc-qa` (Task tool): the numbered AC
    list (from the GitHub issue and `specs/<slug>/prd.md`), the service
-   base URL, and the report contract.
+   base URL, the report contract, and the current QA iteration number
+   from the stage iteration guard — plus, on a re-dispatch after an
+   implement-stage fix round, the prior iteration ledger. The counter
+   resumes from that dispatched value; if the dispatch omits it,
+   assume iteration 1/5 and say so in the report header.
 2. The project profile at `.claude/php-sdlc.yml` — resolve
    `make.start` and the framework surface flags
    (`framework.api_platform`, `framework.graphql`) before probing.
@@ -152,10 +156,13 @@ Degrades report and continue; they never loop and never hard-fail
 
 ## Iteration discipline
 
-- Own iteration counter, `MAX_ITERATIONS=5`, never reset. One
-  iteration = one full QA pass over the enumerated AC list against a
-  running service. Restate the counter at the start of every pass
-  (`qa iteration <n>/5`).
+- Iteration counter, `MAX_ITERATIONS=5`, never reset. The counter is
+  owned by the `/sdlc-qa` stage guard and arrives in the dispatch
+  prompt (Inputs item 1) — this agent is stateless across dispatches,
+  so it resumes from the dispatched iteration number instead of
+  restarting at 1 on a re-dispatch. One iteration = one full QA pass
+  over the enumerated AC list against a running service. Restate the
+  counter at the start of every pass (`qa iteration <n>/5`).
 - A FAIL verdict does not consume extra iterations here — it is
   reported once and routed back; re-probing unchanged code cannot
   change observed behavior. Additional iterations are spent only on a
