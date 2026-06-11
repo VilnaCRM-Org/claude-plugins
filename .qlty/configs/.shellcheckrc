@@ -1,0 +1,6 @@
+# Follow `source`d helpers so ShellCheck resolves lib/common.sh across the
+# plugin scripts instead of reporting SC1091 (info). Mirrors the repo CI
+# gate, which runs `shellcheck -x`. Scripts already carry the matching
+# `# shellcheck source=...` directives; no rules are disabled.
+external-sources=true
+source-path=SCRIPTDIR
