@@ -45,9 +45,16 @@ done
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" \
   || die "not inside a git work tree (cannot bound --spec-path)"
 repo_root="$(cd "$repo_root" && pwd -P)"
-spec_abs="$(cd "$(dirname "$SPEC_PATH")" && pwd -P)/$(basename "$SPEC_PATH")"
-# Strip a trailing /. that dirname+basename can leave for a "specs/." arg.
-spec_abs="${spec_abs%/.}"
+# A symlinked final component would survive dirname-only canonicalization
+# and bypass containment (cd -P resolves parents, not the leaf): refuse
+# it outright, mirroring inject-governance.sh's symlink policy.
+[[ -L "$SPEC_PATH" ]] \
+  && die "refusing to follow symlink for --spec-path: $SPEC_PATH"
+if [[ -d "$SPEC_PATH" ]]; then
+  spec_abs="$(cd "$SPEC_PATH" && pwd -P)"
+else
+  spec_abs="$(cd "$(dirname "$SPEC_PATH")" && pwd -P)/$(basename "$SPEC_PATH")"
+fi
 case "$spec_abs" in
   "$repo_root" | "$repo_root"/*) : ;;
   *) die "spec path escapes the repository boundary: $SPEC_PATH (must resolve inside $repo_root)" ;;

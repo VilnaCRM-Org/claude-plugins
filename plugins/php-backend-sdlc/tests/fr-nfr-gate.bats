@@ -124,6 +124,35 @@ FINDINGS_JSON='{"result":"- FR-3 issue creation not covered by the change set\n-
   [ ! -f "$CLAUDE_LOG" ]
 }
 
+@test "spec path that is a symlink to an outside dir: refused before any gh or claude call" {
+  # A symlink at the FINAL path component survives dirname-only
+  # canonicalization, so the gate must refuse symlinked --spec-path
+  # outright (mirrors inject-governance.sh's symlink policy).
+  outside="$BATS_TEST_TMPDIR/outside-spec-link-target"
+  mkdir -p "$outside"
+  echo spec > "$outside/prd.md"
+  ln -s "$outside" "$WORK/specs-link"
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path "$WORK/specs-link"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"refusing to follow symlink"* ]]
+  [ ! -f "$GH_LOG" ]
+  [ ! -f "$CLAUDE_LOG" ]
+}
+
+@test "spec path symlink with trailing slash: still confined by containment" {
+  # With a trailing slash the -L test dereferences, but pwd -P then
+  # resolves the link target, so containment must still reject it.
+  outside="$BATS_TEST_TMPDIR/outside-spec-slash-target"
+  mkdir -p "$outside"
+  echo spec > "$outside/prd.md"
+  ln -s "$outside" "$WORK/specs-link-slash"
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path "$WORK/specs-link-slash/"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"escapes the repository boundary"* || "$output" == *"refusing to follow symlink"* ]]
+  [ ! -f "$GH_LOG" ]
+  [ ! -f "$CLAUDE_LOG" ]
+}
+
 @test "malformed gate output: exit 1, failure status names the contract" {
   STUB_CLAUDE_OUTPUT='{"result":"prose without the mandatory line"}' run "$GATE"
   [ "$status" -eq 1 ]
