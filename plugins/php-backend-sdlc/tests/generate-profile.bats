@@ -161,6 +161,49 @@ PYEOF
   [ "$(pget persistence.engine)" = "mysql" ]
 }
 
+@test "wildcard constraint '7.2.*' yields framework.version '7.2' (no trailing dot)" {
+  # strip_constraint must trim the trailing '.' left by a '.*' wildcard so the
+  # emitted version is a clean MAJOR.MINOR, never '7.2.' (QA defect D1).
+  python3 - "$REPO/composer.json" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path))
+data['require']['symfony/framework-bundle'] = '7.2.*'
+json.dump(data, open(path, 'w'), indent=2)
+PYEOF
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(pget framework.name)" = "symfony" ]
+  [ "$(pget framework.version)" = "7.2" ]
+}
+
+@test "engine detection ignores commented .env DSN, picks active postgres line" {
+  # A commented-out '# DB_URL=\"mysql://...\"' example must NOT win over the
+  # active 'DB_URL=postgres://...' assignment below it (QA defect D2). With no
+  # doctrine.yaml driver hint the engine comes purely from .env, where the
+  # mysql line is a comment and the postgres line is the live config.
+  python3 - "$REPO/composer.json" <<'PYEOF'
+import json, sys
+path = sys.argv[1]
+data = json.load(open(path))
+req = data['require']
+del req['doctrine/mongodb-odm-bundle']
+req['doctrine/orm'] = '^3.0'
+json.dump(data, open(path, 'w'), indent=2)
+PYEOF
+  cat > "$REPO/.env" <<'EOF'
+###> doctrine/doctrine-bundle ###
+# DB_URL="mysql://app:!ChangeMe!@127.0.0.1:3306/app?serverVersion=8"
+# DB_URL="postgresql://app:!ChangeMe!@127.0.0.1:5432/app?serverVersion=15"
+DB_URL=postgres://app:!ChangeMe!@database:5432/app
+###< doctrine/doctrine-bundle ###
+EOF
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(pget persistence.mapper)" = "doctrine-orm" ]
+  [ "$(pget persistence.engine)" = "postgresql" ]
+}
+
 @test "git origin remote wins over composer name for project.repo" {
   git -C "$REPO" init -q
   git -C "$REPO" remote add origin git@github.com:acme/real-service.git

@@ -77,9 +77,12 @@ except Exception:
   fi
 }
 
-# strip_constraint "^8.4" -> 8.4 ; ">=7.3 <8" -> 7.3 ; "" -> ""
+# strip_constraint "^8.4" -> 8.4 ; ">=7.3 <8" -> 7.3 ; "7.2.*" -> 7.2 ; "" -> ""
+# Leading non-digits and any trailing junk after the first version number are
+# dropped; a trailing '.' left by a wildcard constraint ("7.2.*") is trimmed so
+# the emitted version is a clean "MAJOR.MINOR" with no dangling separator.
 strip_constraint() {
-  printf '%s\n' "$1" | sed -E 's/^[^0-9]*//; s/[^0-9.].*$//'
+  printf '%s\n' "$1" | sed -E 's/^[^0-9]*//; s/[^0-9.].*$//; s/\.+$//'
 }
 
 # sanitize_inline VALUE — drop control characters (incl. newline/CR) from
@@ -139,23 +142,43 @@ elif [[ -n "$(composer_req doctrine/orm)" ]] || [[ -n "$(composer_req doctrine/d
   mapper="doctrine-orm"
 fi
 
+# engine_from_hints HINTS — engine named by the driver-hint text, '' if none.
+# MariaDB still wins globally (it reuses MySQL's pdo_mysql driver, so a
+# `mariadb` server_version anywhere must override the shared driver string).
+# Between mysql and postgresql the *first active line* decides, walking the
+# hints in file order — so a commented-out example DSN can no longer outrank an
+# active assignment lower in the file just because its engine is checked first.
+engine_from_hints() {
+  local hints=$1 line
+  if grep -qiE 'mariadb' <<<"$hints"; then
+    printf 'mariadb\n'; return 0
+  fi
+  while IFS= read -r line; do
+    if grep -qiE 'pdo_mysql|mysql://|mysqli' <<<"$line"; then
+      printf 'mysql\n'; return 0
+    elif grep -qiE 'pdo_pgsql|postgres(ql)?://' <<<"$line"; then
+      printf 'postgresql\n'; return 0
+    fi
+  done <<<"$hints"
+}
+
 engine=""
 if [[ "$mapper" == "doctrine-odm" ]]; then
   engine="mongodb"
 elif [[ "$mapper" == "doctrine-orm" ]]; then
-  # Look for the driver in doctrine config, then in .env DATABASE_URL.
+  # Look for the driver in doctrine config, then in .env DATABASE_URL. Strip
+  # comment lines from every hint source first: a commented example DSN
+  # (e.g. `# DB_URL="mysql://..."`) must NEVER win over the active assignment
+  # — engine detection reflects the live config, not documentation samples.
+  # `.env` comments are whole-line `#...`; YAML comments are `#...` too, so the
+  # same filter cleans both. Lines are kept in file order and the first active
+  # driver hint decides the engine (root cause: comments were never excluded).
   hints=""
   for f in "$TARGET"/config/packages/doctrine.yaml "$TARGET"/config/packages/doctrine.yml \
            "$TARGET"/.env "$TARGET"/.env.dist; do
-    [[ -f "$f" ]] && hints+="$(cat "$f")"$'\n'
+    [[ -f "$f" ]] && hints+="$(grep -vE '^[[:space:]]*#' "$f" || true)"$'\n'
   done
-  if grep -qiE 'mariadb' <<<"$hints"; then
-    engine="mariadb"
-  elif grep -qiE 'pdo_mysql|mysql://|mysqli' <<<"$hints"; then
-    engine="mysql"
-  elif grep -qiE 'pdo_pgsql|postgres(ql)?://' <<<"$hints"; then
-    engine="postgresql"
-  fi
+  engine="$(engine_from_hints "$hints")"
 fi
 
 # --- architecture (src/ layout) ----------------------------------------------------
