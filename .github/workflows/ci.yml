@@ -110,8 +110,7 @@ jobs:
             echo "No bats tests yet — pass"
             exit 0
           fi
-          npm install -g bats
-          bats "${files[@]}"
+          npx --yes bats "${files[@]}"
 
   frontmatter-check:
     runs-on: ubuntu-latest
