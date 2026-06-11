@@ -7,8 +7,10 @@
 #   --impact-context TEXT  extra context appended to the verification prompt
 #
 # Runs the FR/NFR verification prompt through the claude driver (ADR-8
-# conventions: --output-format json, .result extraction, one retry on
-# transport failure). The prompt demands a mandatory last line
+# conventions: --output-format json, .result extraction,
+# --permission-mode acceptEdits (the ADR-6 plugin-wide default),
+# --max-turns 30, one retry on transport failure). The prompt demands a
+# mandatory last line
 # 'FR_NFR_NEW_FINDINGS: <n>'. Always posts the 'BMAD FR/NFR Review
 # Gate' commit status for HEAD; posts a PR comment carrying the
 # findings only when n > 0 (success stays comment-quiet to limit PR
@@ -73,7 +75,8 @@ except Exception:
 
 run_claude_once() {
   local raw result
-  if ! raw="$(claude -p "$GATE_PROMPT" --output-format json --max-turns 30)"; then
+  if ! raw="$(claude -p "$GATE_PROMPT" --output-format json \
+              --permission-mode acceptEdits --max-turns 30)"; then
     log_warn "claude exited non-zero"
     return 1
   fi

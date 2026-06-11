@@ -91,7 +91,9 @@ With `<src>` = `architecture.source_root` and `<Context>` one of
 ### Custom identifier types
 
 Registered in the shared context's Infrastructure layer
-(`<src>/<architecture.shared_context>/Infrastructure/DoctrineType/`):
+(`<src>/<architecture.shared_context>/Infrastructure/DoctrineType/`, or
+the owning bounded context's own `Infrastructure/DoctrineType/` when
+`architecture.shared_context` is `null`):
 
 | Type | Usage | Purpose |
 | --- | --- | --- |
@@ -166,9 +168,9 @@ final class Customer
 App\Customer\Domain\Entity\Customer:
   shortName: Customer
   operations:
-    get_collection: ~
-    get: ~
-    post: ~
+    ApiPlatform\Metadata\GetCollection: ~
+    ApiPlatform\Metadata\Get: ~
+    ApiPlatform\Metadata\Post: ~
 ```
 
 Ensure the resource directory is registered in `api_platform.yaml`.

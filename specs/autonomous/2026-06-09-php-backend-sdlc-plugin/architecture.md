@@ -229,7 +229,7 @@ All scripts: `#!/usr/bin/env bash`, `set -euo pipefail`, source `lib/common.sh`,
 
 | Script | Responsibility | Key interface |
 |---|---|---|
-| `setup-preflight.sh` | Version floors (`bmalph ≥2.11.0`, `claude ≥2.1`, `gh ≥2`), `gh auth status`, git repo, yq-or-python check | exit non-zero on first FAIL; `--report` prints PASS/FAIL table + remediation |
+| `setup-preflight.sh` | Version floors (`bmalph ≥2.11.0`, `claude ≥2.1`, `gh ≥2`), `gh auth status`, git repo, `bmalph doctor` when `_bmad/` exists (FR-2; deferred to post-`bmalph init` on fresh repos), yq-or-python check | exit non-zero on first FAIL; `--report` prints PASS/FAIL table + remediation |
 | `generate-profile.sh` | Detect from composer.json, doctrine config, Makefile, `src/`, workflows, `.coderabbit.yaml`; write profile | `--refresh` (overwrite), default = print diff and keep existing (NFR-3) |
 | `validate-profile.sh` | §4 schema validation | `<path-to-profile>`; exit 0/1 |
 | `inject-governance.sh` | Replace-in-place delimited blocks `<!-- php-backend-sdlc:begin/end -->` in target CLAUDE.md/AGENTS.md; repair duplicates to one block | idempotent; `--diff` preview |

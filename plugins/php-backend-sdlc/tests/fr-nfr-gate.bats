@@ -67,6 +67,14 @@ FINDINGS_JSON='{"result":"- FR-3 issue creation not covered by the change set\n-
   grep -q 'NFR-6 missing iteration guard' "$GH_LOG"
 }
 
+@test "claude invoked with the full ADR-8 flag set (ADR-6 acceptEdits default)" {
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 0 ]
+  grep -q -- '--output-format json' "$CLAUDE_LOG"
+  grep -q -- '--permission-mode acceptEdits' "$CLAUDE_LOG"
+  grep -q -- '--max-turns 30' "$CLAUDE_LOG"
+}
+
 @test "--spec-path and --impact-context reach the claude prompt" {
   mkdir -p custom-specs
   echo spec > custom-specs/prd.md

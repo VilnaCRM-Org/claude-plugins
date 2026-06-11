@@ -758,12 +758,11 @@ class Customer
 ```
 
 ```yaml
-# config/packages/api_platform.yaml
-resources:
-  App\Customer\Domain\Entity\Customer:
-    operations:
-      get:
-        method: GET
+# config/api_platform/resources/customer.yaml
+# (directory registered via mapping.paths in config/packages/api_platform.yaml)
+App\Customer\Domain\Entity\Customer:
+  operations:
+    ApiPlatform\Metadata\Get: ~
 ```
 
 **Solution Option 2**: Use DTOs in Application layer
@@ -944,6 +943,18 @@ use Symfony\Component\Uid\Ulid;
 
 final class UlidType extends Type
 {
+    public function getSQLDeclaration(array $column, AbstractPlatform $platform): string
+    {
+        $column['length'] ??= 26; // ULID canonical text form is 26 chars
+
+        return $platform->getStringTypeDeclarationSQL($column);
+    }
+
+    public function getName(): string // required by DBAL 3 (harmless on DBAL 4)
+    {
+        return 'ulid';
+    }
+
     public function convertToPHPValue($value, AbstractPlatform $platform): Ulid
     {
         return Ulid::fromString($value);

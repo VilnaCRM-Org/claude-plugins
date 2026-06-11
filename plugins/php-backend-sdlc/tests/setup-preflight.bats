@@ -44,7 +44,7 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
 @test "all-pass: exit 0, every check reports PASS" {
   run "$PREFLIGHT"
   [ "$status" -eq 0 ]
-  for check in git-repo claude-cli gh-cli gh-auth bmalph yaml-toolchain; do
+  for check in git-repo claude-cli gh-cli gh-auth bmalph bmalph-doctor yaml-toolchain; do
     [[ "$output" == *"PASS: $check"* ]]
   done
   [[ "$output" == *"preflight OK"* ]]
@@ -55,7 +55,7 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
   run "$PREFLIGHT" --report
   [ "$status" -eq 0 ]
   [[ "$output" == *CHECK*RESULT* ]]
-  for check in git-repo claude-cli gh-cli gh-auth bmalph yaml-toolchain; do
+  for check in git-repo claude-cli gh-cli gh-auth bmalph bmalph-doctor yaml-toolchain; do
     [[ "$output" == *"$check"* ]]
   done
   [[ "$output" != *FAIL* ]]
@@ -101,6 +101,32 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL: git-repo"* ]]
   [[ "$output" == *"git clone, or git init"* ]]
+}
+
+@test "bmalph doctor: fresh repo without _bmad/ passes as deferred (FR-2)" {
+  run "$PREFLIGHT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS: bmalph-doctor"* ]]
+  [[ "$output" == *"doctor deferred"* ]]
+}
+
+@test "bmalph doctor: healthy existing _bmad/ workspace passes (FR-2)" {
+  mkdir -p "$REPO/_bmad"
+  run "$PREFLIGHT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS: bmalph-doctor"* ]]
+  [[ "$output" == *"healthy _bmad/ workspace"* ]]
+}
+
+@test "bmalph doctor failure on existing _bmad/: FAIL with remediation (FR-2)" {
+  mkdir -p "$REPO/_bmad"
+  STUB_BMALPH_DOCTOR_EXIT=1 run "$PREFLIGHT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: bmalph-doctor"* ]]
+  [[ "$output" == *"run 'bmalph doctor'"* ]]
+  [[ "$output" == *"re-run 'bmalph init'"* ]]
+  # first-FAIL abort: yaml-toolchain (later in order) must not have run
+  [[ "$output" != *yaml-toolchain* ]]
 }
 
 @test "missing bmalph binary: FAIL names the binary" {

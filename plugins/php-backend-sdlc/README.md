@@ -14,7 +14,8 @@ remediation):
 - a git repository (your PHP backend project)
 - Claude Code CLI ≥ 2.1
 - GitHub CLI ≥ 2, authenticated (`gh auth login`)
-- bmalph ≥ 2.11.0
+- bmalph ≥ 2.11.0, and a healthy `_bmad/` workspace when one already
+  exists (`bmalph doctor`; fresh repos are bootstrapped by `/sdlc-setup`)
 - `yq`, or `python3` with PyYAML
 
 ## Install

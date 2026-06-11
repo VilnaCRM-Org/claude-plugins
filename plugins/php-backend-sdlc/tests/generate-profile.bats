@@ -115,6 +115,19 @@ pget() { yaml_get "$PROFILE" "$1"; }
   [ "$(pget capabilities.load_testing)" = "false" ]
 }
 
+@test "Makefile without plain targets: make keys null, exit 0 (A3/NFR-4)" {
+  # only .PHONY, a variable assignment, and a pattern rule — the
+  # target-name grep matches nothing; generation must still succeed
+  printf '.PHONY: all\nCC := gcc\n%%.o: %%.c\n\t$(CC) -c $<\n' > "$REPO/Makefile"
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"profile created"* ]]
+  for key in ci start tests e2e psalm deptrac phpinsights infection load_tests; do
+    [ -z "$(pget "make.$key")" ]
+  done
+  [ "$(pget capabilities.load_testing)" = "false" ]
+}
+
 @test "empty repo: never errors, everything null/false (A3)" {
   EMPTY="$BATS_TEST_TMPDIR/empty"
   mkdir -p "$EMPTY"

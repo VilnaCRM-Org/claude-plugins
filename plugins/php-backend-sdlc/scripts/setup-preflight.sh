@@ -5,8 +5,10 @@
 # Usage: setup-preflight.sh [--report]
 #
 # Checks, in order: git repository, claude CLI >= 2.1, gh CLI >= 2,
-# gh authentication, bmalph >= 2.11.0 (ADR-10 floor), and a YAML
-# toolchain (yq, or python3 with PyYAML — ADR-2).
+# gh authentication, bmalph >= 2.11.0 (ADR-10 floor), `bmalph doctor`
+# against an existing `_bmad/` workspace (FR-2; deferred on fresh repos
+# where /sdlc-setup runs `bmalph init` right after preflight), and a
+# YAML toolchain (yq, or python3 with PyYAML — ADR-2).
 #
 # Default mode aborts on the FIRST failing check, printing its named
 # remediation, so /sdlc-setup can halt early with one actionable error.
@@ -118,7 +120,24 @@ check_version "bmalph" "$FLOOR_BMALPH" \
   "install or upgrade bmalph to >= $FLOOR_BMALPH (ADR-10 compatibility floor)" \
   bmalph --version
 
-# --- 6. YAML toolchain (ADR-2) -------------------------------------------------
+# --- 6. bmalph doctor (FR-2) ---------------------------------------------------
+# `bmalph doctor` health-checks an existing `_bmad/` workspace so a
+# broken/stale bootstrap fails at setup, not mid-loop. On a fresh repo
+# there is nothing to examine yet: /sdlc-setup runs `bmalph init` right
+# after preflight, so the doctor check is deferred to that bootstrap.
+if ! command -v bmalph >/dev/null 2>&1; then
+  record FAIL "bmalph-doctor" "'bmalph' not found on PATH" \
+    "install bmalph >= $FLOOR_BMALPH, then run: bmalph doctor"
+elif [[ ! -d _bmad ]]; then
+  record PASS "bmalph-doctor" "fresh repo (no _bmad/) — doctor deferred to post-init" "-"
+elif bmalph doctor >/dev/null 2>&1; then
+  record PASS "bmalph-doctor" "bmalph doctor reports a healthy _bmad/ workspace" "-"
+else
+  record FAIL "bmalph-doctor" "bmalph doctor reported issues with the existing _bmad/ workspace" \
+    "run 'bmalph doctor' and fix the reported issues, or re-run 'bmalph init'"
+fi
+
+# --- 7. YAML toolchain (ADR-2) -------------------------------------------------
 if have_yq; then
   record PASS "yaml-toolchain" "yq available" "-"
 elif python3 -c 'import yaml' >/dev/null 2>&1; then

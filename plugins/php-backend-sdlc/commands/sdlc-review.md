@@ -72,6 +72,13 @@ excludes Write); remediation between gate iterations is delegated.
    `fr-nfr-reviewer` report's mandatory last line
    (`FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=...`).
    `new_findings=0` with `verdict=PASS` is the stage exit condition.
+   `verdict=DEGRADED` (spec bundle missing or empty) is a blocking
+   finding, not a loop state: nothing exists to remediate and
+   re-invoking cannot change the outcome, so escalate immediately —
+   do NOT re-invoke the agent — with `recommended_action` "re-run
+   /sdlc-plan". (A gate-runner-unavailable degrade is different: the
+   agent still reports PASS/FAIL from its manually built matrix, so
+   the loop proceeds normally with the degrade note.)
    On findings: this command cannot write fixes (no Write tool), so
    dispatch the findings as a remediation task to a `php-implementer`
    subagent (Task tool), wait for its completion, then re-invoke
@@ -138,8 +145,9 @@ and restate it every turn (`review iteration <n>/5`).
 
 ## Failure escalation
 
-On guard breach, emit the canonical report (with the review report
-above attached) and stop:
+On guard breach or a blocking finding (e.g. a SPECS-MISSING
+`verdict=DEGRADED` report), emit the canonical report (with the review
+report above attached) and stop:
 
 ```text
 === SDLC ESCALATION ===

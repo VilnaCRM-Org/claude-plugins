@@ -180,7 +180,11 @@ fi
 
 makefile_targets=""
 if [[ -f "$TARGET/Makefile" ]]; then
-  makefile_targets="$(grep -oE '^[A-Za-z0-9_-]+:' "$TARGET/Makefile" | tr -d ':' | sort -u)"
+  # `|| true`: a Makefile with no plain targets (only .PHONY/pattern
+  # rules/variable assignments) makes grep exit 1, which pipefail+set -e
+  # would turn into a silent abort — but a target-less Makefile must
+  # yield null make.* keys, never a failure (A3, NFR-4).
+  makefile_targets="$(grep -oE '^[A-Za-z0-9_-]+:' "$TARGET/Makefile" | tr -d ':' | sort -u || true)"
 fi
 
 # first existing Makefile target among candidates, else empty

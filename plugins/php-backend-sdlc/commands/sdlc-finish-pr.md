@@ -52,15 +52,16 @@ report instead of failing (NFR-4).
 
 3. **Comment source selection** — if `review.coderabbit` is true (or
    any AI reviewer app posts review comments on the PR), the PR's own
-   threads are the comment source. Otherwise (no reviewer app), run
-
-   ```bash
-   "${CLAUDE_PLUGIN_ROOT}/scripts/ai-review-loop.sh" --diff-base <default-branch>
-   ```
-
-   locally as the substitute review source (NFR-4): its findings become
-   the comment set to resolve, and the substitution is recorded as a
-   degrade note in the final report.
+   threads are the comment source. Otherwise (no reviewer app), select
+   the degraded source: `pr-comment-resolver` itself runs
+   `ai-review-loop.sh --diff-base <default-branch> --max-iterations 1`
+   each pass and treats its findings as the comment set to resolve
+   (NFR-4). Never run `ai-review-loop.sh` directly from this command:
+   the agent is the single owner of the degrade source, so the loop
+   runs exactly once per iteration and every fix it applies stays
+   inside counter B's accounting. Record the substitution as a degrade
+   note in the final report and name the selected source in the step-4
+   dispatch prompt.
 
 4. **Comment resolution loop — counter B** — dispatch the
    `pr-comment-resolver` agent (Task tool). The single source of truth
@@ -74,7 +75,8 @@ report instead of failing (NFR-4).
    reply — never a silent dismissal — then mark the thread resolved.
    Re-fetch after the pass. One fetch-resolve-refetch cycle is one
    iteration of counter B (`comment_resolution iteration <b>/5`). Loop
-   until the script reports zero unresolved threads, or counter B is
+   until the script reports zero unresolved threads (degraded source:
+   the agent reports `AI_REVIEW_VERDICT: PASS`), or counter B is
    exhausted → escalate.
 
    Pushes made while resolving comments can re-trigger CI: after
@@ -95,8 +97,8 @@ Two independent loops, re-checked per their own iterations: counter A
 re-polls checks, counter B re-fetches unresolved threads. Exit
 condition (FR-1 stage table): **CI green + 0 unresolved AI review
 comments** — where "CI green" is satisfied-with-report when no checks
-exist, and the local `ai-review-loop.sh` substitutes as the comment
-source when no reviewer app exists (NFR-4).
+exist, and the agent-run `ai-review-loop.sh` substitutes as the
+comment source when no reviewer app exists (NFR-4).
 
 ## Iteration guard
 
