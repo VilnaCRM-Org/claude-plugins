@@ -41,3 +41,29 @@ final verdict READY).
 ## Recommended Next Step
 
 `bmalph implement`, then wave-ordered implementation (epics.md parallelization plan, waves 1–10).
+
+## Build outcome (2026-06-11)
+
+Planning → implementation → review → QA → finish-pr all complete. The plugin
+is delivered on the marketplace branch and the delivery PR is all-green.
+
+- **PR:** [VilnaCRM-Org/claude-plugins#2](https://github.com/VilnaCRM-Org/claude-plugins/pull/2)
+  (`feature/php-backend-sdlc-plugin`, 31 commits).
+- **Final gate state:** all 7 CI jobs green (bats 149/149, shellcheck,
+  markdown-lint, manifest-validate, frontmatter-check, profile-keys-check,
+  generalization-audit); qlty check + qlty fmt green; cubic green; 0
+  unresolved actionable review threads. Only non-green status is
+  CodeRabbit's credits notice (no review content; documented degrade path,
+  outside repo control). FR-7 (seeded-defect QA → FAIL) and FR-8 (live
+  finish-pr → all-green) both demonstrated.
+- **Evidence docs:**
+  - `plugins/php-backend-sdlc/docs/evidence/qa-install-setup.md` — 8/8
+    black-box matrix PASS; 2 detection defects (D1/D2) found and fixed at
+    root cause with regression bats.
+  - `plugins/php-backend-sdlc/docs/evidence/finish-pr-run.md` — live FR-8
+    run on PR #2 (failing checks + 10 reviewer threads → all-green, 10/10
+    replies).
+- **Retrospective:**
+  [`retrospective.md`](./retrospective.md) — what went well / failed,
+  process metrics, action items with owners, and the full skill
+  applicability audit.
