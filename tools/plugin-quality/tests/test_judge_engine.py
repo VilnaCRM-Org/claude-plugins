@@ -6,6 +6,7 @@ extraction, structural validation, vote aggregation, the advisory-vs-blocking
 gate, and the skip-when-unavailable behaviour of the runner.
 """
 
+import io
 import json
 import pathlib
 import sys
@@ -536,6 +537,118 @@ class TestS4BNameFilterBoundary(unittest.TestCase):
         self.assertNotIn("J9", ids)
         ids = {d.id for d in rubrics.applicable_dimensions("agent", "sdlc-qa")}
         self.assertIn("J9", ids)
+
+
+# ---- C1: critical dim below floor but above block_floor is advisory --------
+class TestC1CriticalAdvisory(unittest.TestCase):
+    """A critical dim at score 3 (below floor 4, above block_floor 2) must be
+    reported as an advisory finding, not silently dropped from both lists."""
+
+    def setUp(self):
+        self._orig = judge._run_claude
+
+    def tearDown(self):
+        judge._run_claude = self._orig
+
+    def test_critical_score3_is_advisory(self):
+        dims = rubrics.applicable_dimensions("skill", "foo")
+        self.assertTrue(any(d.critical for d in dims), "fixture needs a critical dim")
+        judge._run_claude = lambda prompt, model, timeout: json.dumps(verdict_for(dims, 3))
+        res = judge.judge_artifact(make_skill(), use_cache=False)
+        self.assertEqual(res.blocking_failures, [], "score 3 must not hard-block")
+        adv_ids = {d.id for d in res.advisory_failures}
+        crit_in_adv = {d.id for d in res.advisory_failures if d.critical}
+        # Every failed dimension (all are below floor at score 3) is advisory,
+        # and at least one of them is a CRITICAL dim — the previously-dropped case.
+        self.assertEqual(adv_ids, {d.id for d in dims})
+        self.assertTrue(crit_in_adv, "a critical dim at score 3 must appear in advisory_failures")
+
+
+# ---- C2: extra_context is part of the cache identity ----------------------
+class TestC2ExtraContextCacheIdentity(unittest.TestCase):
+    def test_key_differs_with_extra_context(self):
+        ab = b"artifact-bytes"
+        dim_ids = ["J1", "J2"]
+        k_empty = cache._key(ab, "sonnet|votes=1", dim_ids, "")
+        k_ctx = cache._key(ab, "sonnet|votes=1", dim_ids, "skills: a, b, c")
+        self.assertNotEqual(k_empty, k_ctx, "extra_context must change the cache key")
+
+    def test_changed_extra_context_misses_cache(self):
+        with tempfile.TemporaryDirectory() as td:
+            with mock.patch.object(cache, "CACHE_DIR", pathlib.Path(td)):
+                dims = rubrics.applicable_dimensions("skill", "foo")
+                art = make_skill()
+                ab = art.raw.encode("utf-8")
+                cm = f"sonnet|votes=1|rubric={rubrics.guidance_fingerprint()}"
+                dim_ids = [d.id for d in dims]
+                # Seed a verdict under extra_context "v1".
+                cache.put(ab, cm, dim_ids, verdict_for(dims, 5), "v1")
+                # Same artifact/model/votes, DIFFERENT context -> must miss (re-judge).
+                with _StubClaude(json.dumps(verdict_for(dims, 4))) as m:
+                    res = judge.judge_artifact(art, model="sonnet", extra_context="v2", use_cache=True)
+                self.assertTrue(m.called, "changed extra_context must invalidate the entry")
+                self.assertFalse(res.cached)
+                # And the original context still hits without a call.
+                with _StubClaude("SHOULD NOT BE CALLED") as m2:
+                    res2 = judge.judge_artifact(art, model="sonnet", extra_context="v1", use_cache=True)
+                self.assertFalse(m2.called, "matching extra_context must still serve the cache")
+                self.assertTrue(res2.cached)
+
+
+# ---- C3: explicit file matching no artifact warns (not silently dropped) ---
+class TestC3ExplicitFileNoMatchWarns(unittest.TestCase):
+    def _write_plugin(self, root: pathlib.Path):
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+        (root / "skills" / "real-skill").mkdir(parents=True)
+        (root / "skills" / "real-skill" / "SKILL.md").write_text(
+            "---\nname: real-skill\ndescription: x. Use when y.\n---\nbody", encoding="utf-8"
+        )
+
+    def test_bogus_file_inside_plugin_warns_and_returns_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "plugins" / "p"
+            self._write_plugin(root)
+            bogus = root / "skills" / "real-skill" / "NOTES.md"  # not a judgeable artifact
+            bogus.write_text("loose notes", encoding="utf-8")
+            with mock.patch("run_judge.sys.stderr", new_callable=io.StringIO) as err:
+                arts = run_judge._collect_artifacts([str(bogus)])
+            self.assertEqual(arts, [], "non-artifact file must not be evaluated")
+            stderr = err.getvalue()
+            self.assertIn("warning", stderr)
+            self.assertIn(str(bogus), stderr)
+
+    def test_real_artifact_file_is_collected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "plugins" / "p"
+            self._write_plugin(root)
+            real = root / "skills" / "real-skill" / "SKILL.md"
+            arts = run_judge._collect_artifacts([str(real)])
+            self.assertEqual([a.path for a in arts], [real.resolve()])
+
+
+# ---- C-refactor: JudgeOptions path is equivalent to keyword path -----------
+class TestJudgeOptionsBundle(unittest.TestCase):
+    def setUp(self):
+        self._orig = judge._run_claude
+
+    def tearDown(self):
+        judge._run_claude = self._orig
+
+    def test_options_object_accepted(self):
+        dims = rubrics.applicable_dimensions("skill", "foo")
+        judge._run_claude = lambda prompt, model, timeout: json.dumps(verdict_for(dims, 5))
+        opts = judge.JudgeOptions(use_cache=False, votes=1)
+        res = judge.judge_artifact(make_skill(), opts)
+        self.assertTrue(res.ok)
+
+    def test_keyword_overrides_win_over_options(self):
+        dims = rubrics.applicable_dimensions("skill", "foo")
+        judge._run_claude = lambda prompt, model, timeout: json.dumps(verdict_for(dims, 5))
+        # options says use_cache=True, but the keyword override forces it off.
+        opts = judge.JudgeOptions(use_cache=True)
+        res = judge.judge_artifact(make_skill(), opts, use_cache=False)
+        self.assertFalse(res.cached)
 
 
 def dataclasses_replace(obj, **kw):

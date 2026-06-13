@@ -93,6 +93,37 @@ class TestLintAllAggregator(unittest.TestCase):
         findings = lint_all.run([REAL_PLUGIN], REPO_ROOT)
         self.assertEqual(findings, [], msg="\n".join(f.render() for f in findings))
 
+    def test_plugins_dir_with_no_valid_manifest_is_not_silent_green(self):
+        # Fix (cubic #5): plugins/ exists with a subdirectory but NONE carries a
+        # valid .claude-plugin/plugin.json. find_plugin_roots returns empty, but
+        # this is a BROKEN repo (a missing/broken manifest hides every plugin),
+        # so the gate must emit a finding and exit non-zero, not pass silently.
+        (self.tmp / "plugins" / "noplug" / "commands").mkdir(parents=True)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = lint_all.main(["--repo-root", str(self.tmp)])
+        self.assertEqual(rc, 1)
+        finding = lint_all._broken_manifest_finding(self.tmp)
+        self.assertIsNotNone(finding)
+        self.assertEqual(finding.severity, "S2")
+        self.assertEqual(finding.rule, "manifest.plugins-dir.no-valid-manifest")
+
+    def test_no_plugins_dir_at_all_is_clean_green(self):
+        # Fix (cubic #5) control: a repo with NO plugins/ dir legitimately has
+        # nothing to lint and must still exit 0 (no false finding).
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = lint_all.main(["--repo-root", str(self.tmp)])
+        self.assertEqual(rc, 0)
+        self.assertIsNone(lint_all._broken_manifest_finding(self.tmp))
+
+    def test_empty_plugins_dir_is_clean_green(self):
+        # Fix (cubic #5) control: an empty plugins/ dir (no subdirs) is not a
+        # broken-manifest case — nothing to discover, so exit 0.
+        (self.tmp / "plugins").mkdir(parents=True)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            rc = lint_all.main(["--repo-root", str(self.tmp)])
+        self.assertEqual(rc, 0)
+        self.assertIsNone(lint_all._broken_manifest_finding(self.tmp))
+
 
 if __name__ == "__main__":
     unittest.main()

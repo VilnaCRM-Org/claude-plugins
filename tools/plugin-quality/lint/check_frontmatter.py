@@ -45,140 +45,183 @@ def _is_report_only(body: str) -> bool:
     return any(signal in lowered for signal in REPORT_ONLY_SIGNALS)
 
 
+def _parse_error_finding(art) -> Finding:
+    """L0: surface an artifact whose frontmatter block failed to parse."""
+    return Finding(
+        check="L0",
+        rule="frontmatter.parse-error",
+        severity="S2",
+        path=art.rel,
+        message=f"frontmatter failed to parse: {art.frontmatter_error}",
+    )
+
+
+def _check_command(art) -> list[Finding]:
+    """L1 + L2: command required keys and allowed-tools shape."""
+    findings: list[Finding] = []
+    fm = art.frontmatter
+
+    # L1: required keys.
+    for key in ("description", "argument-hint"):
+        if not _nonempty_str(fm.get(key)):
+            findings.append(
+                Finding(
+                    check="L1",
+                    rule="frontmatter.command.missing-key",
+                    severity="S2",
+                    path=art.rel,
+                    message=f"command missing frontmatter key {key}",
+                )
+            )
+
+    # L2: allowed-tools shape (only when declared).
+    findings.extend(_check_allowed_tools(art))
+    return findings
+
+
+def _check_allowed_tools(art) -> list[Finding]:
+    """L2: allowed-tools array shape, unknown-tool, and report-only rules."""
+    fm = art.frontmatter
+    if "allowed-tools" not in fm:
+        return []
+
+    tools = fm.get("allowed-tools")
+    if not isinstance(tools, list):
+        return [
+            Finding(
+                check="L2",
+                rule="frontmatter.command.allowed-tools",
+                severity="S2",
+                path=art.rel,
+                message="allowed-tools must be a JSON array of known tools",
+            )
+        ]
+
+    findings: list[Finding] = []
+    unknown = [t for t in tools if t not in KNOWN_TOOLS]
+    if unknown:
+        findings.append(
+            Finding(
+                check="L2",
+                rule="frontmatter.command.allowed-tools",
+                severity="S2",
+                path=art.rel,
+                message=f"allowed-tools contains unknown tools: {', '.join(map(str, unknown))}",
+            )
+        )
+
+    if _is_report_only(art.body):
+        mutating = [t for t in tools if t in MUTATING_TOOLS]
+        if mutating:
+            findings.append(
+                Finding(
+                    check="L2",
+                    rule="frontmatter.command.allowed-tools",
+                    severity="S2",
+                    path=art.rel,
+                    message=(
+                        "report-only command must not allow mutating tools: "
+                        f"{', '.join(mutating)}"
+                    ),
+                )
+            )
+    return findings
+
+
+def _check_agent(art) -> list[Finding]:
+    """L3: four required keys (tools accepts list or comma-string shape)."""
+    findings: list[Finding] = []
+    fm = art.frontmatter
+
+    for key in ("name", "description", "model"):
+        if not _nonempty_str(fm.get(key)):
+            findings.append(
+                Finding(
+                    check="L3",
+                    rule="frontmatter.agent.missing-key",
+                    severity="S2",
+                    path=art.rel,
+                    message=f"agent missing frontmatter key {key}",
+                )
+            )
+    if not _present_tools(fm.get("tools")):
+        findings.append(
+            Finding(
+                check="L3",
+                rule="frontmatter.agent.missing-key",
+                severity="S2",
+                path=art.rel,
+                message="agent missing frontmatter key tools",
+            )
+        )
+    return findings
+
+
+def _check_skill(art) -> list[Finding]:
+    """L4: two required keys, and no tools/model."""
+    findings: list[Finding] = []
+    fm = art.frontmatter
+
+    for key in ("name", "description"):
+        if not _nonempty_str(fm.get(key)):
+            findings.append(
+                Finding(
+                    check="L4",
+                    rule="frontmatter.skill.shape",
+                    severity="S2",
+                    path=art.rel,
+                    message=f"skill missing frontmatter key {key}",
+                )
+            )
+    for forbidden in ("tools", "model"):
+        if forbidden in fm:
+            findings.append(
+                Finding(
+                    check="L4",
+                    rule="frontmatter.skill.shape",
+                    severity="S2",
+                    path=art.rel,
+                    message=f"skill must not declare {forbidden}",
+                )
+            )
+    return findings
+
+
+def _check_meta_guide(art) -> list[Finding]:
+    """L5: meta-guides carry no frontmatter (ADR-11)."""
+    if not art.has_frontmatter:
+        return []
+    return [
+        Finding(
+            check="L5",
+            rule="frontmatter.metaguide.no-frontmatter",
+            severity="S2",
+            path=art.rel,
+            message="meta-guide must not have frontmatter (ADR-11)",
+        )
+    ]
+
+
+# Per-kind dispatch table: kind -> rule helper.
+_KIND_CHECKS = {
+    "command": _check_command,
+    "agent": _check_agent,
+    "skill": _check_skill,
+    "meta-guide": _check_meta_guide,
+}
+
+
 def check(plugin_root: pathlib.Path) -> list[Finding]:
     findings: list[Finding] = []
 
     for art in _model.discover(plugin_root):
         # Surface unparseable frontmatter on any artifact kind first.
         if art.frontmatter_error:
-            findings.append(
-                Finding(
-                    check="L0",
-                    rule="frontmatter.parse-error",
-                    severity="S2",
-                    path=art.rel,
-                    message=f"frontmatter failed to parse: {art.frontmatter_error}",
-                )
-            )
+            findings.append(_parse_error_finding(art))
             continue
 
-        fm = art.frontmatter
-
-        if art.kind == "command":
-            # L1: required keys.
-            for key in ("description", "argument-hint"):
-                if not _nonempty_str(fm.get(key)):
-                    findings.append(
-                        Finding(
-                            check="L1",
-                            rule="frontmatter.command.missing-key",
-                            severity="S2",
-                            path=art.rel,
-                            message=f"command missing frontmatter key {key}",
-                        )
-                    )
-
-            # L2: allowed-tools shape (only when declared).
-            if "allowed-tools" in fm:
-                tools = fm.get("allowed-tools")
-                if not isinstance(tools, list):
-                    findings.append(
-                        Finding(
-                            check="L2",
-                            rule="frontmatter.command.allowed-tools",
-                            severity="S2",
-                            path=art.rel,
-                            message="allowed-tools must be a JSON array of known tools",
-                        )
-                    )
-                else:
-                    unknown = [t for t in tools if t not in KNOWN_TOOLS]
-                    if unknown:
-                        findings.append(
-                            Finding(
-                                check="L2",
-                                rule="frontmatter.command.allowed-tools",
-                                severity="S2",
-                                path=art.rel,
-                                message=f"allowed-tools contains unknown tools: {', '.join(map(str, unknown))}",
-                            )
-                        )
-                    if _is_report_only(art.body):
-                        mutating = [t for t in tools if t in MUTATING_TOOLS]
-                        if mutating:
-                            findings.append(
-                                Finding(
-                                    check="L2",
-                                    rule="frontmatter.command.allowed-tools",
-                                    severity="S2",
-                                    path=art.rel,
-                                    message=(
-                                        "report-only command must not allow mutating tools: "
-                                        f"{', '.join(mutating)}"
-                                    ),
-                                )
-                            )
-
-        elif art.kind == "agent":
-            # L3: four required keys (tools accepts list or comma-string shape).
-            for key in ("name", "description", "model"):
-                if not _nonempty_str(fm.get(key)):
-                    findings.append(
-                        Finding(
-                            check="L3",
-                            rule="frontmatter.agent.missing-key",
-                            severity="S2",
-                            path=art.rel,
-                            message=f"agent missing frontmatter key {key}",
-                        )
-                    )
-            if not _present_tools(fm.get("tools")):
-                findings.append(
-                    Finding(
-                        check="L3",
-                        rule="frontmatter.agent.missing-key",
-                        severity="S2",
-                        path=art.rel,
-                        message="agent missing frontmatter key tools",
-                    )
-                )
-
-        elif art.kind == "skill":
-            # L4: two required keys, and no tools/model.
-            for key in ("name", "description"):
-                if not _nonempty_str(fm.get(key)):
-                    findings.append(
-                        Finding(
-                            check="L4",
-                            rule="frontmatter.skill.shape",
-                            severity="S2",
-                            path=art.rel,
-                            message=f"skill missing frontmatter key {key}",
-                        )
-                    )
-            for forbidden in ("tools", "model"):
-                if forbidden in fm:
-                    findings.append(
-                        Finding(
-                            check="L4",
-                            rule="frontmatter.skill.shape",
-                            severity="S2",
-                            path=art.rel,
-                            message=f"skill must not declare {forbidden}",
-                        )
-                    )
-
-        elif art.kind == "meta-guide":
-            # L5: meta-guides carry no frontmatter (ADR-11).
-            if art.has_frontmatter:
-                findings.append(
-                    Finding(
-                        check="L5",
-                        rule="frontmatter.metaguide.no-frontmatter",
-                        severity="S2",
-                        path=art.rel,
-                        message="meta-guide must not have frontmatter (ADR-11)",
-                    )
-                )
+        handler = _KIND_CHECKS.get(art.kind)
+        if handler is not None:
+            findings.extend(handler(art))
 
     return findings

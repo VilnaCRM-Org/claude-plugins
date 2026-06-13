@@ -82,6 +82,53 @@ def run(plugin_roots: list[pathlib.Path], repo_root: pathlib.Path) -> list[_comm
     return findings
 
 
+def _broken_manifest_finding(repo_root: pathlib.Path) -> _common.Finding | None:
+    """Return a finding when plugins/ has subdirs but none has a valid manifest.
+
+    ``find_plugin_roots`` only returns dirs carrying ``.claude-plugin/plugin.json``.
+    An empty result therefore has two causes: no ``plugins/`` directory (legit —
+    nothing to lint) or a ``plugins/`` directory with subdirectories whose
+    manifests are all missing/broken (a broken repo that must fail the gate, not
+    pass silently green). Only the latter yields a finding.
+    """
+    plugins_dir = repo_root / "plugins"
+    if not plugins_dir.is_dir():
+        return None
+    subdirs = [c for c in plugins_dir.iterdir() if c.is_dir()]
+    if not subdirs:
+        return None
+    return _common.Finding(
+        check="AGG",
+        rule="manifest.plugins-dir.no-valid-manifest",
+        severity="S2",
+        path=str(plugins_dir),
+        message=(
+            f"plugins/ contains {len(subdirs)} subdirectory(ies) but none has a "
+            "valid .claude-plugin/plugin.json — no plugin is discoverable by the gate"
+        ),
+    )
+
+
+def _emit(args, findings: list[_common.Finding], plugin_roots: list[pathlib.Path]) -> int:
+    """Render findings (JSON or human) and return the process exit code."""
+    findings.sort(key=lambda f: (f.path, f.line or 0, f.check))
+    if args.json:
+        print(_common.to_json(findings))
+    else:
+        for f in findings:
+            print(f.render())
+        counts = _common.summarize(findings)
+        roots = ", ".join(p.name for p in plugin_roots) or "(none)"
+        print(
+            f"\nplugin-quality lint over [{roots}]: "
+            f"{counts['total']} finding(s) "
+            f"(S1={counts['S1']} S2={counts['S2']} S3={counts['S3']} S4={counts['S4']})",
+            file=sys.stderr,
+        )
+    blocking = [f for f in findings if f.severity in BLOCKING]
+    return 1 if blocking else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Static prompt-quality lint over plugin trees.")
     parser.add_argument("paths", nargs="*", help="plugin roots (default: all plugins/*/ with a manifest)")
@@ -97,28 +144,18 @@ def main(argv: list[str] | None = None) -> int:
         plugin_roots = _model.find_plugin_roots(repo_root)
 
     if not plugin_roots:
+        # Distinguish "no plugins/ dir at all" (legitimately nothing to lint) from
+        # "plugins/ has subdirs but NONE carries a valid manifest" — the latter is
+        # a broken repo that must NOT pass silently green (a missing/broken
+        # manifest would otherwise hide every plugin from the gate).
+        broken = _broken_manifest_finding(repo_root)
+        if broken is not None:
+            return _emit(args, [broken], [])
         print(f"No plugin roots found under {repo_root}/plugins/ — nothing to lint.", file=sys.stderr)
         return 0
 
     findings = run(plugin_roots, repo_root)
-    findings.sort(key=lambda f: (f.path, f.line or 0, f.check))
-
-    if args.json:
-        print(_common.to_json(findings))
-    else:
-        for f in findings:
-            print(f.render())
-        counts = _common.summarize(findings)
-        roots = ", ".join(p.name for p in plugin_roots)
-        print(
-            f"\nplugin-quality lint over [{roots}]: "
-            f"{counts['total']} finding(s) "
-            f"(S1={counts['S1']} S2={counts['S2']} S3={counts['S3']} S4={counts['S4']})",
-            file=sys.stderr,
-        )
-
-    blocking = [f for f in findings if f.severity in BLOCKING]
-    return 1 if blocking else 0
+    return _emit(args, findings, plugin_roots)
 
 
 if __name__ == "__main__":

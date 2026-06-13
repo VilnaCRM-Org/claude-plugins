@@ -101,6 +101,22 @@ def _has_iteration_bound(section: str) -> bool:
     )
 
 
+# A leading "key:" field token, tolerating an optional markdown list marker
+# ("- stage: 6") so bullet-list fields are still recognized.
+_FIELD_RE = re.compile(r"(?:[-*]\s+)?\b([A-Za-z_]+)\s*:")
+
+
+def _line_fields(text: str) -> list[str]:
+    """Lowercased ``key:`` field tokens on a single block line.
+
+    A line may carry more than one field, e.g. ``"stage: x   iteration: y"``.
+    Returns an empty list when the line opens with no recognizable field token.
+    """
+    if not re.match(r"\s*(?:[-*]\s+)?[A-Za-z_]+\s*:", text):
+        return []
+    return [name.lower() for name in _FIELD_RE.findall(text)]
+
+
 def _escalation_blocks(body: str):
     """Yield ``(banner_lineno, banner_text, field_names)`` for each block.
 
@@ -109,36 +125,31 @@ def _escalation_blocks(body: str):
     the leading ``key:`` tokens found on the block's lines (lowercased).
     """
     blocks: list[tuple[int, str, set[str]]] = []
-    banner_lineno = None
+    banner_lineno: int | None = None
     banner_text = ""
     fields: set[str] = set()
+
     for lineno, text, _in_fence in _model.iter_body_lines(body):
-        stripped = text.strip()
-        if BANNER_RE.match(text):
-            if END_RE.match(text):
-                if banner_lineno is not None:
-                    blocks.append((banner_lineno, banner_text, fields))
-                    banner_lineno = None
-                    fields = set()
-                continue
-            # a new (non-END) banner: flush the open block, start a new one.
+        is_banner = bool(BANNER_RE.match(text))
+
+        # A line inside an open block that adds field tokens.
+        if not is_banner:
             if banner_lineno is not None:
-                blocks.append((banner_lineno, banner_text, fields))
-            banner_lineno = lineno
-            banner_text = stripped
+                fields.update(_line_fields(text))
+            continue
+
+        # Any banner closes the currently open block first.
+        if banner_lineno is not None:
+            blocks.append((banner_lineno, banner_text, fields))
+            banner_lineno = None
             fields = set()
-            continue
-        if banner_lineno is None:
-            continue
-        # inside a block: capture a leading "key:" field token. An optional
-        # list marker ("- stage: 6") is tolerated so fields rendered as a
-        # markdown bullet list are still recognized.
-        m = re.match(r"\s*(?:[-*]\s+)?([A-Za-z_]+)\s*:", text)
-        if m:
-            fields.add(m.group(1).lower())
-            # a line may carry two fields, e.g. "stage: x   iteration: y".
-            for extra in re.findall(r"(?:[-*]\s+)?\b([A-Za-z_]+)\s*:", text)[1:]:
-                fields.add(extra.lower())
+
+        # An END banner only closes; a non-END banner opens a fresh block.
+        if not END_RE.match(text):
+            banner_lineno = lineno
+            banner_text = text.strip()
+            fields = set()
+
     if banner_lineno is not None:
         blocks.append((banner_lineno, banner_text, fields))
     return blocks

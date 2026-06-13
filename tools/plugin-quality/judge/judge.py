@@ -79,7 +79,10 @@ class JudgeResult:
 
     @property
     def advisory_failures(self) -> list[DimensionResult]:
-        return [d for d in self.dimensions if not d.critical and not d.passed]
+        # Anything that failed its floor but does NOT hard-block. This includes a
+        # critical dim scoring between block_floor and floor (e.g. 3): not blocking,
+        # yet a real finding — excluding it on `not d.critical` underreported it.
+        return [d for d in self.dimensions if not d.passed and not d.blocking]
 
     @property
     def ok(self) -> bool:
@@ -168,6 +171,51 @@ def _loads_lenient(s: str):
         return json.loads(_strip_trailing_commas(s))
 
 
+class _BraceScanState:
+    """Mutable cursor for a string-aware brace-balanced scan of one object."""
+
+    __slots__ = ("depth", "in_str", "escaped")
+
+    def __init__(self) -> None:
+        self.depth = 0
+        self.in_str = False
+        self.escaped = False
+
+    def feed(self, c: str) -> bool:
+        """Advance one char; return True when the opening brace's match is hit."""
+        if self.in_str:
+            self._feed_in_string(c)
+            return False
+        return self._feed_outside_string(c)
+
+    def _feed_in_string(self, c: str) -> None:
+        if self.escaped:
+            self.escaped = False
+        elif c == "\\":
+            self.escaped = True
+        elif c == '"':
+            self.in_str = False
+
+    def _feed_outside_string(self, c: str) -> bool:
+        if c == '"':
+            self.in_str = True
+        elif c == "{":
+            self.depth += 1
+        elif c == "}":
+            self.depth -= 1
+            return self.depth == 0
+        return False
+
+
+def _scan_one_object(text: str, start: int) -> int:
+    """Index just past the object opening at ``start``, or -1 if unbalanced."""
+    state = _BraceScanState()
+    for j in range(start, len(text)):
+        if state.feed(text[j]):
+            return j + 1
+    return -1
+
+
 def _iter_top_level_objects(text: str):
     """Yield each top-level ``{...}`` span via a brace-balanced, string-aware scan.
 
@@ -180,34 +228,12 @@ def _iter_top_level_objects(text: str):
         if text[i] != "{":
             i += 1
             continue
-        depth = 0
-        in_str = False
-        escaped = False
-        j = i
-        while j < n:
-            c = text[j]
-            if in_str:
-                if escaped:
-                    escaped = False
-                elif c == "\\":
-                    escaped = True
-                elif c == '"':
-                    in_str = False
-            else:
-                if c == '"':
-                    in_str = True
-                elif c == "{":
-                    depth += 1
-                elif c == "}":
-                    depth -= 1
-                    if depth == 0:
-                        yield text[i : j + 1]
-                        break
-            j += 1
-        if depth == 0 and j < n:
-            i = j + 1  # resume past the closed object
-        else:
+        end = _scan_one_object(text, i)
+        if end == -1:
             i += 1  # unbalanced opener: skip it and keep scanning
+            continue
+        yield text[i:end]
+        i = end  # resume past the closed object
 
 
 def extract_verdict(text: str) -> dict:
@@ -327,53 +353,60 @@ def _aggregate(verdicts: list[dict], dims: list["rubrics.Dimension"]) -> dict:
     return out
 
 
-def judge_artifact(
-    artifact: "_model.Artifact",
-    *,
-    model: str = DEFAULT_MODEL,
-    timeout: int = DEFAULT_TIMEOUT,
-    extra_context: str = "",
-    use_cache: bool = True,
-    votes: int = 1,
-) -> JudgeResult:
-    import cache  # local import keeps cache optional/standalone
+@dataclasses.dataclass(frozen=True)
+class JudgeOptions:
+    """Knobs for :func:`judge_artifact`, bundled to keep its signature small."""
 
-    dims = rubrics.applicable_dimensions(artifact.kind, artifact.name)
-    if not dims:
-        return JudgeResult(artifact.rel, artifact.kind, artifact.name, model, False, [], {})
+    model: str = DEFAULT_MODEL
+    timeout: int = DEFAULT_TIMEOUT
+    extra_context: str = ""
+    use_cache: bool = True
+    votes: int = 1
 
-    dim_ids = [d.id for d in dims]
-    artifact_bytes = artifact.raw.encode("utf-8")
+
+def _cache_identity(opts: JudgeOptions) -> str:
     # Fold the rubric guidance fingerprint into the cache identity so that
     # editing any dimension's guidance self-invalidates stale verdicts.
     fingerprint = rubrics.guidance_fingerprint()
-    cache_model = f"{model}|votes={votes}|rubric={fingerprint}"
+    return f"{opts.model}|votes={opts.votes}|rubric={fingerprint}"
 
-    verdict = None
-    cached = False
-    if use_cache:
-        candidate = cache.get(artifact_bytes, cache_model, dim_ids)
-        if candidate is not None:
-            # A cache hit must still pass validation: a poisoned/stale entry is
-            # treated as a MISS (re-judge) rather than trusted blindly.
-            try:
-                _validate_cached(candidate, dims, votes)
-            except JudgeError:
-                candidate = None
-        if candidate is not None:
-            verdict = candidate
-            cached = True
 
-    if verdict is None:
-        prompt = build_prompt(artifact, dims, extra_context)
-        collected = [_single_verdict(prompt, dims, model, timeout) for _ in range(max(1, votes))]
-        verdict = _aggregate(collected, dims) if votes > 1 else collected[0]
-        if use_cache:
-            cache.put(artifact_bytes, cache_model, dim_ids, verdict)
+def _load_cached_verdict(cache, artifact_bytes, cache_model, dim_ids, dims, opts):
+    """Return a validated cached verdict, or None to force a (re-)judge.
 
-    # Build results defensively: a structurally broken verdict (e.g. a poisoned
-    # cache that somehow slipped through) raises JudgeError, never a raw
-    # KeyError/TypeError that would escape the caller's `except JudgeError`.
+    A cache hit must still pass validation: a poisoned/stale entry is treated as
+    a MISS (re-judge) rather than trusted blindly.
+    """
+    candidate = cache.get(artifact_bytes, cache_model, dim_ids, opts.extra_context)
+    if candidate is None:
+        return None
+    try:
+        _validate_cached(candidate, dims, opts.votes)
+    except JudgeError:
+        return None
+    return candidate
+
+
+def _generate_verdict(cache, artifact, dims, artifact_bytes, cache_model, dim_ids, opts):
+    """Run the model (with votes/aggregation) and persist the verdict."""
+    prompt = build_prompt(artifact, dims, opts.extra_context)
+    collected = [
+        _single_verdict(prompt, dims, opts.model, opts.timeout)
+        for _ in range(max(1, opts.votes))
+    ]
+    verdict = _aggregate(collected, dims) if opts.votes > 1 else collected[0]
+    if opts.use_cache:
+        cache.put(artifact_bytes, cache_model, dim_ids, verdict, opts.extra_context)
+    return verdict
+
+
+def _build_results(verdict: dict, dims: list["rubrics.Dimension"], rel: str) -> list[DimensionResult]:
+    """Map a verdict to DimensionResults defensively.
+
+    A structurally broken verdict (e.g. a poisoned cache that somehow slipped
+    through) raises JudgeError, never a raw KeyError/TypeError that would escape
+    the caller's ``except JudgeError``.
+    """
     try:
         dimensions = verdict["dimensions"]
         if not isinstance(dimensions, dict):
@@ -396,5 +429,56 @@ def judge_artifact(
                 )
             )
     except (KeyError, ValueError, TypeError) as exc:
-        raise JudgeError(f"malformed verdict for {artifact.rel}: {exc}") from exc
-    return JudgeResult(artifact.rel, artifact.kind, artifact.name, model, cached, results, verdict)
+        raise JudgeError(f"malformed verdict for {rel}: {exc}") from exc
+    return results
+
+
+def judge_artifact(
+    artifact: "_model.Artifact",
+    options: JudgeOptions | None = None,
+    *,
+    model: str | None = None,
+    timeout: int | None = None,
+    extra_context: str | None = None,
+    use_cache: bool | None = None,
+    votes: int | None = None,
+) -> JudgeResult:
+    # Backward-compatible: callers may pass an ``options`` object, or the legacy
+    # keyword knobs (which override the corresponding option fields).
+    opts = options or JudgeOptions()
+    overrides = {
+        k: v
+        for k, v in (
+            ("model", model), ("timeout", timeout), ("extra_context", extra_context),
+            ("use_cache", use_cache), ("votes", votes),
+        )
+        if v is not None
+    }
+    if overrides:
+        opts = dataclasses.replace(opts, **overrides)
+
+    import cache  # local import keeps cache optional/standalone
+
+    dims = rubrics.applicable_dimensions(artifact.kind, artifact.name)
+    if not dims:
+        return JudgeResult(artifact.rel, artifact.kind, artifact.name, opts.model, False, [], {})
+
+    dim_ids = [d.id for d in dims]
+    artifact_bytes = artifact.raw.encode("utf-8")
+    cache_model = _cache_identity(opts)
+
+    verdict = None
+    cached = False
+    if opts.use_cache:
+        verdict = _load_cached_verdict(cache, artifact_bytes, cache_model, dim_ids, dims, opts)
+        cached = verdict is not None
+
+    if verdict is None:
+        verdict = _generate_verdict(
+            cache, artifact, dims, artifact_bytes, cache_model, dim_ids, opts
+        )
+
+    results = _build_results(verdict, dims, artifact.rel)
+    return JudgeResult(
+        artifact.rel, artifact.kind, artifact.name, opts.model, cached, results, verdict
+    )

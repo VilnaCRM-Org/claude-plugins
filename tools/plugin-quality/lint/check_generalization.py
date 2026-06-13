@@ -84,32 +84,33 @@ def _strip_profile_examples(text: str) -> list[str | None]:
     return out
 
 
-def check(plugin_root: pathlib.Path) -> list[Finding]:
-    plugin_root = pathlib.Path(plugin_root)
+def _read_text(path: pathlib.Path) -> str | None:
+    """Read a scanned file's text, matching CI's raw-byte grep.
+
+    ci.yml greps the raw bytes, so a denylisted token in a non-UTF-8 file is
+    still a CI failure. We decode with ``errors="replace"`` (utf-8-sig first to
+    strip a BOM) so the denylist still scans the content instead of skipping
+    the file — keeping this gate in lockstep with CI rather than more lenient.
+    """
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    return data.decode("utf-8-sig", errors="replace")
+
+
+def _scan_denylist(plugin_root: pathlib.Path, rel) -> list[Finding]:
+    """L28: denylist scan over the scoped component dirs."""
     findings: list[Finding] = []
-
-    repo_root = plugin_root.parent.parent
-
-    def rel(p: pathlib.Path) -> str:
-        try:
-            return str(p.relative_to(repo_root))
-        except ValueError:
-            return str(p)
-
-    # --- L28: denylist over the scoped component dirs -------------------------
     for sub in SCOPED_DIRS:
         base = plugin_root / sub
         if not base.is_dir():
             continue
         for path in sorted(base.rglob("*")):
-            if not path.is_file():
+            if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
                 continue
-            if path.suffix not in SCANNED_SUFFIXES:
-                continue
-            try:
-                # utf-8-sig so a BOM'd file's first line is scanned normally.
-                text = path.read_text(encoding="utf-8-sig")
-            except (OSError, UnicodeDecodeError):
+            text = _read_text(path)
+            if text is None:
                 continue
             for lineno, line in enumerate(_strip_profile_examples(text), start=1):
                 if line is None:
@@ -130,22 +131,39 @@ def check(plugin_root: pathlib.Path) -> list[Finding]:
                             ),
                         )
                     )
-
-    # --- L29: tree hygiene — no _bmad/.ralph component anywhere ---------------
-    if plugin_root.is_dir():
-        for path in sorted(plugin_root.rglob("*")):
-            if path.name in STRAY_NAMES:
-                findings.append(
-                    Finding(
-                        check="L29",
-                        rule="generalization.tree-hygiene",
-                        severity="S1",
-                        path=rel(path),
-                        message=(
-                            f"vendored asset {path.name!r} must not live inside the "
-                            "plugin tree (NFR-7)"
-                        ),
-                    )
-                )
-
     return findings
+
+
+def _scan_tree_hygiene(plugin_root: pathlib.Path, rel) -> list[Finding]:
+    """L29: no _bmad/.ralph path component anywhere in the tree."""
+    findings: list[Finding] = []
+    if not plugin_root.is_dir():
+        return findings
+    for path in sorted(plugin_root.rglob("*")):
+        if path.name in STRAY_NAMES:
+            findings.append(
+                Finding(
+                    check="L29",
+                    rule="generalization.tree-hygiene",
+                    severity="S1",
+                    path=rel(path),
+                    message=(
+                        f"vendored asset {path.name!r} must not live inside the "
+                        "plugin tree (NFR-7)"
+                    ),
+                )
+            )
+    return findings
+
+
+def check(plugin_root: pathlib.Path) -> list[Finding]:
+    plugin_root = pathlib.Path(plugin_root)
+    repo_root = plugin_root.parent.parent
+
+    def rel(p: pathlib.Path) -> str:
+        try:
+            return str(p.relative_to(repo_root))
+        except ValueError:
+            return str(p)
+
+    return _scan_denylist(plugin_root, rel) + _scan_tree_hygiene(plugin_root, rel)

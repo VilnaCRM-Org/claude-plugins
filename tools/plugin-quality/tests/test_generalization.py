@@ -140,6 +140,22 @@ class GeneralizationCase(unittest.TestCase):
         self._write_skill("s", body)
         self.assertEqual(self._findings("L28"), [])
 
+    def test_gn1_denylist_token_in_latin1_file_still_flagged(self):
+        # Fix (cubic #4): ci.yml greps RAW BYTES, so a denylisted token in a
+        # non-UTF-8 (latin-1) file is a CI failure. The Python gate must decode
+        # with errors="replace" and still scan it, instead of skipping on
+        # UnicodeDecodeError (which was a false negative / divergence from CI).
+        d = self.root / "skills" / "legacy"
+        d.mkdir(parents=True, exist_ok=True)
+        # 0xE9 ('é' in latin-1) is invalid UTF-8 and would raise on strict decode.
+        content = f"# caf\xe9 notes\n\nInjects {TOK_MONGO_REPO} here.\n"
+        (d / "SKILL.md").write_bytes(content.encode("latin-1"))
+        fs = self._findings("L28")
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].rule, "generalization.denylist")
+        self.assertEqual(fs[0].severity, "S1")
+        self.assertEqual(fs[0].line, 3)
+
     # --- GN-2 (L29) tree hygiene -----------------------------------------
 
     def test_gn2_no_stray_dirs_passes(self):

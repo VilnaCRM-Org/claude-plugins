@@ -65,29 +65,129 @@ SKIP_PREDICATE_RE = re.compile(
 
 # ATX H2 with optional trailing '#' run stripped (matches _model.H2_RE).
 _H2_RE = re.compile(r"^##\s+(.*?)\s*#*\s*$")
+# Setext H2 underline: a line of two-or-more '-' (matches _model._SETEXT_H2_RE).
+_SETEXT_H2_RE = re.compile(r"^-{2,}\s*$")
+
+
+def _h2_title_at(idx: int, lines: list[tuple[str, bool]]) -> str | None:
+    """Return the H2 title that BEGINS at stream index ``idx``, else None.
+
+    Recognises both ATX (``## X``) and setext (``X`` then ``----``) H2 forms,
+    consistent with :func:`_model.extract_headings`. For a setext heading the
+    boundary line is the underline, so the title comes from the preceding
+    non-blank, non-fenced text line.
+    """
+    text, in_fence = lines[idx]
+    if in_fence:
+        return None
+    m = _H2_RE.match(text)
+    if m:
+        return m.group(1).strip()
+    if _SETEXT_H2_RE.match(text) and idx > 0:
+        prev_text, prev_fenced = lines[idx - 1]
+        if not prev_fenced and prev_text.strip() and not _H2_RE.match(prev_text):
+            return prev_text.strip()
+    return None
 
 
 def _section_text(body: str, heading: str) -> str | None:
     """Return the fence-aware body text of the H2 ``heading``, or None.
 
     Slices from the line after the heading up to (not including) the next
-    non-fenced H2. Headings inside code fences are ignored.
+    non-fenced H2 (ATX or setext). Headings inside code fences are ignored.
     """
-    start = None
-    lines: list[str] = []
-    for lineno, text, in_fence in _model.iter_body_lines(body):
+    lines = [(text, in_fence) for _lineno, text, in_fence in _model.iter_body_lines(body)]
+    start = None  # stream index of the first content line of the section
+    out: list[str] = []
+    for idx in range(len(lines)):
+        title = _h2_title_at(idx, lines)
         if start is None:
-            if not in_fence:
-                m = _H2_RE.match(text)
-                if m and m.group(1).strip() == heading:
-                    start = lineno
+            if title == heading:
+                start = idx + 1
             continue
-        if not in_fence and _H2_RE.match(text):
+        if title is not None:
+            # A setext boundary's underline follows its title line, which we
+            # already appended; drop that trailing title line from the section.
+            text = lines[idx][0]
+            if _SETEXT_H2_RE.match(text) and out:
+                out.pop()
             break
-        lines.append(text)
+        out.append(lines[idx][0])
     if start is None:
         return None
-    return "\n".join(lines)
+    return "\n".join(out)
+
+
+def _check_spine(art, check_id: str, rule: str, spine, label: str) -> list[Finding]:
+    """L15/L16: every spine section must be present (any order)."""
+    present = set(art.h2_sections)
+    return [
+        Finding(
+            check=check_id,
+            rule=rule,
+            severity="S2",
+            path=art.rel,
+            message=f"{label} missing required H2 section: ## {section}",
+        )
+        for section in spine
+        if section not in present
+    ]
+
+
+def _check_skill_first_h2(art) -> list[Finding]:
+    """L17: a skill's first H2 must be exactly ``Profile keys consumed``."""
+    first = art.h2_sections[0] if art.h2_sections else None
+    if first == SKILL_FIRST_H2:
+        return []
+    return [
+        Finding(
+            check="L17",
+            rule="structure.skill.first-h2",
+            severity="S2",
+            path=art.rel,
+            message=(
+                f"skill first H2 must be '## {SKILL_FIRST_H2}', "
+                f"found {('## ' + first) if first else '(no H2 sections)'}"
+            ),
+        )
+    ]
+
+
+def _gate_has_skip(art) -> bool:
+    """True when a gating skill documents its skip path (NFR-4).
+
+    Satisfied when a skip note lives in ANY gate-named section, or when a skip
+    word sits next to a gate predicate (capabilities./framework./persistence.)
+    anywhere — the genuine "skip when <predicate> is false" contract, which some
+    skills document outside a literally "gate"-named H2.
+    """
+    gate_sections = [h for h in art.h2_sections if GATE_RE.search(h)]
+    in_gate_section = any(
+        "SKIPPED:" in (sec := _section_text(art.body, h) or "")
+        or SKIP_NOTE_RE.search(sec)
+        for h in gate_sections
+    )
+    return in_gate_section or bool(SKIP_PREDICATE_RE.search(art.body))
+
+
+def _check_skill_gate(art) -> list[Finding]:
+    """L18: a capability-gating section must emit a SKIPPED degrade path."""
+    gate_sections = [h for h in art.h2_sections if GATE_RE.search(h)]
+    if not gate_sections or _gate_has_skip(art):
+        return []
+    return [
+        Finding(
+            check="L18",
+            rule="structure.skill.gate-skipped-token",
+            severity="S2",
+            path=art.rel,
+            message=(
+                "gated skill (H2 "
+                f"'## {gate_sections[0]}') must emit a 'SKIPPED:' "
+                "skip-path token in its body (NFR-4)"
+            ),
+        )
+    ]
 
 
 def check(plugin_root: pathlib.Path) -> list[Finding]:
@@ -95,82 +195,16 @@ def check(plugin_root: pathlib.Path) -> list[Finding]:
 
     for art in _model.discover(plugin_root):
         if art.kind == "command":
-            present = set(art.h2_sections)
-            for section in COMMAND_SPINE:
-                if section not in present:
-                    findings.append(
-                        Finding(
-                            check="L15",
-                            rule="structure.command.spine",
-                            severity="S2",
-                            path=art.rel,
-                            message=f"command missing required H2 section: ## {section}",
-                        )
-                    )
-
+            findings += _check_spine(
+                art, "L15", "structure.command.spine", COMMAND_SPINE, "command"
+            )
         elif art.kind == "agent":
-            present = set(art.h2_sections)
-            for section in AGENT_SPINE:
-                if section not in present:
-                    findings.append(
-                        Finding(
-                            check="L16",
-                            rule="structure.agent.spine",
-                            severity="S2",
-                            path=art.rel,
-                            message=f"agent missing required H2 section: ## {section}",
-                        )
-                    )
-
+            findings += _check_spine(
+                art, "L16", "structure.agent.spine", AGENT_SPINE, "agent"
+            )
         elif art.kind == "skill":
-            # L17: first H2 must be exactly "Profile keys consumed".
-            first = art.h2_sections[0] if art.h2_sections else None
-            if first != SKILL_FIRST_H2:
-                findings.append(
-                    Finding(
-                        check="L17",
-                        rule="structure.skill.first-h2",
-                        severity="S2",
-                        path=art.rel,
-                        message=(
-                            f"skill first H2 must be '## {SKILL_FIRST_H2}', "
-                            f"found {('## ' + first) if first else '(no H2 sections)'}"
-                        ),
-                    )
-                )
-
-            # L18: a capability-gating section must emit a SKIPPED degrade path.
-            # The skip note must be scoped to gating context, not satisfied by an
-            # unrelated "skipping ahead" elsewhere in the body. It counts when it
-            # lives in ANY gate-named section, or when a skip word sits next to a
-            # gate predicate (capabilities./framework./persistence.) anywhere —
-            # the genuine "skip when <predicate> is false" contract, which some
-            # skills document outside a literally "gate"-named H2.
-            gate_sections = [h for h in art.h2_sections if GATE_RE.search(h)]
-            if gate_sections:
-                in_gate_section = any(
-                    "SKIPPED:" in (sec := _section_text(art.body, h) or "")
-                    or SKIP_NOTE_RE.search(sec)
-                    for h in gate_sections
-                )
-                has_skip = in_gate_section or bool(
-                    SKIP_PREDICATE_RE.search(art.body)
-                )
-                if not has_skip:
-                    findings.append(
-                        Finding(
-                            check="L18",
-                            rule="structure.skill.gate-skipped-token",
-                            severity="S2",
-                            path=art.rel,
-                            message=(
-                                "gated skill (H2 "
-                                f"'## {gate_sections[0]}') must emit a 'SKIPPED:' "
-                                "skip-path token in its body (NFR-4)"
-                            ),
-                        )
-                    )
-
+            findings += _check_skill_first_h2(art)
+            findings += _check_skill_gate(art)
         # meta-guides are exempt from L17/L18 (ADR-11).
 
     return findings

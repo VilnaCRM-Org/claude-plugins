@@ -147,6 +147,28 @@ class ReferenceCheckTests(unittest.TestCase):
         )
         self.assertEqual([], self.tree.run())
 
+    def test_rf3_link_dead_with_title_is_flagged(self):
+        # Fix (cubic #2): a dead relative .md link carrying a Markdown title
+        # suffix (`"Title"`) must still be resolved and flagged — the title must
+        # be stripped before the path is extracted, otherwise the .md tail fuses
+        # into the title and the dead link is a false negative.
+        self.tree.skill(
+            "testing-workflow",
+            '# testing-workflow\n\nSee [crud](../code-revew/SKILL.md "The Title").\n',
+        )
+        findings = self.tree.run()
+        self.assertEqual(1, len(findings))
+        self.assertEqual("references.link.dead", findings[0].rule)
+
+    def test_rf3_link_live_with_title_not_flagged(self):
+        # Fix (cubic #2) control: a LIVE relative .md link with a title resolves
+        # cleanly once the title is stripped — no false positive.
+        self.tree.skill(
+            "testing-workflow",
+            "# testing-workflow\n\nSee [crud](../code-review/SKILL.md 'Title').\n",
+        )
+        self.assertEqual([], self.tree.run())
+
     # RF-4 (L22) command refs ------------------------------------------------
     def test_rf4_command_positive(self):
         self.tree.command(

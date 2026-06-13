@@ -161,6 +161,70 @@ def check(plugin_root: pathlib.Path) -> list[Finding]:
     return findings
 
 
+def _market_finding(rel: str, message: str) -> Finding:
+    """An M4 ``manifest.marketplace`` finding (the shared shape)."""
+    return Finding(
+        check="M4",
+        rule="manifest.marketplace",
+        severity="S1",
+        path=rel,
+        message=message,
+    )
+
+
+def _check_market_top_fields(data: dict, rel: str) -> list[Finding]:
+    """M4: top-level ``name`` and ``owner.name`` present and non-empty."""
+    findings: list[Finding] = []
+    if _is_empty(data.get("name")):
+        findings.append(
+            _market_finding(rel, "marketplace.json missing or empty required field: name")
+        )
+    if _is_empty(_get_nested(data, "owner.name")):
+        findings.append(
+            _market_finding(
+                rel, "marketplace.json missing or empty required field: owner.name"
+            )
+        )
+    return findings
+
+
+def _check_market_entry(entry, index: int, rel: str, repo_root: pathlib.Path) -> list[Finding]:
+    """M4: validate one ``plugins[index]`` entry (name + source + dir exists)."""
+    if not isinstance(entry, dict):
+        return [_market_finding(rel, f"marketplace.json plugins[{index}] is not an object")]
+
+    findings: list[Finding] = []
+    name = entry.get("name")
+    source = entry.get("source")
+    label = name if isinstance(name, str) and name.strip() else f"index {index}"
+
+    if _is_empty(name):
+        findings.append(
+            _market_finding(rel, f"marketplace.json plugins[{index}] missing or empty name")
+        )
+
+    expected = f"./plugins/{name}" if isinstance(name, str) else None
+    if expected is None or source != expected:
+        findings.append(
+            _market_finding(
+                rel,
+                f"marketplace entry {label!r} source {source!r} != {expected!r}",
+            )
+        )
+
+    # The referenced dir must exist (resolve against repo root).
+    if isinstance(source, str) and source:
+        target = (repo_root / source).resolve()
+        if not target.is_dir():
+            findings.append(
+                _market_finding(
+                    rel,
+                    f"marketplace entry {label!r} source dir {source!r} does not exist",
+                )
+            )
+    return findings
+
+
 def check_marketplace(repo_root: pathlib.Path) -> list[Finding]:
     """M4: validate the repo-level ``.claude-plugin/marketplace.json``."""
     repo_root = pathlib.Path(repo_root)
@@ -185,111 +249,19 @@ def check_marketplace(repo_root: pathlib.Path) -> list[Finding]:
 
     data, error = _load_json(manifest)
     if error is not None:
-        return [
-            Finding(
-                check="M4",
-                rule="manifest.marketplace",
-                severity="S1",
-                path=rel,
-                message=f"marketplace.json does not parse: {error}",
-            )
-        ]
+        return [_market_finding(rel, f"marketplace.json does not parse: {error}")]
 
     # name + owner.name present and non-empty.
-    if _is_empty(data.get("name")):
-        findings.append(
-            Finding(
-                check="M4",
-                rule="manifest.marketplace",
-                severity="S1",
-                path=rel,
-                message="marketplace.json missing or empty required field: name",
-            )
-        )
-    if _is_empty(_get_nested(data, "owner.name")):
-        findings.append(
-            Finding(
-                check="M4",
-                rule="manifest.marketplace",
-                severity="S1",
-                path=rel,
-                message="marketplace.json missing or empty required field: owner.name",
-            )
-        )
+    findings.extend(_check_market_top_fields(data, rel))
 
     # plugins must be a non-empty array.
     plugins = data.get("plugins")
     if not isinstance(plugins, list) or len(plugins) == 0:
-        findings.append(
-            Finding(
-                check="M4",
-                rule="manifest.marketplace",
-                severity="S1",
-                path=rel,
-                message="marketplace.json must list at least one plugin",
-            )
-        )
+        findings.append(_market_finding(rel, "marketplace.json must list at least one plugin"))
         return findings
 
     # Each entry: source == "./plugins/<name>" and that dir exists.
     for i, entry in enumerate(plugins):
-        if not isinstance(entry, dict):
-            findings.append(
-                Finding(
-                    check="M4",
-                    rule="manifest.marketplace",
-                    severity="S1",
-                    path=rel,
-                    message=f"marketplace.json plugins[{i}] is not an object",
-                )
-            )
-            continue
-
-        name = entry.get("name")
-        source = entry.get("source")
-        label = name if isinstance(name, str) and name.strip() else f"index {i}"
-
-        if _is_empty(name):
-            findings.append(
-                Finding(
-                    check="M4",
-                    rule="manifest.marketplace",
-                    severity="S1",
-                    path=rel,
-                    message=f"marketplace.json plugins[{i}] missing or empty name",
-                )
-            )
-
-        expected = f"./plugins/{name}" if isinstance(name, str) else None
-        if expected is None or source != expected:
-            findings.append(
-                Finding(
-                    check="M4",
-                    rule="manifest.marketplace",
-                    severity="S1",
-                    path=rel,
-                    message=(
-                        f"marketplace entry {label!r} source {source!r} != "
-                        f"{expected!r}"
-                    ),
-                )
-            )
-
-        # The referenced dir must exist (resolve against repo root).
-        if isinstance(source, str) and source:
-            target = (repo_root / source).resolve()
-            if not target.is_dir():
-                findings.append(
-                    Finding(
-                        check="M4",
-                        rule="manifest.marketplace",
-                        severity="S1",
-                        path=rel,
-                        message=(
-                            f"marketplace entry {label!r} source dir "
-                            f"{source!r} does not exist"
-                        ),
-                    )
-                )
+        findings.extend(_check_market_entry(entry, i, rel, repo_root))
 
     return findings

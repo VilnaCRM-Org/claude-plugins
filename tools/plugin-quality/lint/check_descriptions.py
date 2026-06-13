@@ -42,6 +42,98 @@ def _text(value) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _check_too_short(art, description: str) -> list[Finding]:
+    """L14: non-empty and >= 20 chars (commands + agents + skills)."""
+    if len(description) >= MIN_LEN:
+        return []
+    return [
+        Finding(
+            check="L14",
+            rule="descriptions.too-short",
+            severity="S2",
+            path=art.rel,
+            message=(
+                f"{art.kind} description must be non-empty and at least "
+                f"{MIN_LEN} characters (got {len(description)})"
+            ),
+        )
+    ]
+
+
+def _check_cap(art, description: str) -> list[Finding]:
+    """L11: length cap. Skills add ``when_to_use``; others cap description alone."""
+    if art.kind == "skill":
+        when = _text(art.frontmatter.get("when_to_use"))
+        total = len(description) + len(when)
+        if total <= CAP:
+            return []
+        message = (
+            f"skill description + when_to_use is {total} chars; "
+            f"must be <= {CAP}"
+        )
+    else:  # command / agent: description alone capped
+        if len(description) <= CAP:
+            return []
+        message = (
+            f"{art.kind} description is {len(description)} chars; "
+            f"must be <= {CAP}"
+        )
+    return [
+        Finding(
+            check="L11",
+            rule="descriptions.cap-1536",
+            severity="S2",
+            path=art.rel,
+            message=message,
+        )
+    ]
+
+
+def _check_skill_trigger(art, description: str) -> list[Finding]:
+    """L12: skill trigger clause."""
+    if art.kind != "skill" or not description or SKILL_TRIGGER_RE.search(description):
+        return []
+    return [
+        Finding(
+            check="L12",
+            rule="descriptions.skill.no-trigger",
+            severity="S2",
+            path=art.rel,
+            message=(
+                'skill description must contain a trigger clause '
+                '("Use when" or "When to use")'
+            ),
+        )
+    ]
+
+
+def _check_agent_trigger(art, description: str) -> list[Finding]:
+    """L13: agent delegation trigger."""
+    if art.kind != "agent" or not description or AGENT_TRIGGER_RE.search(description):
+        return []
+    return [
+        Finding(
+            check="L13",
+            rule="descriptions.agent.no-trigger",
+            severity="S2",
+            path=art.rel,
+            message=(
+                'agent description must contain a delegation trigger '
+                '("Delegate", "Use when", "Use this agent", or "Proactively")'
+            ),
+        )
+    ]
+
+
+# Per-artifact rule helpers (L14, L11, L12, L13), in original evaluation order.
+_RULES = (
+    _check_too_short,
+    _check_cap,
+    _check_skill_trigger,
+    _check_agent_trigger,
+)
+
+
 def check(plugin_root) -> list[Finding]:
     plugin_root = pathlib.Path(plugin_root)
     findings: list[Finding] = []
@@ -51,82 +143,7 @@ def check(plugin_root) -> list[Finding]:
             continue  # meta-guides carry no frontmatter (ADR-11)
 
         description = _text(art.frontmatter.get("description"))
-
-        # L14: non-empty and >= 20 chars (commands + agents + skills).
-        if len(description) < MIN_LEN:
-            findings.append(
-                Finding(
-                    check="L14",
-                    rule="descriptions.too-short",
-                    severity="S2",
-                    path=art.rel,
-                    message=(
-                        f"{art.kind} description must be non-empty and at least "
-                        f"{MIN_LEN} characters (got {len(description)})"
-                    ),
-                )
-            )
-
-        # L11: length cap.
-        if art.kind == "skill":
-            when = _text(art.frontmatter.get("when_to_use"))
-            total = len(description) + len(when)
-            if total > CAP:
-                findings.append(
-                    Finding(
-                        check="L11",
-                        rule="descriptions.cap-1536",
-                        severity="S2",
-                        path=art.rel,
-                        message=(
-                            f"skill description + when_to_use is {total} chars; "
-                            f"must be <= {CAP}"
-                        ),
-                    )
-                )
-        else:  # command / agent: description alone capped
-            if len(description) > CAP:
-                findings.append(
-                    Finding(
-                        check="L11",
-                        rule="descriptions.cap-1536",
-                        severity="S2",
-                        path=art.rel,
-                        message=(
-                            f"{art.kind} description is {len(description)} chars; "
-                            f"must be <= {CAP}"
-                        ),
-                    )
-                )
-
-        # L12: skill trigger clause.
-        if art.kind == "skill" and description and not SKILL_TRIGGER_RE.search(description):
-            findings.append(
-                Finding(
-                    check="L12",
-                    rule="descriptions.skill.no-trigger",
-                    severity="S2",
-                    path=art.rel,
-                    message=(
-                        'skill description must contain a trigger clause '
-                        '("Use when" or "When to use")'
-                    ),
-                )
-            )
-
-        # L13: agent delegation trigger.
-        if art.kind == "agent" and description and not AGENT_TRIGGER_RE.search(description):
-            findings.append(
-                Finding(
-                    check="L13",
-                    rule="descriptions.agent.no-trigger",
-                    severity="S2",
-                    path=art.rel,
-                    message=(
-                        'agent description must contain a delegation trigger '
-                        '("Delegate", "Use when", "Use this agent", or "Proactively")'
-                    ),
-                )
-            )
+        for rule in _RULES:
+            findings.extend(rule(art, description))
 
     return findings

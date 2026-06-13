@@ -119,9 +119,13 @@ def iter_body_lines(body: str):
                 fence_len = len(run)
                 yield i, line, True
                 continue
-            # CommonMark: a closing fence must be the same char AND at least as
-            # long as the opening fence; a shorter inner fence does not close it.
-            if marker == fence_marker and len(run) >= fence_len:
+            # CommonMark: a closing fence must be the same char, at least as
+            # long as the opening fence, AND carry no info string — only the
+            # fence run plus optional trailing whitespace. A shorter inner fence
+            # (e.g. ``` inside a ```` block) does not close it, and neither does
+            # a line like "```bash" whose info text marks it as an opening fence.
+            after = line[m.end():]
+            if marker == fence_marker and len(run) >= fence_len and not after.strip():
                 in_fence = False
                 fence_marker = ""
                 fence_len = 0
@@ -130,42 +134,61 @@ def iter_body_lines(body: str):
         yield i, line, in_fence
 
 
+def _atx_heading(line: str) -> tuple[int, str] | None:
+    """Return ``(level, title)`` for an ATX H1/H2 line, else None."""
+    m1 = H1_RE.match(line)
+    if m1:
+        return 1, m1.group(1).strip()
+    m2 = H2_RE.match(line)
+    if m2:
+        return 2, m2.group(1).strip()
+    return None
+
+
+def _setext_level(line: str) -> int | None:
+    """Return 1 for a setext H1 underline, 2 for a setext H2 underline, else None."""
+    if _SETEXT_H1_RE.match(line):
+        return 1
+    if _SETEXT_H2_RE.match(line):
+        return 2
+    return None
+
+
 def extract_headings(body: str) -> tuple[str | None, list[str]]:
     h1: str | None = None
     h2: list[str] = []
-    # Materialize the fence-aware stream so setext detection can look one line
-    # back (the underline binds to the preceding non-blank text line).
-    stream = [
-        (line, in_fence) for _lineno, line, in_fence in iter_body_lines(body)
-    ]
     prev_text: str | None = None  # last non-blank, non-fenced, non-ATX line
-    for idx, (line, in_fence) in enumerate(stream):
+    for _lineno, line, in_fence in iter_body_lines(body):
         if in_fence:
             prev_text = None
             continue
-        m1 = H1_RE.match(line)
-        if m1 and h1 is None:
-            h1 = m1.group(1).strip()
-            prev_text = None
-            continue
-        m2 = H2_RE.match(line)
-        if m2:
-            h2.append(m2.group(1).strip())
-            prev_text = None
-            continue
+        atx = _atx_heading(line)
+        if atx is not None:
+            level, title = atx
+            if level == 2:
+                h2.append(title)
+                prev_text = None
+                continue
+            if h1 is None:  # only the FIRST ATX H1 is captured
+                h1 = title
+                prev_text = None
+                continue
+            # a later H1 is not re-captured; fall through so it can act as the
+            # preceding text line for a following setext underline (original
+            # behaviour preserved).
         # Setext underline: this line is all '=' (H1) or all '-' (H2) and the
         # previous line was a non-blank paragraph line (the heading text). The
         # body has its frontmatter already split off, so a leading '---' here is
         # a real horizontal-rule / setext-H2 underline, never frontmatter.
         if prev_text is not None and prev_text.strip():
-            title = prev_text.strip()
-            if _SETEXT_H1_RE.match(line):
+            level = _setext_level(line)
+            if level == 1:
                 if h1 is None:
-                    h1 = title
+                    h1 = prev_text.strip()
                 prev_text = None
                 continue
-            if _SETEXT_H2_RE.match(line):
-                h2.append(title)
+            if level == 2:
+                h2.append(prev_text.strip())
                 prev_text = None
                 continue
         prev_text = line if line.strip() else None

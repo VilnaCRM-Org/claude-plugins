@@ -62,7 +62,17 @@ def _collect_artifacts(paths: list[str]) -> list["_model.Artifact"]:
                 # Resolve which plugin owns this file so kind detection is right.
                 plugin_root = _owning_plugin_root(p)
                 if plugin_root:
-                    arts.extend(a for a in _model.discover(plugin_root) if a.path == p)
+                    matched = [a for a in _model.discover(plugin_root) if a.path == p]
+                    if matched:
+                        arts.extend(matched)
+                    else:
+                        # Inside a plugin but not a discoverable artifact (a typo
+                        # or a non-artifact .md). Never silently evaluate nothing.
+                        print(
+                            f"warning: {p} is inside a plugin but is not a judgeable "
+                            "artifact (command/agent/skill/meta-guide) — skipped",
+                            file=sys.stderr,
+                        )
                 else:
                     print(f"warning: {p} is not inside a known plugin tree — skipped", file=sys.stderr)
     else:
@@ -95,7 +105,7 @@ def _render_result(res: "judge.JudgeResult") -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_arg_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description="LLM-as-judge over plugin prompt artifacts.")
     ap.add_argument("paths", nargs="*", help="files or plugin dirs (default: all plugins)")
     ap.add_argument("--model", default=judge.DEFAULT_MODEL, help="judge model (default: sonnet)")
@@ -111,8 +121,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--require", action="store_true", help="fail (exit 2) if the claude CLI is unavailable")
     ap.add_argument("--json", action="store_true", help="emit JSON results to stdout")
     ap.add_argument("--report", default=None, help="write a markdown report to this path")
-    args = ap.parse_args(argv)
+    return ap
 
+
+def _votes_error(args) -> bool:
     # An even vote count >1 makes the median_low aggregate flaky: median_low of
     # an even split leans on a single low vote (median_low([2,5]) == 2), so one
     # stray low score blocks. Require an odd count for stable gating.
@@ -122,45 +134,52 @@ def main(argv: list[str] | None = None) -> int:
             "(3 recommended) for a stable median.",
             file=sys.stderr,
         )
-        return 2
+        return True
+    return False
 
-    if not judge.cli_available():
-        msg = "claude CLI not found on PATH — LLM-judge SKIPPED (deterministic lint still gates)."
-        print(f"SKIP: {msg}", file=sys.stderr)
-        return 2 if args.require else 0
 
+def _select_artifacts(args) -> list["_model.Artifact"]:
     artifacts = _collect_artifacts(args.paths)
     if args.kinds:
         wanted = {k.strip() for k in args.kinds.split(",") if k.strip()}
         artifacts = [a for a in artifacts if a.kind in wanted]
     if args.limit:
         artifacts = artifacts[: args.limit]
+    return artifacts
 
-    if not artifacts:
-        print("No artifacts to judge.", file=sys.stderr)
-        return 0
 
-    def _judge_one(a):
-        extra = _meta_guide_context(a.plugin_root) if a.kind == "meta-guide" else ""
-        return a, judge.judge_artifact(
-            a, model=args.model, extra_context=extra,
-            use_cache=not args.no_cache, votes=args.votes,
-        )
+def _judge_one(a, args):
+    extra = _meta_guide_context(a.plugin_root) if a.kind == "meta-guide" else ""
+    return a, judge.judge_artifact(
+        a, model=args.model, extra_context=extra,
+        use_cache=not args.no_cache, votes=args.votes,
+    )
 
+
+_JUDGE_EXC = (judge.JudgeError, judge.JudgeUnavailable, KeyError, ValueError, TypeError)
+
+
+def _judge_all(artifacts, args):
+    """Judge every artifact, returning (results, errors). One bad artifact never
+    aborts the run; its failure is recorded as an error entry instead."""
     results: list[judge.JudgeResult] = []
     errors: list[str] = []
+
+    def _record_error(rel, exc):
+        errors.append(f"{rel}: {exc}")
+        print(f"ERROR judging {rel}: {exc}", file=sys.stderr)
+
     if args.jobs > 1 and len(artifacts) > 1:
         import concurrent.futures
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            futures = {pool.submit(_judge_one, a): a for a in artifacts}
+            futures = {pool.submit(_judge_one, a, args): a for a in artifacts}
             for fut in concurrent.futures.as_completed(futures):
                 a = futures[fut]
                 try:
                     _, res = fut.result()
-                except (judge.JudgeError, judge.JudgeUnavailable, KeyError, ValueError, TypeError) as exc:
-                    errors.append(f"{a.rel}: {exc}")
-                    print(f"ERROR judging {a.rel}: {exc}", file=sys.stderr)
+                except _JUDGE_EXC as exc:
+                    _record_error(a.rel, exc)
                     continue
                 results.append(res)
         results.sort(key=lambda r: r.path)
@@ -169,17 +188,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         for a in artifacts:
             try:
-                _, res = _judge_one(a)
-            except (judge.JudgeError, judge.JudgeUnavailable, KeyError, ValueError, TypeError) as exc:
-                errors.append(f"{a.rel}: {exc}")
-                print(f"ERROR judging {a.rel}: {exc}", file=sys.stderr)
+                _, res = _judge_one(a, args)
+            except _JUDGE_EXC as exc:
+                _record_error(a.rel, exc)
                 continue
             results.append(res)
             print(_render_result(res), file=sys.stderr)
+    return results, errors
 
-    blocking = [(r, d) for r in results for d in r.blocking_failures]
-    advisory = [(r, d) for r in results for d in r.advisory_failures]
 
+def _report(args, results, blocking, advisory, errors) -> None:
     if args.json:
         import json as _json
         print(_json.dumps([{
@@ -195,6 +213,28 @@ def main(argv: list[str] | None = None) -> int:
         f"{len(blocking)} blocking, {len(advisory)} advisory, {len(errors)} error(s).",
         file=sys.stderr,
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_arg_parser().parse_args(argv)
+
+    if _votes_error(args):
+        return 2
+
+    if not judge.cli_available():
+        msg = "claude CLI not found on PATH — LLM-judge SKIPPED (deterministic lint still gates)."
+        print(f"SKIP: {msg}", file=sys.stderr)
+        return 2 if args.require else 0
+
+    artifacts = _select_artifacts(args)
+    if not artifacts:
+        print("No artifacts to judge.", file=sys.stderr)
+        return 0
+
+    results, errors = _judge_all(artifacts, args)
+    blocking = [(r, d) for r in results for d in r.blocking_failures]
+    advisory = [(r, d) for r in results for d in r.advisory_failures]
+    _report(args, results, blocking, advisory, errors)
 
     # Errors are never a silent pass: under --gate, an unjudgeable artifact fails.
     if args.gate and (blocking or errors):

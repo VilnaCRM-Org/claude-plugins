@@ -196,6 +196,49 @@ class StructureCase(unittest.TestCase):
         self.assertEqual(len(fs), 1)
         self.assertEqual(fs[0].rule, "structure.skill.gate-skipped-token")
 
+    def test_st4_setext_gate_section_skip_token_bounded_passes(self):
+        # Fix (cubic #3): a gate section whose H2 is a SETEXT heading must be
+        # sliced correctly by _section_text so its in-section `SKIPPED:` token is
+        # found. Under the old ATX-only slicing the setext gate section was never
+        # located, _section_text returned None, and L18 fired a false positive.
+        # No gate predicate appears anywhere, so passing proves the SETEXT
+        # section body (not a predicate fallback) satisfied the rule.
+        text = (
+            "---\nname: s\n---\n\n"
+            "Profile keys consumed\n"
+            "---------------------\n\n"
+            "Reads keys.\n\n"
+            "Capability gate\n"
+            "---------------\n\n"
+            "When off emit `SKIPPED: feature disabled` and stop.\n\n"
+            "Notes\n"
+            "-----\n\n"
+            "Unrelated trailing prose.\n"
+        )
+        self._write_skill("s", text)
+        self.assertEqual(self._findings("L18"), [])
+
+    def test_st4_setext_gate_skip_token_in_other_section_fails(self):
+        # Fix (cubic #3) guard: the setext gate section itself has NO skip path;
+        # a stray `SKIPPED:` lives only in a LATER setext section. Correct
+        # bounding must NOT let that later section satisfy the gate, so L18 fires.
+        text = (
+            "---\nname: s\n---\n\n"
+            "Profile keys consumed\n"
+            "---------------------\n\n"
+            "Reads keys.\n\n"
+            "Capability gate\n"
+            "---------------\n\n"
+            "This section gates on a capability and does nothing else.\n\n"
+            "Notes\n"
+            "-----\n\n"
+            "Elsewhere we emit `SKIPPED: unrelated` for another reason.\n"
+        )
+        self._write_skill("s", text)
+        fs = self._findings("L18")
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].rule, "structure.skill.gate-skipped-token")
+
     def test_st4_skip_predicate_outside_gate_h2_passes(self):
         # Fix 6: a genuine "skip when <predicate> is false" note, tied to a gate
         # predicate but living outside a literally gate-named H2, still passes
@@ -261,6 +304,33 @@ class StructureCase(unittest.TestCase):
         self.assertIn("Real", h2)
         self.assertIn("After", h2)
         self.assertNotIn("Leak", h2)
+
+    def test_info_string_fence_does_not_close_open_fence(self):
+        # Fix (cubic #1): a "```python" line inside a "```" block is an OPENING
+        # fence (it carries an info string), so per CommonMark it must NOT close
+        # the open block. "## Leak" between the two same-length fence lines stays
+        # fenced and never surfaces as an H2; "After" (the genuine bare close)
+        # ends the block.
+        body = (
+            "## Real\n\n"
+            "```\n"
+            "```python\n"
+            "## Leak\n"
+            "```\n\n"
+            "## After\n"
+        )
+        _h1, h2 = _model.extract_headings(body)
+        self.assertIn("Real", h2)
+        self.assertIn("After", h2)
+        self.assertNotIn("Leak", h2)
+
+    def test_bare_close_fence_with_trailing_whitespace_closes(self):
+        # Fix (cubic #1) control: a closing fence MAY carry trailing whitespace
+        # only ("```   "), so the block still closes and "After" is an H2.
+        body = "## Real\n\n```\nx = 1\n```   \n\n## After\n"
+        _h1, h2 = _model.extract_headings(body)
+        self.assertIn("Real", h2)
+        self.assertIn("After", h2)
 
     # --- regression: Fix 1 — BOM strip + non-UTF-8 stub -------------------
 
