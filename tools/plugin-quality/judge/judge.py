@@ -38,7 +38,35 @@ import rubrics  # noqa: E402
 import _model  # noqa: E402
 
 DEFAULT_MODEL = os.environ.get("JUDGE_MODEL", "sonnet")
-DEFAULT_TIMEOUT = int(os.environ.get("JUDGE_TIMEOUT", "180"))
+
+
+def _env_timeout(default: int = 180) -> int:
+    """Read JUDGE_TIMEOUT as a positive int, falling back to ``default``.
+
+    A non-integer or non-positive value must NOT crash ``import judge`` (which
+    would abort the whole tool); it warns on stderr and uses the default instead.
+    """
+    raw = os.environ.get("JUDGE_TIMEOUT")
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        print(
+            f"warning: JUDGE_TIMEOUT={raw!r} is not an integer; using {default}s.",
+            file=sys.stderr,
+        )
+        return default
+    if value <= 0:
+        print(
+            f"warning: JUDGE_TIMEOUT={raw!r} must be > 0; using {default}s.",
+            file=sys.stderr,
+        )
+        return default
+    return value
+
+
+DEFAULT_TIMEOUT = _env_timeout()
 MAX_REPROMPTS = 2
 
 
@@ -304,9 +332,10 @@ def _validate_cached(verdict: dict, dims: list["rubrics.Dimension"], votes: int)
     """Validate a verdict read from cache before trusting it.
 
     For a single-vote verdict this is the same structural check as a fresh one.
-    For a votes>1 aggregate (which carries no per-dim ``evidence`` requirement in
-    the same shape) we still require every expected dim to be present with an int
-    1-5 score, and reject extra/hallucinated dimension ids.
+    For a votes>1 aggregate we still require every expected dim to be present with
+    an int 1-5 score AND a non-empty string ``evidence`` (matching the single-vote
+    check), and reject extra/hallucinated dimension ids. A cached aggregate with
+    empty/missing evidence is treated as a MISS (re-judge).
     """
     if votes > 1:
         if not isinstance(verdict, dict) or not isinstance(verdict.get("dimensions"), dict):
@@ -319,6 +348,8 @@ def _validate_cached(verdict: dict, dims: list["rubrics.Dimension"], votes: int)
             score = entry.get("score")
             if isinstance(score, bool) or not isinstance(score, int) or not (1 <= score <= 5):
                 raise JudgeError(f"cached aggregate dimension {d.id} score not an int 1-5: {score!r}")
+            if not isinstance(entry.get("evidence"), str) or not entry["evidence"].strip():
+                raise JudgeError(f"cached aggregate dimension {d.id} missing evidence")
         extra = set(out) - {d.id for d in dims}
         if extra:
             raise JudgeError(f"cached aggregate has unexpected dimension ids: {sorted(extra)}")

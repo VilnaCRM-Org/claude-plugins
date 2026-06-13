@@ -13,6 +13,7 @@ than silently skipped.
 """
 
 import pathlib
+import re
 
 from _common import Finding
 import _model
@@ -26,6 +27,10 @@ REPORT_ONLY_SIGNALS = ("report only", "never fix", "read-only", "no self-fix", "
 
 # Tools that mutate the working tree; forbidden for report-only commands (L2).
 MUTATING_TOOLS = {"Write", "Edit"}
+
+# L33: a QA-named artifact's identity, e.g. ``sdlc-qa`` / ``qa-manual-tester``.
+# "qa" as a whole, dash-delimited token (NOT a substring of "equal"/"squash").
+_QA_NAME_RE = re.compile(r"(^|-)qa(-|$)", re.IGNORECASE)
 
 
 def _nonempty_str(value) -> bool:
@@ -192,6 +197,49 @@ def _check_skill(art) -> list[Finding]:
     return findings
 
 
+def _tool_names(value) -> list[str]:
+    """Normalize a frontmatter tool allowlist to a list of tool-name strings.
+
+    Accepts a YAML list (commands' ``allowed-tools``, or an agent ``tools``
+    list) or a comma-separated string (an agent ``tools: Bash, Read``). Non-empty
+    string elements are returned trimmed; anything else is dropped.
+    """
+    if isinstance(value, list):
+        return [item.strip() for item in value if _nonempty_str(item)]
+    if _nonempty_str(value):
+        return [part.strip() for part in value.split(",") if part.strip()]
+    return []
+
+
+def _check_qa_no_mutating_tools(art) -> list[Finding]:
+    """L33: a QA-named command/agent must not allowlist mutating tools.
+
+    Black-box QA is read-only by contract (FR-7/FR-12): a command or agent whose
+    name matches ``(^|-)qa(-|$)`` (e.g. ``sdlc-qa``, ``qa-manual-tester``) must
+    not include Write/Edit in its tool allowlist — the command ``allowed-tools``
+    array or the agent ``tools`` list/comma-string — regardless of body prose.
+    """
+    if not _QA_NAME_RE.search(art.name):
+        return []
+    key = "allowed-tools" if art.kind == "command" else "tools"
+    tools = _tool_names(art.frontmatter.get(key))
+    mutating = [t for t in tools if t in MUTATING_TOOLS]
+    if not mutating:
+        return []
+    return [
+        Finding(
+            check="L33",
+            rule="frontmatter.qa.no-mutating-tools",
+            severity="S2",
+            path=art.rel,
+            message=(
+                f"QA {art.kind} '{art.name}' must be read-only: "
+                f"{key} must not include mutating tools: {', '.join(mutating)}"
+            ),
+        )
+    ]
+
+
 def _check_meta_guide(art) -> list[Finding]:
     """L5: meta-guides carry no frontmatter (ADR-11)."""
     if not art.has_frontmatter:
@@ -228,5 +276,9 @@ def check(plugin_root: pathlib.Path) -> list[Finding]:
         handler = _KIND_CHECKS.get(art.kind)
         if handler is not None:
             findings.extend(handler(art))
+
+        # L33 spans commands and agents: a QA-named artifact must be read-only.
+        if art.kind in ("command", "agent"):
+            findings.extend(_check_qa_no_mutating_tools(art))
 
     return findings

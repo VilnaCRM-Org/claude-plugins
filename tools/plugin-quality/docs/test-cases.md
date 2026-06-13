@@ -40,6 +40,13 @@ specific message), **E** edge (boundary that must be classified correctly).
 - N: a `skills/FOO.md` starting with `---` → fail "meta-guide must not have frontmatter (ADR-11)"
 - E: `skills/<dir>/SKILL.md` is NOT a meta-guide (in a subdir) → not checked by this rule
 
+**FM-6 (L33) qa command/agent must not allow mutating tools** (FR-7/FR-12)
+- P: `commands/sdlc-qa.md` with `allowed-tools: ["Bash","Read"]` → no finding
+- P: `agents/qa-manual-tester.md` with `tools: Bash, Read` → no finding
+- N: a qa-named agent (`name` matches `(^|-)qa(-|$)`) whose `tools` include `Write` → fail "qa … must not allow mutating tools" (regardless of body phrasing)
+- N: a qa command whose `allowed-tools` include `Edit` → fail
+- E: a non-qa command listing `Write` → not flagged by L33 (only the body-phrasing rule L2 applies)
+
 ## Tier 1 — naming
 
 **NM-1 (L6) agent name==stem==H1**
@@ -80,7 +87,7 @@ specific message), **E** edge (boundary that must be classified correctly).
 **ST-1 (L15) command 5-spine** — P: all five H2 present · N: missing `## Loop & exit condition` → fail · E: extra H2s (report template) → PASS
 **ST-2 (L16) agent 8-spine** — P: all eight · N: missing `## Smoke prompt` → fail · E: order differs (fr-nfr-reviewer Role-first) → PASS (presence not order)
 **ST-3 (L17) skill first H2 profile-keys** — P: first H2 `## Profile keys consumed` · N: first H2 `## Overview` → fail · E: meta-guides excluded
-**ST-4 (L18) gated skill SKIPPED token** — P: `## Capability gate` + `SKIPPED: capabilities.x is false` · N: gate section, no SKIPPED token → fail · E: non-gated skill (no gate section) → not checked
+**ST-4 (L18) gated skill skip path** — P (literal token): `## Capability gate` + `SKIPPED: capabilities.x is false` · P (prose note tied to a predicate): gate section that says "skip when `capabilities.load_testing` is false" → PASS · N: gate section that documents NO skip path — neither a `SKIPPED:` token nor a prose skip-note tied to a `capabilities.`/`framework.`/`persistence.` predicate → fail · E: non-gated skill (no gate section) → not checked
 
 ## Tier 1 — references
 
@@ -101,6 +108,10 @@ specific message), **E** edge (boundary that must be classified correctly).
 
 **GN-1 (L28) denylist** — P: clean skill · N: skill body containing `MongoUserRepository` → fail · N: `user-service` in prose → fail · E: `user-service` inside a ```bash # profile-example fence → PASS (stripped); README/marketplace `VilnaCRM` org link → exempt path
 **GN-2 (L29) tree hygiene** — P: no such dirs · N: a `plugins/x/_bmad/` dir → fail · E: `_bmad` substring inside a filename (not a dir) → not flagged
+
+## Tier 1 — meta-guides
+
+**MG-1 (L30) decision-guide triage clause** (FR-16) — P: a `skills/*DECISION*.md` meta-guide whose body contains the BMAD "no silent skips / every skill verdict recorded" triage clause → no finding · N: a `skills/MY-DECISION-GUIDE.md` lacking the clause → fail "decision guide must state the … triage clause" · E: a non-decision meta-guide (`AI-AGENT-GUIDE.md`) → not checked by this rule
 
 ## Tier 2 — manifest
 

@@ -126,9 +126,12 @@ def check(plugin_root: pathlib.Path) -> list[Finding]:
                 )
             )
 
-    # M2: version must be semver (prerelease suffix allowed).
+    # M2: version must be semver (prerelease suffix allowed). Only run when a
+    # non-empty version string is present: an absent/empty version is already
+    # reported by M1 above, so checking it here too would double-count one root
+    # cause. A present-but-malformed version (e.g. "0.1") is M2's concern.
     version = data.get("version")
-    if not isinstance(version, str) or not SEMVER_RE.match(version):
+    if isinstance(version, str) and version.strip() and not SEMVER_RE.match(version):
         findings.append(
             Finding(
                 check="M2",
@@ -203,14 +206,19 @@ def _check_market_entry(entry, index: int, rel: str, repo_root: pathlib.Path) ->
             _market_finding(rel, f"marketplace.json plugins[{index}] missing or empty name")
         )
 
-    expected = f"./plugins/{name}" if isinstance(name, str) else None
-    if expected is None or source != expected:
-        findings.append(
-            _market_finding(
-                rel,
-                f"marketplace entry {label!r} source {source!r} != {expected!r}",
+    # source-vs-expected only when a non-empty name exists: without a name the
+    # expected path is undefined ("./plugins/None"), and the missing/empty name
+    # is already reported above — emitting a spurious "source mismatch" here too
+    # would double-count one root cause.
+    if isinstance(name, str) and name.strip():
+        expected = f"./plugins/{name.strip()}"
+        if source != expected:
+            findings.append(
+                _market_finding(
+                    rel,
+                    f"marketplace entry {label!r} source {source!r} != {expected!r}",
+                )
             )
-        )
 
     # The referenced dir must exist (resolve against repo root).
     if isinstance(source, str) and source:

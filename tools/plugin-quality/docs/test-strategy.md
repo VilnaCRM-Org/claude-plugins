@@ -52,7 +52,7 @@ runtime, reproducible. These are the **blocking** gate. Categories:
 | --- | --- | --- |
 | `frontmatter` | arch §2/§3/§4, plugin docs | command missing `description`/`argument-hint`; agent missing `name`/`description`/`tools`/`model`; SKILL.md missing `name`/`description`; meta-guide that wrongly carries frontmatter (ADR-11) |
 | `naming` | arch §6, ADR-11 | agent `name` ≠ filename stem ≠ H1; skill `name` ≠ directory name; `model` outside `{sonnet,opus,haiku,fable,inherit}`; `argument-hint` not a single `[...]` group |
-| `descriptions` | plugin docs (1536-char cap), FR-15 | description over the cap; skill/agent description with no trigger clause ("Use when"/"Delegate"/"Proactively") |
+| `descriptions` | plugin docs (1536-char cap), FR-15 | description over the cap; skill/agent description with no trigger clause ("Use when"/"Delegate"/"Use this agent"/"Proactively") |
 | `structure` | arch §2/§3, epics E5/E6 | command missing one of the 5-section spine; agent missing one of the 8-section spine; skill missing `## Profile keys consumed` as first H2 |
 | `references` | arch §4/§5, readiness F-class | dead `${CLAUDE_PLUGIN_ROOT}/scripts/<x>.sh`; dead `../<skill>/SKILL.md` link; `/sdlc-*` with no `commands/*.md`; backticked agent name with no `agents/*.md`; "X skill" with no `skills/X/` dir; profile key not in `docs/profile-schema.md` |
 | `escalation` | arch §2, NFR-6 | command `## Iteration guard` / agent `## Iteration discipline` missing `MAX_ITERATIONS=5`; `=== SDLC ESCALATION ===` block missing a canonical field |

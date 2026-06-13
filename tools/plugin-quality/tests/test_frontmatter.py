@@ -128,6 +128,18 @@ class TestFM2(FrontmatterTestBase):
         self.write_command("noat", '---\ndescription: "Run X"\nargument-hint: "[x]"\n---\nbody\n')
         self.assert_no_findings(self.run_check())
 
+    # --- regression (7a): unknown-tool branch of L2 ------------------------
+    def test_negative_unknown_tool_flagged(self):
+        # 7a: an allowed-tools array carrying a tool not in KNOWN_TOOLS
+        # ("FooBar") -> L2 frontmatter.command.allowed-tools "unknown tool".
+        self.write_command(
+            "unknown",
+            '---\ndescription: "Run X"\nargument-hint: "[x]"\nallowed-tools: ["Bash","FooBar"]\n---\nbody\n',
+        )
+        self.assert_finding(
+            self.run_check(), "L2", "frontmatter.command.allowed-tools", "unknown tool"
+        )
+
 
 # --- FM-3 (L3) agent four keys ---------------------------------------------
 class TestFM3(FrontmatterTestBase):
@@ -240,6 +252,85 @@ class TestParseError(FrontmatterTestBase):
         # Unterminated frontmatter block -> _model reports an error.
         self.write_command("broken", "---\ndescription: oops\n")
         self.assert_finding(self.run_check(), "L0", "frontmatter.parse-error", "failed to parse")
+
+    # --- regression (7b): L0 parse-error variants --------------------------
+    def test_invalid_yaml_in_block_surfaced(self):
+        # 7b(i): a terminated block with invalid YAML (unbalanced bracket) ->
+        # L0 frontmatter.parse-error.
+        self.write_command("badyaml", "---\nkey: [unbalanced\n---\nbody\n")
+        self.assert_finding(self.run_check(), "L0", "frontmatter.parse-error", "failed to parse")
+
+    def test_frontmatter_not_a_mapping_surfaced(self):
+        # 7b(ii): frontmatter that parses to a YAML sequence (not a mapping) ->
+        # L0 frontmatter.parse-error.
+        self.write_command("seqfm", "---\n- a\n- b\n---\nbody\n")
+        self.assert_finding(self.run_check(), "L0", "frontmatter.parse-error", "failed to parse")
+
+
+# --- L33 QA artifacts must be read-only (Fix 6) ----------------------------
+class TestQANoMutatingTools(FrontmatterTestBase):
+    def test_qa_agent_with_write_flagged(self):
+        # Fix 6: a qa-named agent whose tools include Write -> L33.
+        self.write_agent(
+            "qa-manual-tester",
+            "---\nname: qa-manual-tester\ndescription: QA agent.\n"
+            "tools: Bash, Read, Write\nmodel: sonnet\n---\nbody\n",
+        )
+        self.assert_finding(
+            self.run_check(), "L33", "frontmatter.qa.no-mutating-tools", "Write"
+        )
+
+    def test_qa_agent_read_only_passes(self):
+        # Control: a qa agent with tools Bash, Read has no L33 finding.
+        self.write_agent(
+            "qa-manual-tester",
+            "---\nname: qa-manual-tester\ndescription: QA agent.\n"
+            "tools: Bash, Read\nmodel: sonnet\n---\nbody\n",
+        )
+        l33 = [f for f in self.run_check() if f.check == "L33"]
+        self.assertEqual(l33, [])
+
+    def test_qa_command_read_only_passes(self):
+        # Fix 6: a qa command with allowed-tools ["Bash","Read"] -> no L33.
+        self.write_command(
+            "sdlc-qa",
+            '---\ndescription: "QA"\nargument-hint: "[x]"\n'
+            'allowed-tools: ["Bash","Read"]\n---\nbody\n',
+        )
+        l33 = [f for f in self.run_check() if f.check == "L33"]
+        self.assertEqual(l33, [])
+
+    def test_qa_command_with_edit_flagged(self):
+        # Fix 6: a qa command whose allowed-tools include Edit -> L33.
+        self.write_command(
+            "sdlc-qa",
+            '---\ndescription: "QA"\nargument-hint: "[x]"\n'
+            'allowed-tools: ["Bash","Edit"]\n---\nbody\n',
+        )
+        self.assert_finding(
+            self.run_check(), "L33", "frontmatter.qa.no-mutating-tools", "Edit"
+        )
+
+    def test_non_qa_command_with_write_not_flagged_by_l33(self):
+        # Fix 6: a non-qa command with Write is NOT an L33 concern (the name
+        # gate excludes it; report-only L2 may still apply to other commands).
+        self.write_command(
+            "sdlc-implement",
+            '---\ndescription: "Implement"\nargument-hint: "[x]"\n'
+            'allowed-tools: ["Bash","Write"]\n---\nbody\n',
+        )
+        l33 = [f for f in self.run_check() if f.check == "L33"]
+        self.assertEqual(l33, [])
+
+    def test_qa_name_token_not_substring_match(self):
+        # Fix 6: "qa" must be a dash-delimited token; "squash" is not a qa name.
+        self.write_command(
+            "squash-helper",
+            '---\ndescription: "Squash"\nargument-hint: "[x]"\n'
+            'allowed-tools: ["Bash","Write"]\n---\nbody\n',
+        )
+        l33 = [f for f in self.run_check() if f.check == "L33"]
+        self.assertEqual(l33, [])
 
 
 if __name__ == "__main__":

@@ -137,6 +137,33 @@ class EscalationCase(unittest.TestCase):
         self.assertIn("recommended_action", fs[0].message)
         self.assertIsNotNone(fs[0].line)
 
+    def test_es2_each_missing_field_fires_one_l27(self):
+        # 7c: for EACH of the 7 canonical fields, build a block missing exactly
+        # that field (one field per line, so the others stay intact) and assert
+        # exactly one L27 finding naming it.
+        for missing in check_escalation.REQUIRED_FIELDS:
+            with self.subTest(field=missing):
+                field_lines = [
+                    f"{field}: <value>"
+                    for field in check_escalation.REQUIRED_FIELDS
+                    if field != missing
+                ]
+                block = "\n".join(
+                    ["```text", "=== SDLC ESCALATION ==="]
+                    + field_lines
+                    + ["=== END ===", "```"]
+                )
+                self._write_command(
+                    "c", _command_md("`MAX_ITERATIONS=5`.", block)
+                )
+                fs = self._findings("L27")
+                self.assertEqual(
+                    len(fs), 1, f"expected 1 L27 for missing {missing}, got {len(fs)}"
+                )
+                self.assertEqual(fs[0].rule, "escalation.block-fields")
+                self.assertEqual(fs[0].severity, "S2")
+                self.assertIn(missing, fs[0].message)
+
     def test_es2_run_report_banner_exempt(self):
         # RUN REPORT block lacks the seven fields but is exempt; the command
         # still needs an iteration bound for L26 to stay clean.
@@ -266,6 +293,45 @@ class EscalationCase(unittest.TestCase):
         )
         self._write_command("c", text)
         self.assertEqual(self._findings("L26"), [])
+
+    # --- regression: ATX-H1 above '---' is not a setext H2 (Fix 1) --------
+
+    def test_es1_atx_h1_above_rule_not_treated_as_setext_title(self):
+        # Fix 1: an ATX H1 ("# /cmd") immediately followed by a '---' horizontal
+        # rule must NOT be read as a setext H2 titled "/cmd". If it were, the
+        # bogus "/cmd" H2 would split the stream and the real "## Iteration
+        # guard" section (carrying the correct MAX_ITERATIONS=5) could be
+        # mis-sliced. With the H1 guard the guard section is located intact and
+        # L26 stays clean.
+        fm = '---\ndescription: "x"\nargument-hint: "[a]"\n---\n'
+        text = (
+            f"{fm}\n# /cmd\n"
+            "---\n\n"
+            "Intro paragraph.\n\n"
+            "## Iteration guard\n\n"
+            "Keep a counter, `MAX_ITERATIONS=5`.\n\n"
+            f"## Failure escalation\n\n{FULL_BLOCK}\n"
+        )
+        self._write_command("c", text)
+        self.assertEqual(self._findings("L26"), [])
+
+    def test_es1_atx_h1_above_rule_inside_guard_does_not_mask_bound(self):
+        # Fix 1 control: with the H1 guard, an ATX H1 + '---' sitting INSIDE the
+        # guard section does not prematurely end it; a missing bound there is
+        # still seen and L26 fires (no false negative from the H1/rule pair).
+        fm = '---\ndescription: "x"\nargument-hint: "[a]"\n---\n'
+        text = (
+            f"{fm}\n# /cmd\n\n"
+            "## Iteration guard\n\n"
+            "# Guard heading\n"
+            "---\n\n"
+            "State a counter but give no number here.\n\n"
+            f"## Failure escalation\n\n{FULL_BLOCK}\n"
+        )
+        self._write_command("c", text)
+        fs = self._findings("L26")
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].rule, "escalation.max-iterations")
 
     # --- real shipped plugin is clean for L26-L27 -------------------------
 

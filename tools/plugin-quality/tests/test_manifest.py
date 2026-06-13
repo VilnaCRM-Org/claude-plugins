@@ -170,6 +170,28 @@ class ManifestCase(unittest.TestCase):
         root = self._write_plugin("acme", m)
         self.assertEqual(self._plugin_findings(root, "M2"), [])
 
+    def test_mf2_absent_version_is_only_m1_not_m2(self):
+        # Fix 3: a manifest with NO version is one root cause -> exactly ONE
+        # finding (M1 missing-field), never an additional M2 semver finding.
+        m = _full_plugin_manifest("acme")
+        del m["version"]
+        root = self._write_plugin("acme", m)
+        fs = self._plugin_findings(root)
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].check, "M1")
+        self.assertIn("version", fs[0].message)
+        self.assertEqual(self._plugin_findings(root, "M2"), [])
+
+    def test_mf2_empty_version_is_only_m1_not_m2(self):
+        # Fix 3: an empty version string is likewise M1-only (no double finding).
+        m = _full_plugin_manifest("acme")
+        m["version"] = "   "
+        root = self._write_plugin("acme", m)
+        fs = self._plugin_findings(root)
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].check, "M1")
+        self.assertEqual(self._plugin_findings(root, "M2"), [])
+
     # --- MF-3 (M3) name == dir -------------------------------------------
 
     def test_mf3_name_matches_dir_passes(self):
@@ -222,6 +244,21 @@ class ManifestCase(unittest.TestCase):
         self._write_marketplace(m)
         fs = self._market_findings("M4")
         self.assertTrue(any("owner.name" in f.message for f in fs))
+
+    def test_mf4_entry_no_name_is_only_name_finding(self):
+        # Fix 4: an entry with no name yields the missing-name finding ONLY, not
+        # also a spurious "source mismatch" against the undefined
+        # "./plugins/None" expectation. The source points at a real dir so the
+        # dir-exists check stays clean and the name finding is isolated.
+        self._make_plugin_dir("acme")
+        m = _full_marketplace(("acme",))
+        del m["plugins"][0]["name"]
+        m["plugins"][0]["source"] = "./plugins/acme"
+        self._write_marketplace(m)
+        fs = self._market_findings("M4")
+        self.assertEqual(len(fs), 1)
+        self.assertIn("missing or empty name", fs[0].message)
+        self.assertFalse(any("!=" in f.message for f in fs))
 
     def test_mf4_empty_plugins_fails(self):
         m = _full_marketplace(())

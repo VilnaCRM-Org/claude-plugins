@@ -27,7 +27,7 @@ never blocking).
 | L10 | Command/agent/skill names are kebab-case `[a-z0-9-]+` | naming | plugin docs | BLOCK | NM-5 |
 | L11 | description (skill+`when_to_use`) ≤ 1536 chars | descriptions | plugin docs (cap) | BLOCK | DS-1 |
 | L12 | Skill description has a trigger clause ("Use when"/"When to use") | descriptions | FR-15; plugin docs | BLOCK | DS-2 |
-| L13 | Agent description has a delegation trigger ("Delegate"/"Use when"/"Proactively") | descriptions | arch §3; plugin docs | BLOCK | DS-3 |
+| L13 | Agent description has a delegation trigger ("Delegate"/"Use when"/"Use this agent"/"Proactively") | descriptions | arch §3; plugin docs | BLOCK | DS-3 |
 | L14 | description not empty / ≥ 20 chars | descriptions | plugin docs | BLOCK | DS-4 |
 | L15 | Command 5-section spine present (Inputs/Procedure/Loop & exit condition/Iteration guard/Failure escalation) | structure | arch §2; epics E6 | BLOCK | ST-1 |
 | L16 | Agent 8-section spine present (Profile keys consumed/Role/Inputs/Outputs/Allowed actions/Degrade paths/Iteration discipline/Smoke prompt) | structure | arch §3; epics E5 | BLOCK | ST-2 |
@@ -44,6 +44,8 @@ never blocking).
 | L27 | `=== SDLC ESCALATION ===` block carries all canonical fields (stage/iteration/exit_condition/status/blocking_finding/iteration_log/recommended_action); orchestrator `=== SDLC RUN REPORT ===` exempt | escalation | arch §2 | BLOCK | ES-2 |
 | L28 | NFR-2 denylist over skills/commands/agents/scripts with `# profile-example` fences stripped | generalization | NFR-2; ci.yml generalization-audit | BLOCK | GN-1 |
 | L29 | NFR-7 tree hygiene: no `_bmad/`/`.ralph/` inside plugin tree | generalization | NFR-7; ADR-10 | BLOCK | GN-2 |
+| L30 | Meta-guide whose filename contains `DECISION` carries the BMAD triage clause ("no silent skips / every skill verdict recorded") — rule `metaguide.decision-guide.triage` (S3) | check_metaguides | FR-16 | BLOCK | MG-1 |
+| L33 | A `qa`-named command/agent must not list `Write`/`Edit` in its tool allowlist, regardless of body phrasing — rule `frontmatter.qa.no-mutating-tools` (S2), name-targeted, body-independent | frontmatter | FR-7; FR-12 | BLOCK | FM-6 |
 
 ## Tier 2 — Manifest validation
 
@@ -68,7 +70,7 @@ block_floor (hard-block threshold) is 2 for crit dimensions.
 | J1 | Trigger specificity — would the router fire on the right tasks and not adjacent ones | skill, agent | skill / agent | FR-15; arch §3/§4 | crit | JD-1 |
 | J2 | Body↔description fidelity — body delivers what description promises, no over/under-claim or self-contradiction | skill, agent, command | all | FR-15 | crit | JD-2 |
 | J3 | Degrade-path soundness — described path terminates, never loops/hard-fails, matches §8 matrix | agent, command, skill | all | NFR-4; arch §8 | crit | JD-3 |
-| J4 | Exit-condition fidelity — command exit condition semantically equals FR-1 stage-table row | command | command | FR-1 | advisory | JD-4 |
+| J4 | Exit-condition consistency (internal: the command states its exit condition consistently across its own sections; the judge is never given the FR-1 stage table, so it cannot and does not verify fidelity to it) | command | command | FR-1 | advisory | JD-4 |
 | J5 | Loop/escalation soundness — prose loop logic actually bounds iterations, restates counter, never auto-resets breaker | command, agent | command/agent | NFR-6 | advisory | JD-5 |
 | J6 | Profile-key branching completeness — body branches on every key it lists; both conditional branches present | skill | skill | FR-15 | advisory | JD-6 |
 | J7 | Semantic generalization — paraphrased/structural user-service leakage the denylist misses | generalization | all | NFR-2 | crit | JD-7 |
@@ -83,7 +85,7 @@ block_floor (hard-block threshold) is 2 for crit dimensions.
 | --- | --- | --- | --- |
 | `prompt-lint` | T1 + T2 (M1–M4) | always (no network) | BLOCK |
 | `lint-selftest` | T1/T3-engine unittest | always (no network) | BLOCK |
-| `plugin-validate-cli` | T2 (M5) | when `claude` installable + creds | BLOCK if it runs, else skip-with-message |
+| `plugin-validate-cli` | T2 (M5) | when `claude` is installable (auth-gating detected from validate output -> skip-with-message) | BLOCK if it runs, else skip-with-message |
 | `prompt-judge` | T3 | when Anthropic creds present | BLOCK* (crit floor) / ADVISORY summary |
 
 There is no separate `manifest-validate-py` job: M1–M4 (the Python manifest
@@ -94,12 +96,12 @@ checks) run *inside* `prompt-lint`, because `lint_all.py` invokes
 
 | Requirement | Covered by |
 | --- | --- |
-| FR-1 orchestrator exit conditions | RF-4, ES-1/2, JD-4/5 |
+| FR-1 orchestrator exit conditions | RF-4 (command refs resolve) + ES-1/2 (iteration guard + escalation block) + JD-5 (loop soundness) + J4 (internal exit-condition consistency, advisory). NOTE: no check verifies fidelity to the authoritative FR-1 stage-table row — the judge is never given that table, so J4 only checks that the command states its exit condition consistently within its own sections. |
 | FR-6 review triage / thresholds | ST-1 (generic command spine), JD-3 (degrade-path soundness) — these are all that is statically/judge-checkable here. The 21/21 skill-applicability triage with no silent skips is a *runtime-evidence* concern (it depends on observed per-run behavior), NOT statically checkable, so it is intentionally NOT pinned by any check in this layer. |
-| FR-7/FR-12 QA black-box | L2, JD-9 |
+| FR-7/FR-12 QA black-box | L2, L33, JD-9 — L2 fires only on body phrasing; L33 enforces qa read-only tools structurally (name-targeted, body-independent: a qa-named command/agent must not list Write/Edit in its allowlist); JD-9 judges black-box discipline |
 | FR-9..14 agent contracts | L3, L6, ST-2, RF-5, JD-1/2/3 |
 | FR-15 generalized 21 skills | L4, L7, L12, ST-3, RF-6, JD-1/2/6, GN-1, JD-7 |
-| FR-16 meta-guides | L5, JD-10 |
+| FR-16 meta-guides | L5, L30, JD-10 — L30 pins the verbatim BMAD triage clause ("no silent skips / every skill verdict recorded") in any DECISION-named meta-guide |
 | FR-17 profile schema | RF-7 |
 | FR-18 shipped scripts | RF-1 |
 | FR-19 manifest | MF-1..5 |

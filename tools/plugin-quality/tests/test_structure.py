@@ -368,6 +368,30 @@ class StructureCase(unittest.TestCase):
         self.assertIsNotNone(bad[0].frontmatter_error)
         self.assertIn("UTF-8", bad[0].frontmatter_error)
 
+    # --- regression: ATX-H1 above '---' is not a setext H2 (Fix 2) --------
+
+    def test_st4_atx_h1_above_rule_in_gate_section_not_split(self):
+        # Fix 2: an ATX H1 ("# Note") immediately above a '---' inside the gate
+        # section must NOT be read as a setext H2 by _section_text. Under the bug
+        # the bogus "Note" H2 ended the gate section early, dropping its
+        # `SKIPPED:` token so L18 fired a false positive. With the H1 guard the
+        # whole gate section (token included) is sliced and L18 stays clean.
+        body = (
+            "\n\n# Note\n"
+            "---\n\n"
+            "When off emit `SKIPPED: capabilities.x is false` and stop.\n"
+        )
+        self._write_skill(
+            "s", _skill_md(("Profile keys consumed", "Capability gate"), body)
+        )
+        self.assertEqual(self._findings("L18"), [])
+
+    def test_h2_title_at_skips_atx_h1_above_rule(self):
+        # Fix 2 (unit): _h2_title_at must return None for the '---' line below an
+        # ATX H1, i.e. it does not synthesize a setext H2 from the H1 text.
+        lines = [(t, False) for t in ("# Heading", "---")]
+        self.assertIsNone(check_structure._h2_title_at(1, lines))
+
     # --- real shipped plugin is clean for L15-L18 -------------------------
 
     def test_real_plugin_clean_for_structure(self):

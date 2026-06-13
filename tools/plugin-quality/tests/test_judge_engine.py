@@ -1039,5 +1039,236 @@ class TestF6EAggregateCacheRevalidation(unittest.TestCase):
         self.assertFalse(res.cached)
 
 
+# ===========================================================================
+# Round-2 review fix regression tests
+# ===========================================================================
+
+
+# ---- R2-1: votes>1 cached aggregate must carry non-empty evidence ----------
+class TestR2AggregateCacheEvidence(unittest.TestCase):
+    def setUp(self):
+        self.dims = rubrics.applicable_dimensions("skill", "foo")
+        self._tmp = tempfile.TemporaryDirectory()
+        self._cache_patch = mock.patch.object(
+            cache, "CACHE_DIR", pathlib.Path(self._tmp.name)
+        )
+        self._cache_patch.start()
+
+    def tearDown(self):
+        self._cache_patch.stop()
+        self._tmp.cleanup()
+
+    def _seed(self, verdict):
+        art = make_skill()
+        ab = art.raw.encode("utf-8")
+        cm = f"sonnet|votes=3|rubric={rubrics.guidance_fingerprint()}"
+        dim_ids = [d.id for d in self.dims]
+        cache.put(ab, cm, dim_ids, verdict)
+        return art
+
+    def test_aggregate_cache_empty_evidence_rejudges(self):
+        # votes>1 aggregate, score is valid but evidence is "" -> MISS (re-judge).
+        agg = {"dimensions": {d.id: {"score": 4, "evidence": ""} for d in self.dims}, "votes": 3}
+        art = self._seed(agg)
+        with _StubClaude([json.dumps(verdict_for(self.dims, 4))] * 3) as m:
+            res = judge.judge_artifact(
+                art, judge.JudgeOptions(model="sonnet", use_cache=True, votes=3)
+            )
+        self.assertTrue(m.called, "empty-evidence aggregate must trigger a re-judge")
+        self.assertFalse(res.cached)
+
+    def test_aggregate_cache_missing_evidence_rejudges(self):
+        # votes>1 aggregate where the evidence key is entirely absent -> MISS.
+        agg = {"dimensions": {d.id: {"score": 4} for d in self.dims}, "votes": 3}
+        art = self._seed(agg)
+        with _StubClaude([json.dumps(verdict_for(self.dims, 4))] * 3) as m:
+            res = judge.judge_artifact(
+                art, judge.JudgeOptions(model="sonnet", use_cache=True, votes=3)
+            )
+        self.assertTrue(m.called, "missing-evidence aggregate must trigger a re-judge")
+        self.assertFalse(res.cached)
+
+    def test_aggregate_cache_with_evidence_is_served(self):
+        # A well-formed aggregate (score + non-empty evidence) is served as a hit.
+        agg = {"dimensions": {d.id: {"score": 5, "evidence": "good"} for d in self.dims}, "votes": 3}
+        art = self._seed(agg)
+        with _StubClaude("SHOULD NOT BE CALLED") as m:
+            res = judge.judge_artifact(
+                art, judge.JudgeOptions(model="sonnet", use_cache=True, votes=3)
+            )
+        self.assertFalse(m.called, "valid aggregate hit must not call claude")
+        self.assertTrue(res.cached)
+
+
+# ---- R2-2: JUDGE_TIMEOUT parsing never crashes import ----------------------
+class TestR2EnvTimeout(unittest.TestCase):
+    def test_unset_returns_default(self):
+        with mock.patch.dict(judge.os.environ, {}, clear=True):
+            self.assertEqual(judge._env_timeout(180), 180)
+
+    def test_valid_integer_used(self):
+        with mock.patch.dict(judge.os.environ, {"JUDGE_TIMEOUT": "42"}, clear=True):
+            self.assertEqual(judge._env_timeout(180), 42)
+
+    def test_non_integer_falls_back_to_default(self):
+        for bad in ("fast", "", "12x", "1.5"):
+            with mock.patch.dict(judge.os.environ, {"JUDGE_TIMEOUT": bad}, clear=True):
+                with mock.patch.object(judge.sys, "stderr", new_callable=io.StringIO) as err:
+                    self.assertEqual(judge._env_timeout(180), 180)
+                self.assertIn("JUDGE_TIMEOUT", err.getvalue())
+
+    def test_non_positive_falls_back_to_default(self):
+        for bad in ("0", "-5"):
+            with mock.patch.dict(judge.os.environ, {"JUDGE_TIMEOUT": bad}, clear=True):
+                with mock.patch.object(judge.sys, "stderr", new_callable=io.StringIO):
+                    self.assertEqual(judge._env_timeout(180), 180)
+
+    def test_import_survives_bad_env(self):
+        # Re-importing judge with a bad JUDGE_TIMEOUT must not raise ValueError.
+        # Done in a clean subprocess so the live `judge` module the rest of the
+        # suite shares is never reloaded out from under it.
+        import subprocess
+
+        env = dict(judge.os.environ)
+        env["JUDGE_TIMEOUT"] = "fast"
+        judge_dir = str(pathlib.Path(judge.__file__).resolve().parent)
+        lint_dir = str(pathlib.Path(judge.__file__).resolve().parent.parent / "lint")
+        code = (
+            "import sys; sys.path[:0] = [%r, %r]; import judge; "
+            "assert judge.DEFAULT_TIMEOUT == 180, judge.DEFAULT_TIMEOUT; "
+            "print('OK')" % (judge_dir, lint_dir)
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, env=env
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("OK", proc.stdout)
+        self.assertIn("JUDGE_TIMEOUT", proc.stderr)  # the warning was emitted
+
+
+# ---- R2-3: Dimension.__post_init__ guards the score thresholds -------------
+class TestR2DimensionInvariants(unittest.TestCase):
+    def _dim(self, **kw):
+        base = dict(
+            id="JX", name="x", applies_to=("skill",), critical=True,
+            floor=4, guidance="g",
+        )
+        base.update(kw)
+        return rubrics.Dimension(**base)
+
+    def test_floor_above_5_rejected(self):
+        with self.assertRaises(ValueError):
+            self._dim(floor=6)
+
+    def test_block_floor_ge_floor_rejected(self):
+        with self.assertRaises(ValueError):
+            self._dim(floor=4, block_floor=4)
+        with self.assertRaises(ValueError):
+            self._dim(floor=4, block_floor=5)
+
+    def test_block_floor_below_1_rejected(self):
+        with self.assertRaises(ValueError):
+            self._dim(floor=4, block_floor=0)
+
+    def test_non_int_floor_rejected(self):
+        with self.assertRaises(ValueError):
+            self._dim(floor="4")
+
+    def test_valid_dimension_constructs(self):
+        d = self._dim(floor=4, block_floor=2)
+        self.assertEqual((d.floor, d.block_floor), (4, 2))
+
+    def test_all_shipped_dimensions_construct(self):
+        # The shipped registry already imported fine; re-assert each invariant.
+        for d in rubrics.DIMENSIONS:
+            self.assertTrue(1 <= d.block_floor < d.floor <= 5, d.id)
+
+
+# ---- R2-4: OSError from cache.put becomes a recorded error, not a crash ----
+class TestR2OSErrorRecorded(unittest.TestCase):
+    def setUp(self):
+        self._cli = judge.cli_available
+        self._judge = judge.judge_artifact
+        self._collect = run_judge._collect_artifacts
+        judge.cli_available = lambda: True
+
+    def tearDown(self):
+        judge.cli_available = self._cli
+        judge.judge_artifact = self._judge
+        run_judge._collect_artifacts = self._collect
+
+    def test_oserror_under_gate_fails_run(self):
+        art = make_skill()
+        run_judge._collect_artifacts = lambda paths: [art]
+
+        def boom(a, options=None):
+            raise OSError("disk full")  # mimics cache.put failing in _generate_verdict
+
+        judge.judge_artifact = boom
+        rc = run_judge.main(["--gate", "x"])
+        self.assertEqual(rc, 1, "an OSError under --gate must fail, not crash")
+
+    def test_oserror_without_gate_run_continues(self):
+        good = make_skill(name="good")
+        bad = make_skill(name="bad")
+        run_judge._collect_artifacts = lambda paths: [bad, good]
+        dims = rubrics.applicable_dimensions("skill", "good")
+
+        def selective(a, options=None):
+            if a.name == "bad":
+                raise OSError("disk full")
+            return judge.JudgeResult(a.rel, a.kind, a.name, "sonnet", False, [], {})
+
+        judge.judge_artifact = selective
+        # No --gate: the run records the error but still returns 0 (continues).
+        with mock.patch.object(run_judge.sys, "stderr", new_callable=io.StringIO) as err:
+            rc = run_judge.main(["x"])
+        self.assertEqual(rc, 0, "without --gate one OSError must not fail the run")
+        self.assertIn("ERROR judging", err.getvalue())
+
+    def test_oserror_is_in_judge_exc_tuple(self):
+        self.assertIn(OSError, run_judge._JUDGE_EXC)
+
+
+# ---- R2-5: J4 redefined to internal exit-condition consistency ------------
+class TestR2J4Consistency(unittest.TestCase):
+    def test_j4_id_and_kind_unchanged(self):
+        j4 = rubrics.DIMENSIONS_BY_ID["J4"]
+        self.assertEqual(j4.id, "J4")
+        self.assertEqual(j4.applies_to, ("command",))
+        self.assertFalse(j4.critical, "J4 stays advisory/non-critical")
+
+    def test_j4_name_reflects_consistency(self):
+        j4 = rubrics.DIMENSIONS_BY_ID["J4"]
+        self.assertEqual(j4.name, "exit-condition-consistency")
+
+    def test_j4_guidance_is_internal_not_stage_table(self):
+        g = rubrics.DIMENSIONS_BY_ID["J4"].guidance.lower()
+        self.assertIn("consisten", g)
+        self.assertIn("internal", g)
+        # The old wording REQUIRED matching an external FR-1 stage-table row.
+        # The redefinition must not demand a faithful paraphrase of that row.
+        self.assertNotIn("faithful paraphrase", g)
+        self.assertNotIn("stage-table row", g)
+        # If "stage table" is mentioned at all it must be to DISCLAIM it.
+        if "stage table" in g:
+            self.assertIn("do not require an external stage table", g)
+
+
+# ---- R2-7: explicit file outside any plugin tree warns + returns empty -----
+class TestR2FileOutsidePluginTree(unittest.TestCase):
+    def test_file_with_no_plugin_ancestor_warns(self):
+        with tempfile.TemporaryDirectory() as td:
+            # A real .md file with NO .claude-plugin ancestor anywhere above it.
+            loose = pathlib.Path(td) / "loose-note.md"
+            loose.write_text("---\nname: x\ndescription: y. Use when z.\n---\nbody", encoding="utf-8")
+            with mock.patch("run_judge.sys.stderr", new_callable=io.StringIO) as err:
+                arts = run_judge._collect_artifacts([str(loose)])
+            self.assertEqual(arts, [], "file outside a plugin tree must not be judged")
+            stderr = err.getvalue()
+            self.assertIn("not inside a known plugin tree", stderr)
+            self.assertIn(str(loose.resolve()), stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

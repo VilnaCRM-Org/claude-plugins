@@ -65,6 +65,9 @@ SKIP_PREDICATE_RE = re.compile(
 
 # ATX H2 with optional trailing '#' run stripped (matches _model.H2_RE).
 _H2_RE = re.compile(r"^##\s+(.*?)\s*#*\s*$")
+# ATX H1 line (e.g. "# heading"). An ATX H1 directly above a '---' underline is
+# an H1 + horizontal rule, NOT a setext H2 — mirror _model.extract_headings.
+_H1_RE = re.compile(r"^#\s+")
 # Setext H2 underline: a line of two-or-more '-' (matches _model._SETEXT_H2_RE).
 _SETEXT_H2_RE = re.compile(r"^-{2,}\s*$")
 
@@ -85,7 +88,16 @@ def _h2_title_at(idx: int, lines: list[tuple[str, bool]]) -> str | None:
         return m.group(1).strip()
     if _SETEXT_H2_RE.match(text) and idx > 0:
         prev_text, prev_fenced = lines[idx - 1]
-        if not prev_fenced and prev_text.strip() and not _H2_RE.match(prev_text):
+        # An ATX H1 or H2 line preceding the '---' is its own heading (the '---'
+        # is then a horizontal rule), never a setext title — mirror
+        # _model.extract_headings, which never treats an ATX heading line as
+        # setext-prelude text.
+        if (
+            not prev_fenced
+            and prev_text.strip()
+            and not _H2_RE.match(prev_text)
+            and not _H1_RE.match(prev_text)
+        ):
             return prev_text.strip()
     return None
 

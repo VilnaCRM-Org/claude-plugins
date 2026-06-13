@@ -103,13 +103,20 @@ This component helps with caching things in the application.
 # ---------------------------------------------------------------------------
 _J2_GOOD = """---
 name: rate-limiter
-description: Add a token-bucket rate limit to an endpoint. Use when an endpoint must cap requests per client.
+description: Add a token-bucket rate limit to one HTTP endpoint, capping requests per client and returning HTTP 429 when the limit is exceeded. Use when an endpoint must throttle per-client request volume.
 ---
 # Rate limiter
 
-This component adds a token-bucket rate limit to the configured endpoint, capping
-requests per client exactly as the description promises. It refills the bucket on
-a timer and returns 429 when the bucket is empty.
+## What this does
+Adds a token-bucket rate limit to a single configured HTTP endpoint. It delivers exactly the three things the description promises and nothing more: (1) per-client capping, (2) the token-bucket algorithm, (3) an HTTP 429 response when the limit is exceeded.
+
+## Steps
+1. Identify each client (API key or IP) and keep one token bucket per client.
+2. On each request refill the bucket by `rate * elapsed` tokens (capped at the burst size), then attempt to remove one token.
+3. If a token is available, allow the request; otherwise return HTTP 429 with a `Retry-After` header.
+
+## Scope
+Single endpoint, single process. No distributed coordination, no shared state, no other endpoints — the body claims nothing the description does not, and the description promises nothing the body omits.
 """
 
 _J2_BAD = """---

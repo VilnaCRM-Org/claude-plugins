@@ -211,7 +211,10 @@ def _judge_one(a, args):
     return a, judge.judge_artifact(a, options)
 
 
-_JUDGE_EXC = (judge.JudgeError, judge.JudgeUnavailable, KeyError, ValueError, TypeError)
+# OSError is included so a cache.put failure (disk full / permissions) inside
+# _generate_verdict becomes a recorded per-artifact error, never a crash that
+# aborts the whole run.
+_JUDGE_EXC = (judge.JudgeError, judge.JudgeUnavailable, OSError, KeyError, ValueError, TypeError)
 
 
 def _judge_all(artifacts, args):

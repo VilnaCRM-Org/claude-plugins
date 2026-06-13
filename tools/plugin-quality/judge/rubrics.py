@@ -30,6 +30,19 @@ class Dimension:
     name_filter: str | None = None  # only score artifacts whose name contains this
     block_floor: int = 2  # CI hard-block: a *critical* dim blocks only at score <= block_floor
 
+    def __post_init__(self) -> None:
+        # Guard the score-threshold invariants up front so a malformed dimension
+        # fails loudly at construction rather than producing a nonsensical gate.
+        if not isinstance(self.floor, int) or isinstance(self.floor, bool):
+            raise ValueError(f"{self.id}: floor must be an int, got {self.floor!r}")
+        if not isinstance(self.block_floor, int) or isinstance(self.block_floor, bool):
+            raise ValueError(f"{self.id}: block_floor must be an int, got {self.block_floor!r}")
+        if not (1 <= self.block_floor < self.floor <= 5):
+            raise ValueError(
+                f"{self.id}: require 1 <= block_floor < floor <= 5, got "
+                f"block_floor={self.block_floor}, floor={self.floor}"
+            )
+
     def applies(self, kind: str, name: str) -> bool:
         if "all" not in self.applies_to and kind not in self.applies_to:
             return False
@@ -91,14 +104,17 @@ DIMENSIONS: tuple[Dimension, ...] = (
     ),
     Dimension(
         id="J4",
-        name="exit-condition-fidelity",
+        name="exit-condition-consistency",
         applies_to=("command",),
         critical=False,
         floor=4,
         guidance=(
-            "Is the command's single stated exit condition a faithful paraphrase of its FR row "
-            "in the orchestrator stage table (FR-1)? Penalize drift where the command promises a "
-            "different or weaker exit condition than the stage table implies."
+            "Is the command's single exit condition stated consistently and measurably across its "
+            "own sections (Procedure, Loop & exit condition, Iteration guard) and consistent with "
+            "the FR id named in its H1 — not vague, not contradicting itself between sections? "
+            "Penalize an exit condition that is phrased one way in one section and a materially "
+            "different way in another, or that is too vague to verify. Judge INTERNAL consistency "
+            "only; do not require an external stage table the artifact does not contain."
         ),
     ),
     Dimension(

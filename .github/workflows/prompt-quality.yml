@@ -65,7 +65,11 @@ jobs:
             rc=0
             out=$(claude plugin validate "$dir" --strict 2>&1) || rc=$?
             echo "$out"
-            if printf '%s' "$out" | grep -qiE 'not logged in|please run /login|requires authentication'; then
+            # Best-effort heuristic over the CLI's human-readable output: there is
+            # no structured auth-status flag, so we match common auth-gating
+            # phrasings. On a match we skip-with-message; any other non-zero
+            # exit is a real validation failure and fails the job.
+            if printf '%s' "$out" | grep -qiE 'not logged in|please run /login|requires authentication|not authenticated|unauthorized|login required|no credentials|ANTHROPIC_API_KEY'; then
               echo "SKIP: 'claude plugin validate' is auth-gated on this runner — relying on manifest-validate-py (lint_all)"
               continue
             fi
