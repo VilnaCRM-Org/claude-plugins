@@ -324,3 +324,131 @@ byte-stable, every symlink write/read target was refused or read-only,
 hostile value achieved YAML/key injection, prompt shell-escape, git-hook
 execution, threshold-ceiling wrap bypass, or a TOCTOU follow-the-symlink
 escape.
+
+## Round-4 (convergence — prove the thrice-fixed scripts hold)
+
+Convergence round against HEAD `ec27b82` (the thrice-fixed scripts). Goal:
+re-prove every round-1/2/3 fix HOLDS under a fresh hostile battery and
+hunt any genuine remaining defect — ruthlessly, but reporting a clean
+surface clean rather than manufacturing marginal findings. Every repro was
+EXECUTED for real (no commit-message trust). Environment identical to
+prior rounds: `yq` absent → python3 + PyYAML backend exercised
+(`SDLC_FORCE_PYTHON_YAML=1`), `jq` present, stub `gh`/`claude`/`bmalph` on
+a prepended PATH, out-of-repo canary/sentinel/secret dir
+`/tmp/sdlc-test4-security-adversarial/OUTSIDE/`, sandboxes under
+`/tmp/sdlc-test4-security-adversarial/`. All 197 regression bats pass
+(suite grew from 188; 0 failures). The real `php-service-template` QA
+clone was driven end-to-end (generate → validate → inject) as a positive
+control. No git mutations; the QA clone was copied into the sandbox and
+the copy mutated.
+
+The hostile target carried injection payloads in every repo-derived field
+(composer `name`/origin URL with `"`/newline/`$()`/backticks, `.env`
+`DATABASE_URL`/`APP_SECRET` with command substitution, Makefile quoted and
+`$(shell …)` targets, `src/` bounded-context dir names literally named
+`$(touch …)`/`` `touch …` ``, a workflow `name:` with metachars), plus a
+malicious `.git/config` (`core.hooksPath` → canary-firing hooks,
+`core.fsmonitor`/`core.pager`/`core.sshCommand` → `touch CANARY`,
+`alias.*` → `!touch CANARY`) and a planted `.git/hooks/pre-commit` canary.
+
+### Round-1/2/3 cases re-run (verification)
+
+| ID | Result R4 | Note |
+| --- | --- | --- |
+| SEC-P1 | PASS | hostile repo → profile inside `.claude/`, no canary, no out-of-repo write |
+| SEC-P2 | PASS | only the 11 schema top-keys; every hostile value an inert quoted scalar; no raw newline in any scalar |
+| SEC-P3 | PASS | validate-profile reads the hostile profile cleanly (it flags `framework.name` null — correct: that repo has no framework bundle; not a security result) |
+| SEC-P4 | PASS | hostile origin slug reached `gh` as a literal `-f` arg (sed-truncated), never shell-eval'd; no canary |
+| SEC-P5 | PASS | orphan/nested markers → one block; shell-metachar user lines (`$(rm -rf /)`, `; touch CANARY`) kept verbatim, never executed |
+| SEC-P6 | PASS | in-repo `--spec-path specs` accepted; claude ran; success status posted; exit 0 |
+| SEC-N1 | PASS | `.claude` symlink-to-existing-dir refused; victim dir stayed empty |
+| SEC-N2 | PASS | dangling `.claude` symlink: out-of-repo dir NOT created |
+| SEC-N3 | PASS | symlinked profile file refused; no out-of-repo file |
+| SEC-N4 | PASS | symlinked CLAUDE.md (write) refused; outside secret byte-stable; link intact |
+| SEC-N5 | PASS | symlinked CLAUDE.md (`--diff` read) refused; secret untouched |
+| SEC-N6 | PASS | absolute out-of-repo `--spec-path` → boundary die; claude never called |
+| SEC-N7 | PASS | `..`-escaping `--spec-path` → refused before claude |
+| SEC-N8 | PASS | symlinked-dir `--spec-path` → symlink die |
+| SEC-N9 | PASS | symlinked-file `--spec-path` → symlink die |
+| SEC-N10 | PASS | every `--pr` injection/negative/hex/sci/SQL payload → "must be a number"; all-digit huge value accepted as a legal numeric (no injection) |
+| SEC-N11 | PASS | composer name / origin metachars quoted+sanitized; no YAML/key injection |
+| SEC-N12 | PASS | `src/` dir names `$(touch …)` / `` `touch …` `` emitted as inert quoted flow-list items |
+| SEC-N13 | PASS | hostile quoted + `$(shell …)` Makefile targets ignored; only `ci`/`tests`/`infection`/`e2e-tests` captured |
+| SEC-N14 | PASS | `.env` engine by hint only (`mysql`); raw `DATABASE_URL`/`APP_SECRET` never emitted |
+| SEC-N15 | PASS | hostile agent names compared/logged as strings, warn+skip, never eval'd |
+| SEC-N16 | PASS | malicious `.git/config` (fsmonitor/pager set to fire canary) → plumbing reads ran no command |
+| SEC-N17 | PASS | symlinked composer→/etc/passwd read-only → degrades to basename; symlinked Makefile/.env→secret read-only; secret byte-stable; no leak |
+| SEC-E1 | PASS | (covered by FIFO/degrade paths; jq-rejected composer degrades to basename) |
+| SEC-E2 | PASS | billion-laughs profile: PyYAML resolves aliases to SHARED refs — parse flat ~250–550 ms across 81→59049 refs (no exponential blow-up), bounded memory (completes under a 2 GB cap, exit 1, no OOM), clean `VIOLATION` lines, no traceback. Wall-clock ~10 s here is python-subprocess-startup-under-load (host load avg ~19; a NORMAL flat profile is the same ~10 s; not a bomb-specific DoS — see findings) |
+| SEC-E3 | PASS | billion-laughs anchors in a workflow `name:` fold to a benign single-line scalar; exit 0, ~0.4 s |
+| SEC-E4 | PASS (BUG-1 fix HOLDS) | newline-bearing workflow filename → single-line `["evilINJECT: x"]`, no raw newline |
+| SEC-R2-7 | PASS | ceiling matrix: `0`/`007`(=7) handled correctly; `2^64-1`, `2^64`, `10^30` all FLAGGED (no wrap to 0/-1) |
+| SEC-R2-8 | PASS | floor matrix: `100`/`101`/`2^64-1`/`2^64`/`10^20` NOT flagged as lowered (no wrap negative); `99` flagged |
+| SEC-R2-11 | PASS | CRLF (Windows) markers recognized, not duplicated (1 begin/1 end); user CRLF preserved |
+| SEC-R2-12 | PASS | 20 concurrent inject runs → exactly 1 begin/1 end, user content kept, no temp litter |
+| SEC-R2-13 | PASS | idempotent: re-run byte-stable, logs "unchanged" |
+| SEC-R3-12 | PASS | FIFO composer.json no-op via `[[ -f ]]` guard; exit 0, ~0.3 s, no hang |
+| SEC-R3-13 | PASS | directory CLAUDE.md → `reject_irregular` dies non-zero; dir intact; no temp litter |
+| SEC-R3-14 | PASS | FIFO CLAUDE.md → `reject_irregular` dies non-zero; FIFO intact; no hang |
+| SEC-R3-hooksPath | PASS | `core.hooksPath`/fsmonitor/pager/alias/sshCommand hijack across all 6 scripts ran zero hooks/aliases; no canary |
+
+### Round-4 new adversarial cases
+
+| ID | Attack | Expected | Result |
+| --- | --- | --- | --- |
+| SEC-R4-TOCTOU-1 | Race CLAUDE.md ↔ symlink-to-outside via atomic `mv -fT` (only the plugin's own write can touch the victim) during 80 inject runs × 6000 swaps | `mktemp`+`mv -f` renames over the swapped-in symlink, never follows; out-of-repo victim byte-stable | PASS |
+| SEC-R4-TOCTOU-2 | Same race on `.claude/php-sdlc.yml` during 60 `--refresh` runs × 6000 swaps | rename-into-realpath-resolved-dir replaces, never follows; victim byte-stable | PASS |
+| SEC-R4-PROMPT-1 | Profile `review.ai_review_agents` carrying `$(touch …)`/backtick/`;` + a real `claude` → ai-review-loop | agent names compared/logged as inert strings, warn+skip; only `claude` ran; no canary | PASS |
+| SEC-R4-PROMPT-2 | `--agents` override with command-substitution payloads | IFS-split tokens warn+skip as strings, never eval'd; no canary | PASS |
+| SEC-R4-PROMPT-3 | fr-nfr-gate `--impact-context` with `$(touch …)` + a fake `FR_NFR_NEW_FINDINGS: 999` planted in the prompt | text passed as one `-p` data arg, never shell-eval'd; gate parses claude's OUTPUT (`0`) not the injected `999`; status success; no canary | PASS |
+| SEC-R4-AGENTS | AGENTS.md symlink-to-secret while CLAUDE.md is benign | CLAUDE.md gets its block; AGENTS.md symlink refused; outside secret byte-stable | PASS |
+| SEC-R4-MKTEMP | Pre-plant symlinks at guessed `.sdlc-governance.XXXXXX` suffixes pointing to the outside victim | mktemp's random suffix never reuses a plant; victim byte-stable; block still written; user content kept | PASS |
+| SEC-R4-BRANCH | Hostile git branch name `evil$(touch …)br` + `--diff-base 'main$(touch …)'` across ai-review-loop / fr-nfr-gate / get-pr-comments | branch/ref/diff-base text never shell-eval'd (reaches the prompt as literal data); no canary | PASS |
+| SEC-R4-PRECOMMIT | Plant `.git/hooks/pre-commit` (+ 8 other hooks) firing a canary, then run all 6 scripts (incl. `--refresh`, `--diff`) | no plugin script commits, so no hook ever fires; canary absent | PASS |
+| SEC-R4-QA | Drive the real `php-service-template` QA clone (copied to sandbox) end-to-end | generate (valid: doctrine-orm/postgresql) → validate (valid) → inject (CLAUDE.md + AGENTS.md written); exit 0; no canary | PASS |
+
+### Round-4 findings
+
+No new security escape, crash, silent failure, contract violation, or
+doc-reality mismatch was found. Every round-1/2/3 fix re-verified holds.
+
+One environment-limited observation worth recording (NOT a bug):
+
+- SEC-E2 (billion-laughs → validate-profile) completed in ~10 s wall-clock
+  here, versus the "<1 s" prior rounds recorded. Investigation isolated
+  the cause to python-subprocess startup under heavy host load (load avg
+  ~19 on 8 cores): each `python3 -c 'import yaml'` costs ~0.3–0.5 s, and
+  validate-profile issues ~35 separate yaml backend calls (one per
+  `yaml_get`/`yaml_has`/`yaml_is_list`), so ~35 × ~0.28 s ≈ 10 s. A NORMAL
+  flat profile validates in the same ~10 s right now, proving the cost is
+  per-invocation backend startup, not the bomb. The bomb's own parse stays
+  FLAT (~0.25–0.55 s across 81→59049 refs — PyYAML shares alias refs, no
+  exponential blow-up), memory is bounded (completes under a 2 GB ulimit,
+  no OOM), and the output is clean `VIOLATION` lines. The E2 security
+  contract — no exponential blow-up, bounded memory, clean violations —
+  holds in full; the latency is an environment limit (host load, plus the
+  yq-absent python-fallback-only backend with a per-call re-parse), not an
+  attacker-reachable DoS (the profile is plugin-generated or
+  maintainer-edited, on the same side of the trust boundary).
+
+A pre-existing non-defect, re-noted: the inject-governance "lockfile"
+wording in an earlier commit message remains inaccurate (the mechanism is
+per-file atomic `mktemp`+`mv -f`, last-writer-wins, not a lock). Behavior
+is correct (20-way concurrency → one well-formed block); commit-message
+prose only, no code/user-doc defect.
+
+## Round-4 verdict
+
+41 cases executed (31 round-1/2/3 re-runs + 10 new). 41 PASS, 0 FAIL. One
+prior FAIL was rechecked (SEC-E4 / BUG-1, the only ever-FAIL case across
+the campaign); it stays PASS. No out-of-repo write or directory was
+created, no planted canary command executed across any script (the
+`rm -rf /` / `touch CANARY` payloads were inert quoted scalars or
+unevaluated strings), the sentinel and outside secret stayed byte-stable,
+every symlink write/read target was refused or read-only, the
+`core.hooksPath`/fsmonitor/pager/alias/sshCommand hijack and the planted
+`.git/hooks/pre-commit` canary ran no command, both inject and generate
+TOCTOU windows stayed byte-stable under a correctly-isolated 6000-swap
+race, and no hostile value achieved YAML/key injection, prompt
+shell-escape, git-hook execution, threshold wrap bypass, or a TOCTOU
+follow-the-symlink escape. The surface is clean.

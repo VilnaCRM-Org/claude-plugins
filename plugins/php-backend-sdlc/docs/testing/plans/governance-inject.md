@@ -434,3 +434,98 @@ bats tests** (23/23 pass).
 
 - `/tmp/sdlc-test3-governance-inject/` removed after execution.
 - QA clone reset with `git checkout . && git clean -fd` (no push).
+
+## Round 4 (convergence)
+
+Independent convergence re-run against the working-tree
+`scripts/inject-governance.sh` (branch `feature/php-backend-sdlc-plugin`,
+13853 bytes, unmodified during this round). Goal: prove every round-1,
+round-2, and round-3 fix HOLDS and surface any genuine remaining defect.
+Sandboxes under `/tmp/sdlc-test4-governance-inject/<case>/`, removed after
+the run. QA clone `php-sdlc-qa/php-service-template` used for the
+generate-profile sequence (P06) only, then reset with
+`git checkout . && git clean -fd` (no push). NFR-3 verified on every
+mutating case: the original bytes are confirmed an exact `cmp` prefix or
+the outside-markers content is byte-stable; for repair cases the result is
+inspected line-by-line (`diff` shows additions only, zero deletions).
+Every result was reproduced twice in fresh sandboxes.
+
+Headline: the surface is clean. All 23 dedicated bats cases pass twice
+(`tests/inject-governance.bats`). The script still ships **no lockfile**
+(re-confirming R2V Bug 4 / the brief's framing); a source grep for
+`flock`/`lockfile`/`mkdir.*lock`/`.lock` matches only `block`/`blockfile`
+substrings. Concurrency safety is the atomic in-dir `mktemp` + `mv -f`
+rename plus snapshot-once rendering, which withstood every adversarial
+probe below. No remaining or fix-introduced bug found.
+
+### Round-4 mandated re-runs (every governance-inject case)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| C-L01 | lockfile source probe | no lock primitive; atomic mktemp+mv is the real safeguard | PASS (re-confirms R2V Bug 4 doc mismatch, no runtime impact) |
+| C-N06 | `CLAUDE.md` symlink outside repo | exit 1, `refusing to follow symlink`, target byte-identical, link intact | PASS |
+| C-N07 | `CLAUDE.md` is a directory | exit 1, `not a regular file`, dir intact, zero litter inside | PASS |
+| C-FIFO | `CLAUDE.md` is a FIFO | exit 1, `not a regular file`, FIFO intact, no litter | PASS |
+| C-N04 | read-only (0444) `CLAUDE.md` needing a change | exit 1, `refusing to overwrite read-only`, file unmodified, no litter | PASS |
+| C-N05 | read-only (0555) target dir, files missing | exit 1, no partial file, no litter | PASS |
+| C-N01 | nonexistent target dir | exit 1, `target directory not found` | PASS |
+| C-N02 | unknown flag `--bogus` | exit 1, names the flag | PASS |
+| C-N03 | target path is a regular file | exit 1, `target directory not found` | PASS |
+| C-P01 | both files missing | both created, one marker pair each, three governance sections | PASS |
+| C-P02 | non-empty file, no markers | block appended; original bytes exact `cmp` prefix | PASS |
+| C-P03 | second run | `unchanged` logged ×2, sha256 identical | PASS |
+| C-P04 | stale block between user sections | replaced in place, position preserved (line 3), outside-sha stable, both user sections kept | PASS |
+| C-P05 | `--diff` vs apply parity | `--diff` writes nothing; `patch` reproduces the real run byte-for-byte; preview shows pending block | PASS |
+| C-P06 | generate-profile + inject on QA clone, re-run inject, `--refresh` | inject creates one block/file, re-run idempotent (`unchanged`), `--refresh` never touches CLAUDE/AGENTS; original committed content kept as exact prefix; `git diff` 50 insertions, 0 deletions | PASS |
+| C-E01 | orphan BEGIN only | marker line removed, user A/B kept, one fresh block | PASS |
+| C-E03 | two balanced pairs, user text between | collapse to first position, HEADER/MIDDLE/FOOTER kept, both stales gone, outside-sha stable | PASS |
+| C-E05 | END before BEGIN (balanced count) | markers removed, X/MID/Y kept, fresh well-ordered block | PASS |
+| C-E07 | marker pair documented inside a `` ``` `` fence | fenced example + both markers survive, fence intact, original bytes exact `cmp` prefix, real block appended outside, idempotent | PASS (Bug 1 fix holds) |
+| C-E08 | markers indented 4 spaces | treated as content, indented body kept, real block appended | PASS |
+| C-E09 | marker as substring / trailing space | not matched, both kept as content, one real block | PASS |
+| C-E11 | unix2dos CRLF managed block round-trip | recognized, replaced in place, exactly one pair, CRLF user lines (top+bottom) kept with CR, outside-content sha stable, idempotent | PASS (Bug 2 fix holds) |
+| C-E12 | file without trailing newline | newline + separator + block; original bytes exact prefix | PASS |
+| C-E13 | empty 0-byte file | block written, rerun idempotent | PASS |
+| C-E14 | ~200k-line (~6 MB) file around the block | completes in 5.3 s (< 60 s), outside-markers sha identical, one pair | PASS |
+| C-E17 | no TARGET arg | operates on `$PWD`, one pair | PASS |
+| C-E18 | target path with spaces + trailing slash | files created in the right place, one pair | PASS |
+| C-X05 | mode preservation (overwrite 0600; create umask 027) | overwrite keeps 600; create yields 640 | PASS |
+
+### Round-4 adversarial-new probes
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| A1 | lock acquired then SIGKILL (stale-lock/temp recovery): 30 kills mid-run × 2 trials, then a clean run | managed file never torn (`begin==end` always), user line never lost, clean run converges to one block, idempotent, no inherent litter observed | PASS (0/60 torn or lost) |
+| A2 | two genuinely concurrent processes (background `&`): 40 races × 2 trials | exactly one block per `CLAUDE.md`/`AGENTS.md`, user line intact, zero litter, final state byte-identical to a single clean run | PASS (0/80 bad iterations) |
+| A3 | stale planted `.sdlc-governance.STALE*` temps (lock-like) + concurrent runs | one block, user intact, planted foreign temps untouched (mktemp random suffix never collides), idempotent after cleanup | PASS |
+| A4 | marker text containing regex metacharacters: user lines with `.* [a-z]+ (foo\|bar)$ ^anchored \d{3}`, `$1.50`, `100%`, `back\reference \1`, a near-marker substring line, and a `begin -->.*`-suffixed line | awk `==` is literal, so metacharacters are never interpreted; the only whole-line marker (an orphan END) is stripped, every regex line preserved (verified line-by-line, additions only), one fresh well-ordered block appended, idempotent | PASS |
+| A5 | managed block whose body contains the END marker string as literal content (input counts 1 BEGIN / 2 END = unbalanced) | unbalanced → strip ONLY the exact marker lines, preserve all user body (header/footer/literal-end-body line), append one fresh block, converge to one pair, idempotent | PASS |
+| A6 | temp-litter audit across all 4 sandboxes after the full run | zero `.sdlc-governance.*` files remain | PASS (0 left) |
+
+### Round-4 results summary
+
+- Cases run: 34 (28 mandated re-runs covering every governance-inject
+  case, 6 adversarial-new probes). PASS: 34. FAIL: 0.
+- Prior FAILs re-checked: 7 (round-1 E07 fenced / E11 CRLF / E15
+  concurrency = Bug 1/2/3; round-2 R2V-20 read-only, R2V-21 directory,
+  R2V-N5 FIFO, R2V-N6 `--diff`-on-dir). All 7 still pass and remain
+  guarded by dedicated bats cases — every prior fix HOLDS.
+- NFR-3 byte-preservation re-confirmed on every mutating case via exact
+  `cmp` prefix, outside-markers sha256, or line-by-line `diff`
+  (additions-only) — no user content outside a real managed region was
+  ever touched, including the QA-clone integration (`git diff` 50
+  insertions, 0 deletions).
+- Concurrency / "lock" attack: no lockfile exists; the atomic-rename
+  mechanism withstood 60 SIGKILLs mid-write (0 torn), 80 two-process
+  races (0 bad), and planted stale-temp recovery with zero defects and
+  zero litter.
+- One non-defect noted twice during testing was traced to the QA harness,
+  not the script: a fence-aware "outside-markers" strip helper reports a
+  changed sha for E07 and A3/A4 because it cannot model the post-append
+  fence/orphan state; the script's own output is byte-correct (exact
+  `cmp` prefix; `diff` shows additions only). Not a bug.
+
+### Round-4 cleanup
+
+- `/tmp/sdlc-test4-governance-inject/` removed after execution.
+- QA clone reset with `git checkout . && git clean -fd` (no push).

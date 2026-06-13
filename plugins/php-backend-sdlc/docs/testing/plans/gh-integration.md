@@ -492,3 +492,145 @@ ELEMENT is an object. A scalar comment node slips the guard and dies in
   31/31 (4 new R3 Bug 6 cases), `tests/fr-nfr-gate.bats` 17/17.
 - All FAILs reproduced twice (BUG-6 reproduced 4×); sandboxes under
   `/tmp/sdlc-test3-*/` removed after the run.
+
+## Round 4 (convergence)
+
+Fourth pass against the committed tree (HEAD `ec27b82`, branch
+`feature/php-backend-sdlc-plugin`). This is the CONVERGENCE round: prove
+every round-1/2/3 fix HOLDS by re-running its real repro live (never
+trusting commit messages or prior PASS rows), then hunt adversarially for
+any genuine remaining defect. The standing fixes under test:
+`get-pr-comments.sh` BUG-1 (non-JSON die), BUG-2 (empty / wrong-shape /
+`pullRequest:null` / GraphQL-error-envelope refusal), BUG-4 (gh-resolved
+PR `^[0-9]+$` re-validation), BUG-5 (valid-JSON wrong-TYPE SHAPE guard),
+BUG-6 (per-ELEMENT object access so a scalar comment node aborts to a
+clean SHAPE die), the pageInfo>100 truncation guard, and the leading-BOM
+strip; `fr-nfr-gate.sh` BUG-3 (`findings_norm` digit-string zero-test, so
+any multiple of 2^64 fails the gate).
+
+Method unchanged: sandboxes under `/tmp/sdlc-test4-<surface>/<case>/`,
+removed after the run; routing `gh`/`claude` wrappers built per case
+(copied, never symlinked); both jq (1.8.1) and python3 (3.14.4) backends
+exercised wherever the transform can diverge (jq stripped via a PATH
+containing every needed tool EXCEPT jq); every result confirmed twice. No
+git mutations. Host tools: jq 1.8.1, python3 3.14.4, gh 2.92.0, bats
+1.11.1, markdownlint-cli 0.48.0.
+
+### Round 4 — BUG-6 element-shape guard re-run (scalar comment node)
+
+The round-3 BUG-6 fix forces per-element object access. Re-run a scalar
+comment node in BOTH the issue-comment and thread-comment positions, on
+BOTH backends, across `--json` and `--unresolved-only`. Contract: a clean
+`[php-sdlc]` SHAPE diagnostic on stderr, exit 1, never a raw `jq: error
+… Cannot index` or python `Traceback/AttributeError`.
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R4-GPC-1 | Issue-comment scalar node `comments.nodes:[42]`, jq, default + `--json` + `--unresolved-only` | exit 1; `unexpected response shape`; no raw leak | PASS — clean `[php-sdlc]` SHAPE die all 3 modes |
+| R4-GPC-2 | Same issue-comment scalar node, python (jq stripped), all 3 modes | exit 1; identical clean die | PASS — no `AttributeError`/`Traceback` |
+| R4-GPC-3 | Thread-comment scalar node `reviewThreads.nodes[0].comments.nodes:[42]`, jq, all 3 modes | exit 1; clean SHAPE die | PASS |
+| R4-GPC-4 | Same thread-comment scalar node, python, all 3 modes | exit 1; identical clean die | PASS |
+| R4-GPC-5 | Control: healthy multi-comment payload (2 thread comments + 1 issue comment), both backends | exit 0; `unresolved threads: 1`; not over-rejected | PASS — both backends render identically |
+
+### Round 4 — pageInfo>100 truncation guard re-run
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R4-GPC-6 | Exactly 100 review threads (66 unresolved), every `hasNextPage:false`, both backends | exit 0; no refusal; `unresolved threads: 66` | PASS — both backends agree |
+| R4-GPC-7 | 100 threads, `reviewThreads.pageInfo.hasNextPage:true`, both backends | exit 1; pagination refusal | PASS — refusal both backends |
+| R4-GPC-8 | 1 thread with 100 comments, `comments.pageInfo.hasNextPage:true`, both backends | exit 1; comment-level refusal | PASS — refusal both backends |
+
+### Round 4 — exit-0 wrong-type-JSON guard re-run (BUG-5)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R4-GPC-9 | Top-level array `[1,2,3]`, both backends | exit 1; SHAPE `top-level JSON is a …, not an object` | PASS |
+| R4-GPC-10 | Top-level scalars `"hello"` / `42` / `true`, both backends | exit 1; SHAPE die | PASS — all three, both backends, no leak |
+| R4-GPC-11 | `pullRequest` non-null but `reviewThreads:"oops"` (wrong child type), both backends | exit 1; SHAPE `unexpected structure` | PASS |
+
+### Round 4 — gh-resolved PR-number validation re-run (BUG-4)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R4-GPC-12 | `gh pr view` exit 0 prints `not-a-number`, no `--pr`, both backends | exit 1; `resolved PR number is not numeric: 'not-a-number'`; no `--argjson` leak | PASS |
+| R4-GPC-13 | `gh pr view` exit 0 prints empty string, no `--pr`, both backends | exit 1; `resolved PR number is not numeric: ''` | PASS |
+
+### Round 4 — BUG-1 / BUG-2 family re-run + positive control
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R4-GPC-14 | gh exit 0, empty stdout, both backends | exit 1; `returned an empty response` | PASS — divergence gone, both backends die identically |
+| R4-GPC-15 | Wrong-shape `{"ok":true}`, both backends | exit 1; `no pull-request data` | PASS |
+| R4-GPC-16 | `data.repository.pullRequest:null`, both backends | exit 1; `no pull-request data` | PASS |
+| R4-GPC-17 | GraphQL error envelope `{"data":null,"errors":[…]}`, both backends | exit 1; error message surfaced verbatim | PASS — `Could not resolve to a PullRequest …` surfaced |
+| R4-GPC-18 | Non-JSON HTML garbage (502 page), both backends | exit 1; `returned non-JSON output` | PASS — no raw jq parse error / traceback |
+| R4-GPC-19 | Positive: empty PR (both arrays `[]`), both backends | exit 0; `unresolved threads: 0` | PASS |
+
+### Round 4 — fr-nfr-gate.sh BUG-3 findings_norm zero-test re-run
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R4-FNG-1 | `FR_NFR_NEW_FINDINGS: 18446744073709551616` (2^64) | exit 1; FAILURE status; PR comment | PASS — `state=failure`, comment posted (reproduced twice) |
+| R4-FNG-2 | `36893488147419103232` (2×2^64) | exit 1; FAILURE status | PASS — `state=failure` |
+| R4-FNG-3 | `00018446744073709551616` (leading-zero 2^64) | exit 1; FAILURE status | PASS |
+| R4-FNG-4 | `18446744073709551617` (2^64+1) | exit 1; FAILURE status | PASS |
+| R4-FNG-5 | Control `0000` (all zeros) | exit 0; SUCCESS status, exact context `BMAD FR/NFR Review Gate`; no comment | PASS — `state=success`, PASS log |
+| R4-FNG-6 | `010` (octal-looking) | exit 1; FAILURE; sane description | PASS — `state=failure`, description `010 new FR/NFR finding(s)` |
+
+### Round 4 — adversarial-new probes
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R4-ADV-1 | Deeply nested valid-but-wrong: valid 1st thread comment, scalar 2nd (`comments.nodes:[{…},99]`), both backends | exit 1; clean SHAPE die (the `all()` guard must consume the whole stream, not just index 0) | PASS — clean die both backends; the guard catches a scalar buried after a valid element |
+| R4-ADV-1b | Valid thread node + scalar thread node at index 1 (`reviewThreads.nodes:[{…},7]`), both backends | exit 1; clean SHAPE die | PASS |
+| R4-ADV-1c | `isResolved:"nope"` (wrong type, non-boolean string) on an otherwise valid thread, both backends | deterministic, no crash/leak, backends agree | PASS (informational) — `has("isResolved")` is a key-presence contract (matching what `normalize` needs to not crash), not a type assertion; a truthy non-boolean is treated as resolved → `unresolved threads: 0` identically on both backends, exit 0, no leak. GitHub types the field `Boolean!`, so this cannot occur at runtime; same class as the round-3 R3-GPC-39 non-null-empty-PR informational |
+| R4-ADV-2 | Duplicate thread ids: 5 byte-identical unresolved thread objects + 1 resolved dup, plus 2 identical issue comments | exit 0; no dedup/crash; correct count; `--json` array length consistent across backends | PASS — `unresolved threads: 5`; all 6 dup bodies rendered; `--json` `review_threads` length 6 on jq and python (no spurious dedup) |
+| R4-ADV-3 | Log spoofing: comment body with literal `[php-sdlc][ERROR] …` prefix AND an embedded `unresolved threads: 4242` line; an issue comment body spoofing `[php-sdlc][INFO] … PASS` | spoof cannot forge a diagnostic or a count: body renders verbatim on STDOUT, real diagnostics live on STDERR, structural count wins | PASS — under the production invocation (`--unresolved-only --json`, used by both `sdlc-finish-pr` and `pr-comment-resolver`) the spoof is fully contained inside a JSON string value, output is valid JSON, structural `unresolved` count is `1`, jq/python byte-identical; ZERO `[php-sdlc]` line reaches stderr; in human mode the real summary is the last line (`unresolved threads: 1`) while the spoofed `4242` sits inside the rendered body where it belongs |
+
+### Round 4 verdict summary
+
+- Cases run: 33 distinct (multi-mode/multi-backend sub-runs and
+  confirmation re-runs not counted). 33 PASS (1 informational, R4-ADV-1c).
+  Zero FAIL rows. No new defects.
+- Prior fixes RE-RUN for real (live repros, not trusted from prior PASS
+  rows) — ALL HOLD:
+  - BUG-1 (S3, r1) — non-JSON gh stdout dies cleanly, both backends
+    (R4-GPC-18).
+  - BUG-2 (S2, r1, fixed r3) — empty / wrong-shape / `pullRequest:null` /
+    GraphQL-error-envelope all die exit 1 with a script-level `[php-sdlc]`
+    diagnostic on BOTH backends; the GraphQL error message is surfaced
+    verbatim; no jq/python divergence (R4-GPC-14..17).
+  - BUG-3 (S2, r1, fixed r3) — `findings_norm` fails the gate for 2^64,
+    2×2^64, and leading-zero 2^64, posting a FAILURE status; `0000`
+    passes with a SUCCESS `BMAD FR/NFR Review Gate` status; reproduced
+    twice (R4-FNG-1..6).
+  - BUG-4 (S3, r1 NEW, fixed r3) — a non-numeric or empty gh-resolved PR
+    dies `resolved PR number is not numeric` before `--argjson`, both
+    backends (R4-GPC-12/13).
+  - BUG-5 (S3, r3, fixed r3) — top-level array/scalar and wrong-type
+    child connections die with a clean SHAPE diagnostic, both backends
+    (R4-GPC-9..11).
+  - BUG-6 (S3, r3, fixed r3) — a scalar comment node in BOTH the
+    issue-comment and thread-comment positions dies with a clean SHAPE
+    `[php-sdlc]` diagnostic on BOTH backends across `--json` and
+    `--unresolved-only`; healthy payloads are NOT over-rejected
+    (R4-GPC-1..5). This was the round-3 residual; it holds with no leak.
+  - pageInfo>100 truncation guard — refuses thread-level and
+    comment-level truncation, passes exactly-100 with `hasNextPage:false`,
+    both backends (R4-GPC-6..8).
+- Adversarial-new: deeply nested valid-but-wrong JSON (scalar buried past
+  a valid element, in both comment and thread positions) is caught by the
+  whole-stream `all()` guard (R4-ADV-1/1b); duplicate thread/comment
+  objects render and count correctly with no spurious dedup (R4-ADV-2);
+  a log-spoofing comment body cannot forge a diagnostic (stream-separated)
+  or a count (structural, and JSON-string-contained under the production
+  `--json` invocation) (R4-ADV-3). The only non-PASS observation,
+  R4-ADV-1c (`isResolved` as a non-boolean string), is deterministic,
+  cross-backend-identical, leak-free, and unreachable given GitHub's
+  `Boolean!` typing — informational, not a defect (same class as
+  R3-GPC-39).
+- Regression suites green on this tree: `tests/get-pr-comments.bats`
+  31/31, `tests/fr-nfr-gate.bats` 17/17 (48 total).
+- The surface is CLEAN. Every round-1/2/3 fix re-run holds; no genuine
+  remaining bug found. Sandboxes under `/tmp/sdlc-test4-*/` removed after
+  the run.

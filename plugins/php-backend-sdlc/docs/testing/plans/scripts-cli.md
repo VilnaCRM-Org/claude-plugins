@@ -628,3 +628,146 @@ the root cause; no regression observed.
   and was twice wiped mid-run by concurrent cleanup; re-created each time
   with a fresh `yq` download. No effect on results (each case is
   self-contained), recorded only as a test-harness observation.
+
+## Round 4 — convergence (prove rounds 1–3 fixes HOLD)
+
+Goal: re-run every round-1..3 FAIL repro LIVE and prove Bugs 1–5 hold fixed
+at the root cause, then probe an adversarial-new matrix (empty profile,
+profile missing required keys, SIGPIPE, concurrent invocations sharing a
+temp dir) plus the shared `lib/common.sh` refactor
+(`strip_zeros`/`num_gt`/`num_lt`) to confirm `validate-profile.sh` and
+`ai-review-loop.sh` use one identical implementation. All 8 surfaces
+exercised as real CLI invocations against disposable sandboxes under
+`/tmp/sdlc-test4-<surface>/`; a real `yq v4.44.3` binary was downloaded
+for the yq backend and the forced python fallback
+(`SDLC_FORCE_PYTHON_YAML=1`) was run alongside it. The bundled
+`tests/*.bats` suite is 197 cases and passes 197/197 on the yq backend
+(the supported/CI configuration); `bash -n` is clean on all 7 scripts +
+`lib/common.sh`. The QA clone (real `php-service-template`) was used as a
+realistic target (copied to a scratch dir, never pushed).
+
+### R4 — round-1/2/3 FAIL repros re-run LIVE (must still PASS)
+
+| ID | Re-run case | Round-4 result |
+| --- | --- | --- |
+| SP-E1 | bare repo, default + `--report` | PASS (git-repo FAILs, exit 1; `--report` still runs later checks) |
+| SP-E6 | inside a normal repo's `.git/` | PASS (git-repo FAILs, exit 1) |
+| VP-E7 | `psalm_errors: 2^64-1` (yq + py) | PASS (VIOLATION "relaxed above 0", exit 1, both backends) |
+| VP-E7b | `deptrac_violations: 2^64` (yq + py) | PASS (VIOLATION, exit 1, both backends) |
+| VP-E7c | `infection_msi: 2^64-1` (a raise) | PASS (exit 0, no misleading "lowered below", both backends) |
+| IG-E5 | CRLF file carrying a CRLF managed block (two fresh sandboxes) | PASS (1 begin/1 end/1 banner, stale gone, user CRLF lines kept, run 2 "unchanged", 0 stray temp) |
+| R2-AR3 | `--max-iterations` `2^64`/`2^63`/22-digit/`1001` | PASS (ceiling 1000 rejects, exit 1, 0 claude calls); boundary 1000 accepted (2000 calls = 1000 iter × retry, escalates exit 1) |
+| R2-FG2 | `FR_NFR_NEW_FINDINGS: 2^64` (full sweep 0,00,1,999,2^63,2^64,2^64-1) | PASS (0/00 → `success` exit 0; all nonzero → `failure` exit 1, no silent escape) |
+
+All eight prior FAIL repros still PASS. Bugs 1–5 confirmed fixed at the
+root cause; no regression observed.
+
+### R4 — adversarial-new: empty / missing-key profile + arg edges
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R4-A1 | 0-byte profile → `validate-profile.sh` (yq + py) | 29 violations, exit 1, identical both backends, no crash | PASS |
+| R4-A2 | `missing-key.yml` fixture → validate | VIOLATION names `php.version`, exit 1, both backends | PASS |
+| R4-A3 | profile missing `review.ai_review_agents` → `ai-review-loop.sh` | defaults to claude, PASS iteration 1, exit 0 (no crash) | PASS |
+| R4-A4 | malformed-YAML matrix (unclosed quote, bad indent, tab indent, dangling anchor, NUL/control bytes) → validate + ai-review-loop, both backends | clean `[php-sdlc] profile is not valid YAML` diagnostic, exit 1, ZERO raw traceback; AR self-diagnoses (does not silently default to claude) | PASS |
+| R4-A5 | `--agents`/`--max-iterations` with no value (end of argv) | clean `${2:?…}` parameter error, exit 1 | PASS |
+
+### R4 — adversarial-new: SIGPIPE under `set -euo pipefail`
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R4-SP1 | `validate-profile.sh \| head -1` (29 VIOLATION lines, reader closes pipe) | first line emitted, writer killed by SIGPIPE (141), no hang, no corrupt state | PASS |
+| R4-SP2 | `ai-review-loop.sh \| head -1` (5000-line result body) | same; benign SIGPIPE on writer | PASS |
+| R4-SP3 | `get-pr-comments.sh \| head -1` (80-thread listing) | same | PASS |
+| R4-SP4 | `setup-preflight.sh --report \| head -1` | same | PASS |
+| R4-SP5 | `generate-profile.sh` diff output `\| head -1` | diff prints, EXIT trap fires, 0 stray `.php-sdlc.yml.*` temp | PASS |
+
+### R4 — adversarial-new: concurrent invocations sharing a temp dir
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R4-C1 | 30 parallel `inject-governance.sh` into one pre-seeded dir (CLAUDE.md + AGENTS.md with user content) | serialize via atomic `mv`; 1 begin/1 end/1 banner each, user content kept, 0 stray `.sdlc-governance.*`, post-storm run "unchanged" | PASS |
+| R4-C2 | 20 parallel `generate-profile.sh` into one dir (minimal composer) | one complete profile, parses as YAML, byte-identical to a single non-concurrent run, 0 stray temp | PASS |
+| R4-C3 | 25 parallel `generate-profile.sh` into the `stub-repo` fixture dir | concurrent profile is VALID and byte-identical to the golden single run, 0 stray temp | PASS |
+
+### R4 — lib/common.sh shared-refactor equivalence
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R4-L1 | both `validate-profile.sh` and `ai-review-loop.sh` `source lib/common.sh` and call `num_gt`/`num_lt` | one shared implementation, no per-script copy | PASS (verified by source) |
+| R4-L2 | `strip_zeros`/`num_gt`/`num_lt` table under `set -euo pipefail`: `007→7`, `000→0`, `100=100`, `5=5`, `10>9`, `999<1000`, `2^64-1>0`, `2^64>0`, `2^63 vs 2^63-1` | wrap-safe digit-string ordering correct, survives `set -e` | PASS |
+| R4-L3 | validate `check_ceiling`/`check_floor` vs ai-review-loop `MAX_ITERATIONS` ceiling on the same 2^63/2^64 magnitudes | identical verdicts (reject/accept) — one num_gt | PASS |
+
+### R4 — fence-aware inject-governance (freshest code path) re-probe
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R4-F1 | documented markers inside a balanced ` ``` ` fence, no real block | fenced example kept (2 begin total: 1 fenced + 1 real), real banner appended once, run 2 "unchanged" | PASS |
+| R4-F2 | odd/unclosed fence wrapping marker-delimited content | fallback to whole-line matching, treated as a real block (1 begin/1 end), user tail kept, idempotent | PASS |
+
+### R4 — fr-nfr-gate + get-pr-comments edge re-sweep
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R4-FG1 | `--spec-path` `/etc` / `specs/../../../../etc` / symlinked / `specs/../specs` | `die` boundary-escape / symlink-refusal for first three, allowed for the last (runs to PASS); all die paths exit 1 | PASS |
+| R4-FG2 | verdict trailing-space / missing line | "contract violation", exit 1 (strict regex) | PASS |
+| R4-FG3 | bare repo / non-git dir | `die` "not inside a git work tree" before gh/claude, exit 1 | PASS |
+| R4-PC1 | `--pr abc` / `--pr ''` / unknown flag / non-JSON gh / `hasNextPage:true` / `pullRequest:null` | clean `die` each, exit 1 | PASS |
+| R4-PC2 | healthy empty PR (yq + py) | exit 0, `unresolved threads: 0`, both backends | PASS |
+
+### R4 — QA clone (real php-service-template) end-to-end
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R4-QA1 | generate-profile on the real template (yq + py) | exit 0, full feature map (php 8.2, symfony 7.2, api_platform 4.0, graphql, doctrine-orm/postgresql, contexts, structurizr, load_testing) | PASS |
+| R4-QA2 | generated profile → validate-profile (yq + py) | exit 0, 0 violations, both backends | PASS |
+| R4-QA3 | generate-profile second run, no flags | "unchanged", byte-identical (NFR-3) | PASS |
+| R4-QA4 | inject-governance into the real CLAUDE.md (1322 B user content) + AGENTS.md | 1 block each, user bytes kept, idempotent re-run "unchanged", 0 stray temp | PASS |
+| R4-QA5 | engine detection from active `pdo_pgsql` / `postgres://` (commented hints excluded) | postgresql | PASS |
+| R4-QA6 | validate mutations on the QA-derived valid profile: lower complexity, relax psalm/deptrac (incl. 2^64), bad enum, schema_version 2, raise 100→101 | each lowered/relaxed/illegal value → VIOLATION exit 1; raises → exit 0; both backends | PASS |
+| R4-QA7 | generate-profile make-map `:=`/`::=`/`:::=`/`?=`/`+=` adversarial Makefile + real `start:`/`e2e-tests:`/`psalm: vendor/bin/psalm` targets | assignments → null; real targets (incl. value-side-colon `psalm:`) detected | PASS |
+
+## Round-4 execution summary
+
+- Cases executed: 41 round-4 IDs (8 re-run prior FAILs + 33 new/edge),
+  plus the 197-case bundled bats suite run on the yq backend (197/197) and
+  the forced-python backend (196/197 — see note below), and `bash -n`
+  clean on all 7 scripts + `lib/common.sh`.
+- Every round-1/2/3 FAIL repro re-run still PASSES — Bugs 1–5 are
+  confirmed fixed at the root cause; no regression in re-sampled prior
+  PASS cases.
+- The adversarial-new matrix (empty profile, missing-key profile, SIGPIPE
+  to `head`, 30-/25-/20-way concurrent invocations sharing a temp dir) is
+  clean: clean diagnostics, no crashes, atomic `mv` serialization, zero
+  stray temp files. The shared `lib/common.sh` refactor is identical by
+  construction (both scripts source one file) and verified behaviorally
+  across the 2^63/2^64 wrap boundaries.
+- NO new or fix-introduced bugs found this round. The surface is clean.
+- Sandboxes under `/tmp/sdlc-test4-*/` removed after the run.
+
+## Round-4 notes (observations, not defects)
+
+- The single forced-python bats delta (test 174, "no JSON toolchain") is a
+  CONTRADICTORY test configuration, not a defect: that test builds a PATH
+  sandbox holding a real `yq` but neither `jq` nor `python3` (to isolate
+  the json-toolchain failure on a yq-only machine), then asserts
+  `yaml-toolchain PASS`. Running the whole suite with a global
+  `SDLC_FORCE_PYTHON_YAML=1` disables `have_yq()`, so the yaml-toolchain
+  check falls back to a python3 that the sandbox deliberately omits and
+  FAILs — a logically impossible combination (force-python-yaml AND
+  python-absent). The script behaves correctly in both the production
+  scenario (yq-only machine, no force flag: yaml PASS + json FAIL, exit 1)
+  and the contradictory one. The yq backend (the CI/supported config)
+  passes 197/197.
+- SIGPIPE on a script's own stdout (`| head -1`) reports pipestatus 141
+  (128+13) — the READER closing the pipe, not a writer fault. No state
+  corruption and no stray temp resulted in any script.
+- generate-profile against a minimal composer.json (php only, no
+  framework/persistence/src) legitimately emits null required keys, so the
+  freshly generated profile fails validate-profile — this is correct A3/
+  NFR-4 detection of a bare repo, not a generation defect (proven
+  byte-identical to a single non-concurrent run).
+- The QA template's profile lists `"code quality"` twice in `ci.workflows`
+  because there are genuinely two workflow files named "code quality" in
+  `.github/workflows/`; faithful detection, not a duplication bug
+  (`required_checks` stays `[]`).

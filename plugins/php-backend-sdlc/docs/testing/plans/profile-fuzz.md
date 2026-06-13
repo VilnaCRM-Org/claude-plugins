@@ -440,3 +440,129 @@ confirmed fixed. The shared-helper uint64-wrap ceiling fix, the full
 `yaml_parses` guard, and the symlink rejection all hold to contract. No
 remaining or fix-introduced bug found. Sandboxes under
 `/tmp/sdlc-test3-profile-fuzz/` removed.
+
+## Round 4 (convergence)
+
+Tree under test: branch `feature/php-backend-sdlc-plugin` working tree at
+commit `ec27b82` (clean — `.claude/` is git-ignored; the 3 modified
+`docs/testing/plans/*.md` files in `git status` belong to concurrent
+sibling surfaces, not this one). Independent fourth campaign run for real
+on this host — no `yq` (`SDLC_FORCE_PYTHON_YAML=1`, python3 3.14.4 +
+PyYAML 6.0.3); GNU make 4.4.1; `jq` 1.8.1; bats 1.11.1; markdownlint-cli2
+v0.22.1. Charter: prove the round-3 fixes HOLD and surface any genuine
+remaining bug — clean reported clean, no manufactured findings.
+
+Sandboxes under `/tmp/sdlc-test4-profile-fuzz/`, removed after the round.
+Every non-null `make.*` candidate cross-checked against real `make -p`
+(declared-target proof) and `make -n` (runnable proof). The QA clone was
+copied to a sandbox (`qa-copy`, stray untracked `ok` dropped in the copy
+only) and never mutated in place.
+
+### R4 re-runs — prior FAILs and highest-risk cases
+
+| ID | Re-run of | Expected | Result |
+| --- | --- | --- | --- |
+| R4-RERUN-01 | GEN-14 / BUG-1: `tests:=unit src`, no `tests` rule (2 fresh dirs) | `make.tests: null`, `make.ci: ci`; `make -n tests` exit≠0 (consistent) | PASS |
+| R4-RERUN-02 | VAL-13 / BUG-2 shape A: tab-indented profile (2 fresh files) | exit 1, `[php-sdlc][ERROR] … not valid YAML … /sdlc-setup`, 0 `Traceback` lines | PASS |
+| R4-RERUN-03 | VAL-13 / BUG-2 shape B: unclosed double quote (2 fresh files) | same clean diagnostic, 0 `Traceback` lines | PASS |
+| R4-RERUN-04 | GEN-21 QA-template clone end-to-end + spot-truth (sandbox copy) | gen exit 0, validator exit 0; all 8 non-null `make.*` DECLARED via `make -p`; contexts == `src/` dirs minus `Shared` | PASS |
+
+### R4 validation — uint64-wrap ceiling fix via shared `num_gt`/`num_lt`
+
+Every magic value applied to every applicable threshold key off a freshly
+generated valid baseline (28 unique-file mutate-and-run rows; each case a
+distinct file, no shared `mut.yml` — see notes). Ceilings:
+`quality.{deptrac_violations,psalm_errors}` (default 0). Floors:
+`quality.phpinsights.{quality,architecture,style}` (100),
+`quality.phpinsights.complexity` (94), `quality.infection_msi` (100).
+
+| ID | Mutation (value → applied to) | Expected | Result |
+| --- | --- | --- | --- |
+| R4-VAL-01 | `9223372036854775808` (2⁶³) → both ceilings | VIOLATION "relaxed above 0", exit 1 (no wrap to negative passing) | PASS |
+| R4-VAL-02 | `18446744073709551616` (2⁶⁴) → both ceilings | VIOLATION, exit 1 (no wrap to 0) | PASS |
+| R4-VAL-03 | `18446744073709551617` (2⁶⁴+1) → both ceilings | VIOLATION, exit 1 | PASS |
+| R4-VAL-04 | `10³⁰` (`1` + 30 zeros) → both ceilings | VIOLATION, exit 1 | PASS |
+| R4-VAL-05 | 2⁶³ / 2⁶⁴ / 2⁶⁴+1 / 10³⁰ → each of the 5 floors | exit 0 `profile valid` (raising is legal; no false "lowered" from a negative wrap) | PASS |
+| R4-VAL-06 | legitimate raises on each floor: quality 150, architecture 1000, style 100, complexity 95 & 1000000, infection_msi 100 & 9999999999 | exit 0 each | PASS |
+| R4-VAL-07 | `num_gt`/`num_lt`/`strip_zeros` unit suite (16 asserts incl. 2⁶⁴>0, 2⁶⁴>2⁶³, 2⁶⁴+1>2⁶⁴, 10³⁰>2⁶³, same-length lex, equality false, leading-zero `094` not> `94`) under `LC_ALL=C/POSIX/en_US.UTF-8/C.UTF-8` | 16/16 per locale, locale-insensitive | PASS |
+
+### R4 validation — malformed-YAML clean diagnostics
+
+| ID | Mutation | Expected | Result |
+| --- | --- | --- | --- |
+| R4-VAL-08 | malformed-YAML sweep (7 shapes): tab-indent, unclosed double quote, unclosed single quote, unclosed flow map, `a: b: c`, undefined alias, lone tab line | every one exits 1, `not valid YAML … /sdlc-setup`, **0** `Traceback`/`File "`/`yaml.` lines | PASS |
+
+### R4 generation — Makefile `:=`/`?=`/`+=`/`::=` assignment parsing
+
+Each candidate cross-checked against `make -p` / `make -n`.
+
+| ID | Target-repo shape | Expected | Result |
+| --- | --- | --- | --- |
+| R4-GEN-01 | full op matrix on candidate names: `tests :=`, `ci ?=`, `psalm +=`, `deptrac ::=`, `infection =`, `phpinsights:=`, `pr-comments?=`, `fr-nfr-gate+=`, `load-tests:::=`, plus real `start:`/`e2e-tests:` | all nine assignments → null; only `start`+`e2e-tests` detected and runnable; each assignment-only name fails `make -n` ("No rule") | PASS |
+| R4-GEN-02 | assignment-then-real-target collision: `tests := skip` then `tests:` rule; `ci ?= skip` then `ci:` rule | real targets win; `make -n tests` exit 0 | PASS |
+| R4-GEN-03 | `+=` append twice (`psalm += …`) + `:=` (`deptrac:=x`), real `start:` | `psalm`/`deptrac` null, `start` detected | PASS |
+| R4-GEN-04 | `?=` value containing a colon (`tests ?= mysql://h:3306/db`), real `ci:` | `tests` null (DSN value not a target), `ci` detected | PASS |
+| R4-GEN-05 | `::=`/`:::=` spaced and no-space (`ci ::=`, `tests :::=`, `infection::=`, `e2e-tests:::=`), real `start:` | all four null, `start` detected | PASS |
+| R4-GEN-06 | indented recipe line `\tci:` under `start:` | `ci` null (`^` anchor rejects indented), `start` detected | PASS |
+| R4-GEN-07 | substring safety: only `tests-extra:`/`test-config:` present, candidate `tests` | `make.tests` null (exact `grep -qxF`, no prefix leak), `ci` detected | PASS |
+| R4-GEN-08 | variable VALUE contains candidate names: `TESTS_DIR = tests`, `RUN := psalm deptrac`, real `ci:` | `tests`/`psalm`/`deptrac` null (values, not targets), `ci` detected | PASS |
+
+### R4 generation — engine detection, framework version, adversarial-new
+
+| ID | Target-repo shape | Expected | Result |
+| --- | --- | --- | --- |
+| R4-GEN-09 | commented mysql DSN above active `postgresql://` | engine `postgresql` (commented line ignored) | PASS |
+| R4-GEN-10 | commented `postgresql` above active `mysql://` | engine `mysql` | PASS |
+| R4-GEN-11 | ONLY a commented mysql DSN, no active line | engine null | PASS |
+| R4-GEN-12 | leading-whitespace-indented `#` commented mysql above active `postgres://` | engine `postgresql` (indented comment also ignored) | PASS |
+| R4-GEN-13 | framework trailing-dot: symfony `6.4.*` / laravel `10.*` / symfony `5.4.* \|\| 6.4.*`; `strip_constraint` on `8.*`/`1.*.*` | versions `6.4`/`10`/`5.4`; `8`/`1` — no dangling separator anywhere | PASS |
+| R4-GEN-14 | **adversarial:** `composer.json` with `require` as a JSON **array** not object | gen exit 0; `php`/`framework`/`mapper` null; validator exit 1 (required-key violations); **0** leaked `jq:`/`Cannot index`/`Traceback` lines on either backend (3 trials) | PASS |
+| R4-GEN-15 | **adversarial:** Makefile with targets named like profile keys (`quality:`, `schema_version:`, `deptrac_violations:`, `complexity:`, `psalm_errors:`) plus real `ci:`/`deptrac:` | no key pollution — `quality.complexity` stays 94, `deptrac_violations` stays 0; only `ci`+`deptrac` enter the make map; validator reports only the 2 genuine null-key violations | PASS |
+| R4-GEN-16 | **adversarial:** `.env` with the same key twice (active + commented), 4 variants: active-mysql + commented-dup; commented-pg-dup + active-mysql; active-pg + commented-mysql-dup; two active dups (mysql then pg) | `mysql` / `mysql` / `postgresql` / `mysql` (commented dup ignored; first-active-line-wins per the documented GEN-10 contract) | PASS |
+
+### R4 regression guard — bats + source-level checks
+
+| ID | Check | Expected | Result |
+| --- | --- | --- | --- |
+| R4-REG-01 | `common-lib.bats` + `validate-profile.bats` + `generate-profile.bats` + `ai-review-loop.bats` under forced python backend | 93 `ok`, 0 `not ok` | PASS |
+| R4-REG-02 | `validate-profile.sh` and `ai-review-loop.sh` both source the single `lib/common.sh`; no local `num_gt`/`num_lt`/`strip_zeros` defined elsewhere | one shared impl | PASS |
+| R4-REG-03 | `grep -rnE '\(\(.*10#' scripts/` — no wrap-prone bash arithmetic on profile values | zero matches | PASS |
+
+### Round-4 notes
+
+- The lone transient anomaly seen mid-round (`infection_msi: 2⁶⁴` →
+  exit 1) was a **test-harness race**: two background validator loops wrote
+  the same `$SB/mut.yml` concurrently. Re-run in isolation twice with
+  unique files, `infection_msi: 2⁶⁴` validates clean (exit 0); the entire
+  28-row matrix re-run with one unique file per case is 0 FAIL. Script
+  behavior is correct — the fix was to the test, not the code.
+- R4-GEN-16 variant (d) — `DATABASE_URL` declared **twice active** (mysql
+  then pg) — reports `mysql` because the detector takes the *first active
+  line* (the documented GEN-10 contract, source comment line 148). Real
+  dotenv runtime "last-wins" semantics differ, but a doubly-active
+  `DATABASE_URL` is a degenerate `.env`; reporting the first active hint is
+  the stated, intentional contract, not a defect.
+- R4-GEN-14: `jq` itself errors on `require`-as-array
+  (`Cannot index array with string`, exit 5), but `composer_req` wraps it
+  `2>/dev/null || true`, so the error is swallowed and detection degrades
+  to null on both the jq and forced-python backends — gen exit 0, clean.
+- Framework trailing-dot fix verified on the real QA clone too:
+  `symfony/framework-bundle: 7.2.*` → `framework.version: '7.2'` exactly,
+  no dangling `.`.
+
+### Round-4 verdict
+
+Cases executed: 4 re-runs + 8 validation + 16 generation + 3 regression
+rows = 31 case items, backed by the 28-row uint64 magic-value matrix
+(re-run race-free), a 7-shape malformed-YAML sweep, a 16-assert `num_gt`
+unit suite under 4 locales (64 asserts), and 4 bats suites (93 tests) —
+**0 FAIL**. Both round-1 FAILs (BUG-1 GEN-14, BUG-2 VAL-13 both shapes)
+re-reproduced twice each and confirmed fixed. The shared-helper
+uint64-wrap ceiling fix, the `:=`/`?=`/`+=`/`::=` assignment-exclusion
+regex, the commented-`.env`-line engine detection, the framework
+trailing-dot fix, and the malformed-YAML clean diagnostics all hold to
+contract. The three adversarial-new shapes (require-as-array,
+profile-key-named Makefile targets, doubled `.env` key) degrade or resolve
+truthfully with no crash, leak, or key pollution. No remaining or
+fix-introduced bug found — surface is clean. Sandboxes under
+`/tmp/sdlc-test4-profile-fuzz/` removed.

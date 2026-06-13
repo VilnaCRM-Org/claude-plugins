@@ -272,3 +272,100 @@ exhaustion) re-desk-execute to the same outcomes recorded in rounds 1-2.
   tokens, hints, escalation blocks). No fix-introduced bug.
 
 Sandboxes `/tmp/sdlc-test3-*` deleted after the round.
+
+## Round 4 (convergence)
+
+Date: 2026-06-13. Sandboxes: `/tmp/sdlc-test4-setup/`,
+`/tmp/sdlc-test4-setup2/`, `/tmp/sdlc-test4-setup3/`,
+`/tmp/sdlc-test4-flags/`, `/tmp/sdlc-test4-ghstub/`,
+`/tmp/sdlc-test4-ghstub2/` (all deleted after the round). No git
+mutations; the only repo write is this section.
+
+Goal: the convergence round. Prove the round-3 command-doc fixes that
+landed in commit `1ed8bb7` (CS-N05/N06/N07/N08/E01 — BUG-1..5) actually
+HOLD against live repros, are mutually consistent, and introduced no new
+contradiction. Re-run every prior FAIL repro for real (commit messages
+NOT trusted), desk-execute each command from its hardest edge starting
+state, cross-check every command↔agent contract pair, and grep every
+referenced file/flag/script path against the current tree.
+
+### Round 4 — provenance (what changed since round 3)
+
+`git log` per file: all five owning command files (`sdlc-setup.md`,
+`sdlc-finish-pr.md`, `sdlc-qa.md`, `sdlc.md`, `sdlc-issue.md`) were last
+touched at `1ed8bb7` — the round-3 test campaign that carried the BUG-1..5
+fixes into the tree. So unlike rounds 1-3 (where the owning files were
+unedited and every prior FAIL re-ran to FAIL), round 4 is the first round
+in which the fixes are present and can be verified to hold.
+
+### Round 4 — re-run of the five prior FAIL cases (live repros, fixes now present)
+
+| ID | Case | Re-execution | R3 | R4 |
+| --- | --- | --- | --- | --- |
+| R4-CS-N05 | `/sdlc-setup` generate→validate loop convergence (BUG-1) | live: invalid 2-line profile, then user adds real signals (git remote + `composer.json` php/framework + Makefile); run `generate-profile.sh --refresh` then `validate-profile.sh` per `sdlc-setup.md:70-72`, in two independent sandboxes | FAIL | PASS — FIXED. The loop body now runs `--refresh` (sdlc-setup.md:64,71,127); iteration 1 prints `profile refreshed` (was `kept existing`) and the corrected signals propagate (`project.repo: acme/widget`, `php.version: 8.2/8.3`, `framework.name: symfony` now appear). The loop is no longer a provable no-op: when a fixed signal is detectable it converges; when a violation is a non-redetectable structural gap (persistence, bounded contexts in a bare sandbox) it correctly hits the documented abort path (sdlc-setup.md:75-78). NFR-3 justification (acknowledged remedy after VIOLATION lines, not a silent change) is present (sdlc-setup.md:65-67) and does not contradict sdlc.md's "never auto-generate profile in-loop" rule (sdlc.md:29,76 — the orchestrator never calls `generate-profile.sh`; `/sdlc-setup` is the human decision point). Reproduced twice |
+| R4-CS-N06 | `/sdlc-finish-pr` blocking-finding escalation (BUG-2) | grep + desk-execute `sdlc-finish-pr.md` step 1 + escalation section | FAIL | PASS — FIXED. Step 1 now resolves PR state with `gh pr view --json state,url,number` (:32); **No PR** → create, and a `gh pr create` failure is a blocking finding → escalate (:38-42); **Open** → `gh pr edit` (:43); **MERGED/CLOSED** → escalate, do NOT edit/push (:45-50). The escalation section fires on "a step-1 PR-state/create blocking finding (merged, closed, or `gh pr create` failure)" (:162-164), with `blocking_finding: PR <state>/create-failure` (:53,175) and `iteration: A 0/5, B 0/5` for the pre-loop block (:167-168). A finished/missing PR now has a defined bounded outcome |
+| R4-CS-N07 | `/sdlc-finish-pr` step 2 ci-fixer `BLOCKED`/`SKIPPED-NO-CI` (BUG-3) | grep step-2 statuses vs `ci-fixer.md:123` 4-status enum | FAIL | PASS — FIXED. Step 2 now names all four statuses `ALL-GREEN \| FIXES-READY \| SKIPPED-NO-CI \| BLOCKED` (:68) verbatim-matching `ci-fixer.md:123`, and gives each a bounded outcome: `ALL-GREEN`/`SKIPPED-NO-CI` → satisfied-with-report, no counter consumed (:71-84); `FIXES-READY` → commit-push-repoll = one counter-A tick (:73-79); `BLOCKED` → escalate immediately, NOT a counter-A breach, never loops, no commit/push (:85-90). The unbounded-loop hole (a `BLOCKED` return consuming no iteration and triggering no escalation) is closed (NFR-6) |
+| R4-CS-N08 | `/sdlc-qa` `make.start: null` qualified-PASS verdict (BUG-4) | `sdlc-qa.md:37-43,89-94` vs `qa-manual-tester.md:137-142` vs `sdlc.md:34,66-68` gate | FAIL | PASS — FIXED. The degrade is now first-class on both sides: the command emits `PASS (SUCCESS-WITH-REPORT — black-box QA skipped, make.start: null)` whose leading `PASS` token satisfies the stage-5 gate "QA verdict PASS" (sdlc-qa.md:39-43; report-template note :89-94); the agent mirrors it (`Verdict: PASS` qualified as SUCCESS-WITH-REPORT, qa-manual-tester.md:140-142). The orchestrator gate (sdlc.md:34,68) matches the leading `PASS` and proceeds to stage 6 without burning iterations. Doc-reality mismatch resolved |
+| R4-CS-E01 | `/sdlc` stage-1 issue dedup (BUG-5) | `sdlc-issue.md:34-52` create-mode step 0 + `sdlc.md:43-57` orchestrator resume | FAIL | PASS — FIXED. Two layers of dedup, both keyed on the durable GitHub-side label signal: the orchestrator's resume detection (sdlc.md:43-57) queries `gh issue list --state open --label php-backend-sdlc --json number,url,title,body --limit 100` and adopts a matching managed issue instead of re-entering create mode; create mode itself (sdlc-issue.md:34-52, step 0) repeats the **byte-identical** query before drafting and switches to adopt mode on a match. A `gh issue list` failure escalates ("do not create blind"), so a cross-session resume can no longer open a duplicate |
+
+`allPriorHold = true` — all five round-3 fixes (BUG-1..5) re-run to PASS.
+
+### Round 4 — fix-coherence and cross-contract re-verification
+
+| ID | Case | Check / desk-execution | Result |
+| --- | --- | --- | --- |
+| R4-CS-01 | finish-pr step-2 status enum ≡ ci-fixer contract | command step 2 (`:68`) and escalation (`:164,175`) name `ALL-GREEN \| FIXES-READY \| SKIPPED-NO-CI \| BLOCKED`; `ci-fixer.md:123` emits exactly those four; all four have a bounded handler | PASS |
+| R4-CS-02 | SKIPPED-NO-CI double-cover is consistent, not contradictory | command does its OWN up-front degrade (`ci.provider:null` OR zero checks → SKIP before dispatch, :56-60); the agent's `SKIPPED-NO-CI` (ci-fixer.md:164-165, two triggers) is the fallback for the race where checks vanish at dispatch time; both → satisfied-with-report | PASS |
+| R4-CS-03 | ci-fixer `BLOCKED` triggers all map to finish-pr escalate | ci-fixer.md:169-170 (`gh` unauth/no-PR; profile missing) → command escalates immediately (:85-90); the "no PR exists" trigger is structurally unreachable from finish-pr (step 1 guarantees a PR or escalates) but remains a valid bounded outcome | PASS |
+| R4-CS-04 | finish-pr↔pr-comment-resolver counter-B ownership symmetric (BUG-6 still holds) | command "owns counter B; the agent cannot derive `<b>` itself" (:109); agent "owned by the `/sdlc-finish-pr` stage guard … stateless across dispatches, so it resumes from the dispatched `<b>`" (pr-comment-resolver.md:177-181); Inputs item 1 carries the resume/omit-fallback (`:79-83`) | PASS |
+| R4-CS-05 | sdlc-qa↔qa-manual-tester QA counter transport symmetric | command attaches "the current QA iteration number … the prior iteration ledger, so the agent's counter resumes rather than resets" (sdlc-qa.md:47-51); agent "owned by the `/sdlc-qa` stage guard … stateless across dispatches, so it resumes from the dispatched iteration number" (qa-manual-tester.md:159-163) | PASS |
+| R4-CS-06 | sdlc-issue create-mode dedup query ≡ sdlc.md resume query | both run `gh issue list --state open --label php-backend-sdlc --json number,url,title,body --limit 100` — byte-identical | PASS |
+| R4-CS-07 | escalation-block field set consistent across all 8 commands | 7 stage commands carry the 6-field block (`stage/exit_condition/status/blocking_finding/iteration_log/recommended_action`); sdlc.md forwards "the failing stage's `=== SDLC ESCALATION ===` block" inside the run report by design (sdlc.md:128,149) | PASS |
+| R4-CS-08 | agent-status / verdict tokens cited by commands exist verbatim | `ALL-GREEN`/`FIXES-READY`/`SKIPPED-NO-CI`/`BLOCKED` in ci-fixer.md; `push required: yes` + `AI_REVIEW_VERDICT: PASS` in pr-comment-resolver.md; `AI_REVIEW_VERDICT: PASS\|FAIL` emitted by `ai-review-loop.sh:111,116` | PASS |
+
+### Round 4 — reference-integrity re-checks (current tree)
+
+| ID | Case | Check | Result |
+| --- | --- | --- | --- |
+| R4-CS-P01 | 7 scripts referenced by commands exist | `validate-profile`, `setup-preflight`, `generate-profile`, `inject-governance`, `get-pr-comments`, `ai-review-loop`, `fr-nfr-gate` all present | PASS |
+| R4-CS-P02 | every documented flag parses (no `unknown argument`) | live smoke: `setup-preflight --report`, `generate-profile --refresh`, `inject-governance --diff`, `get-pr-comments --pr/--unresolved-only/--json`, `ai-review-loop --diff-base/--max-iterations` (parser :35-36), `fr-nfr-gate --spec-path` (:34) | PASS |
+| R4-CS-P03 | skill paths + 21-skill count | `skills/bmad-autonomous-planning/SKILL.md`, `skills/SKILL-DECISION-GUIDE.md`, `find skills -name SKILL.md` = 21 | PASS — 21/21 |
+| R4-CS-P04 | all 6 agents referenced exist | `php-implementer`, `code-quality-reviewer`, `fr-nfr-reviewer`, `qa-manual-tester`, `ci-fixer`, `pr-comment-resolver` | PASS |
+| R4-CS-P05 | `get-pr-comments --json` shape preserved + round-2 dataless guards still fire | gh-stub: valid 2-thread payload under `--unresolved-only` → `{pr, review_threads:[{is_resolved:false,…}], issue_comments:[]}` (1 thread, exit 0); `pullRequest:null` → exit 1 "unresolved count is unknowable"; empty body → exit 1 "empty response". No silent "0 unresolved" | PASS |
+| R4-CS-DOCS | docs referenced by commands exist + align | `docs/{profile-schema,degrade-matrix,permissions,sdlc-loop}.md` present; permissions allowlist byte-identical between `sdlc-setup.md` and `docs/permissions.md`; degrade-matrix carries the `make.start`/`ci.provider: null` → SUCCESS-WITH-REPORT rows the fixes hook into | PASS |
+| R4-CS-E12 | argument-hints ≡ documented Inputs for all 8 | finish-pr `[pr-number]`, implement `[specs-dir]`, issue `[task-description \| issue-URL]`, sdlc `[task-description \| issue-URL]`, plan `[issue-URL]`, qa `[issue-URL \| specs-dir]`, review `[specs-dir]`, setup `[--refresh]` | PASS |
+| R4-CS-ESC | canonical escalation block present in all 8 | `=== SDLC ESCALATION ===` in every command | PASS — 8/8 |
+
+### Round 4 — NEW bug hunt (fix-introduced)
+
+No new defect. Each round-3 fix was desk-executed from its hardest edge
+and cross-checked against its agent contract: the setup in-loop
+`--refresh` is scoped to `/sdlc-setup` and does not contradict the
+orchestrator's never-regenerate rule; the finish-pr step-1/step-2
+blocking-finding paths reuse the canonical escalation block with
+consistent `iteration: A 0/5, B 0/5` and `blocking_finding` placeholders;
+the four ci-fixer statuses each map to a bounded handler with no
+unbounded loop; the QA qualified-PASS degrade is mirrored on both
+command and agent and satisfies the stage-5 gate; the issue dedup query
+is byte-identical on the orchestrator and create-mode sides. Two minor
+wording observations were examined and dismissed as non-defects (both
+reachable to a correct state): the finish-pr `PR <state>/create-failure`
+placeholder reads as alternation in a free-text `blocking_finding` line,
+and sdlc-qa step 2's "finish with the degrade verdict" is an unambiguous
+short-circuit that skips the step-3 dispatch.
+
+### Round 4 verdict summary
+
+- `casesRun = 28` (5 prior-FAIL re-runs, 8 fix-coherence/cross-contract,
+  8 reference-integrity, plus the adversarial desk-executions).
+- `priorFailsRechecked = 5`; `allPriorHold = true` — every round-3 fix
+  (BUG-1..5, CS-N05/N06/N07/N08/E01) re-runs to PASS, with BUG-1
+  reproduced twice in two independent sandboxes. BUG-6's round-2 fix also
+  still holds (R4-CS-04).
+- Reference integrity is fully intact (scripts, flags, agents, skills,
+  docs, tokens, hints, escalation blocks) and every command↔agent
+  contract pair is mutually consistent.
+- No new contradiction or unfixed contract. The commands-semantics
+  surface has CONVERGED clean: `bugs = []`.
+
+Sandboxes `/tmp/sdlc-test4-*` deleted after the round.
