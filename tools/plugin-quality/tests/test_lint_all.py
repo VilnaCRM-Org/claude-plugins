@@ -73,30 +73,29 @@ class TestLintAllAggregator(unittest.TestCase):
         self.assertIn("descriptions", rules)
 
     def test_crashing_check_is_a_finding_not_silent(self):
-        # A check module that raises must surface an ERR finding, never pass silently.
-        class Boom:
+        # Exercise the REAL aggregator (lint_all.run): if a discovered check
+        # module raises, run() must convert it into an ERR finding rather than
+        # propagating the exception (a silent abort / false-green). We inject a
+        # crashing module via _discover_check_modules so the run() path itself is
+        # under test, not a try/except in the test body.
+        class _BoomModule:
             __name__ = "check_boom"
 
             @staticmethod
             def check(_root):
                 raise RuntimeError("kaboom")
 
-        import _common
-
-        findings = []
+        original = lint_all._discover_check_modules
+        lint_all._discover_check_modules = lambda: [_BoomModule]
         try:
-            findings.extend(Boom.check(self.tmp))
-        except Exception:
-            findings.append(
-                _common.Finding(
-                    check="ERR",
-                    rule="check_boom.crashed",
-                    severity="S2",
-                    path=str(self.tmp),
-                    message="boom",
-                )
-            )
-        self.assertTrue(any(f.check == "ERR" for f in findings))
+            findings = lint_all.run([self.tmp], self.tmp)
+        finally:
+            lint_all._discover_check_modules = original
+
+        err = [f for f in findings if f.check == "ERR"]
+        self.assertTrue(err, "crashing check must yield an ERR finding via run()")
+        self.assertEqual(err[0].severity, "S2")
+        self.assertIn("kaboom", err[0].message)
 
     @unittest.skipUnless(REAL_PLUGIN.is_dir(), "real plugin not present")
     def test_real_plugin_is_clean(self):

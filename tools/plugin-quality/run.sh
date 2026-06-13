@@ -44,7 +44,9 @@ fi
 if [ "$NO_JUDGE" -eq 0 ]; then
   echo "== Tier 3: LLM-as-judge (sonnet) =="
   if command -v claude >/dev/null 2>&1; then
-    python3 judge/run_judge.py --jobs "${JUDGE_JOBS:-6}" --report judge-report.md || true
+    # No `|| true`: a judge crash, auth failure, or blocking verdict must surface
+    # as a non-zero exit, not be swallowed into a false-green for the gate tier.
+    python3 judge/run_judge.py --gate --jobs "${JUDGE_JOBS:-6}" --report judge-report.md
     echo "  report: $HERE/judge-report.md"
   else
     echo "  SKIP: claude CLI not on PATH"

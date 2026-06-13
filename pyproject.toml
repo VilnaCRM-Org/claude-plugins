@@ -63,8 +63,9 @@ exclude_lines = [
 
 [tool.bandit]
 # The judge engine shells out to the `claude` CLI via subprocess with a fixed
-# argv list (never shell=True, no untrusted interpolation into a shell); B404
-# (import subprocess) and B603 (subprocess call) are accepted by design and
-# justified at each call site.
+# argv list (never shell=True, no untrusted interpolation into a shell). B404
+# (importing subprocess) is benign repo-wide; B603 (the subprocess call) is NOT
+# globally skipped — it is suppressed precisely at the single call site with an
+# inline `# nosec B603` so any future, unreviewed subprocess use is still flagged.
 targets = ["tools/plugin-quality/lint", "tools/plugin-quality/judge"]
-skips = ["B404", "B603"]
+skips = ["B404"]
