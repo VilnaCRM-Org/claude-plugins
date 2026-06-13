@@ -53,6 +53,7 @@ If you created or modified a **NEW feature**, you MUST evaluate **every** skill 
 - `openapi-development`
 - `quality-standards`
 - `query-performance-analysis`
+- `security-audit`
 - `structurizr-architecture-sync`
 - `testing-workflow`
 
@@ -102,6 +103,7 @@ What are you trying to do?
 ├─ Review/validate work
 │   ├─ Before committing → ci-workflow
 │   ├─ PR feedback → code-review
+│   ├─ Adversarial vuln-hunting against the running service → security-audit
 │   ├─ Implemented BMAD specs → bmad-fr-nfr-review-gate
 │   ├─ LLM architecture review → clean-architecture-llm
 │   ├─ Quality thresholds → quality-standards
@@ -115,13 +117,13 @@ What are you trying to do?
     └─ Update workspace.dsl (C4 model) → structurizr-architecture-sync
 ```
 
-All 21 skills appear above: `api-platform-crud`, `bmad-autonomous-planning`,
+All 22 skills appear above: `api-platform-crud`, `bmad-autonomous-planning`,
 `bmad-fr-nfr-review-gate`, `cache-management`, `ci-workflow`,
 `clean-architecture-llm`, `code-organization`, `code-review`,
 `complexity-management`, `database-migrations`, `deptrac-fixer`,
 `documentation-creation`, `documentation-sync`, `implementing-ddd-architecture`,
 `load-testing`, `observability-instrumentation`, `openapi-development`,
-`quality-standards`, `query-performance-analysis`,
+`quality-standards`, `query-performance-analysis`, `security-audit`,
 `structurizr-architecture-sync`, `testing-workflow`.
 
 ## Scenario-Based Guide
@@ -341,6 +343,24 @@ This skill guides updating `workspace.dsl` when adding components or changing ar
 
 ---
 
+## Security audit
+
+### "I need to red-team the running service for vulnerabilities"
+
+**Use**: [security-audit](security-audit/SKILL.md)
+
+This skill runs the adversarial triage → fan-out → find → verify → fix →
+regress → re-verify → loop against an authorized, in-scope running service. It
+dispatches one `security-auditor` red-team subagent per OWASP/vuln family,
+promotes only reproduced findings (SAST output enters as candidates), and routes
+every root-cause fix through `php-implementer` — never suppressions, baselines,
+or threshold cuts. Authorized, defensive use only.
+
+**NOT**: code-review (that's for PR-comment and quality review, not adversarial
+vuln-hunting)
+**NOT**: ci-workflow (that runs static checks but does not probe the live
+service)
+
 ## Skill Relationship Map
 
 ```text
@@ -380,6 +400,7 @@ database-              ci-workflow
 | clean-architecture-llm vs implementing-ddd     | **LLM provider/prompt boundaries** → clean-architecture-llm; **general domain modeling and CQRS** → implementing-ddd-architecture |
 | code-organization vs deptrac-fixer             | **File placement, naming, config extraction** → code-organization; **layer boundary violations** → deptrac-fixer                  |
 | code-organization vs complexity-management     | **Structural refactoring** (move/rename/extract) → code-organization; **reduce cyclomatic complexity** → complexity-management    |
+| security-audit vs code-review                  | **Adversarial vuln-hunting against the running service** → security-audit; **PR-comment / quality review** → code-review          |
 
 ## Multiple Skills for One Task
 

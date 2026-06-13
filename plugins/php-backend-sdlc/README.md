@@ -56,9 +56,10 @@ quality thresholds it carries are raise-only; see the
 | `/sdlc-qa` | 5 | Black-box HTTP verification against the acceptance criteria |
 | `/sdlc-finish-pr` | 6 | PR creation, CI-fix loop, comment-resolution loop |
 
-Commands delegate to six subagents (php-implementer,
+Commands delegate to seven subagents (php-implementer,
 code-quality-reviewer, fr-nfr-reviewer, qa-manual-tester, ci-fixer,
-pr-comment-resolver) and a 21-skill library with applicability triage.
+pr-comment-resolver, security-auditor) and a 22-skill library with
+applicability triage.
 
 ## Documentation
 

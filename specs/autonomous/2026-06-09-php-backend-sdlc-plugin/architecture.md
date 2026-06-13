@@ -29,14 +29,15 @@ plugins/php-backend-sdlc/
 │   ├── sdlc-review.md                   # 21-skill triage + multi-lens review + FR/NFR gate loop
 │   ├── sdlc-qa.md                       # black-box QA via qa-manual-tester
 │   └── sdlc-finish-pr.md                # PR + ci-fixer loop + pr-comment-resolver loop
-├── agents/                              # 6 subagents (FR-9..14)
+├── agents/                              # 7 subagents (FR-9..14)
 │   ├── php-implementer.md
 │   ├── code-quality-reviewer.md
 │   ├── fr-nfr-reviewer.md
 │   ├── qa-manual-tester.md
 │   ├── ci-fixer.md
-│   └── pr-comment-resolver.md
-├── skills/                              # 21 skills (FR-15) + 2 meta-guides (FR-16)
+│   ├── pr-comment-resolver.md
+│   └── security-auditor.md
+├── skills/                              # 22 skills (FR-15) + 2 meta-guides (FR-16)
 │   ├── SKILL-DECISION-GUIDE.md          # triage decision tree (loose file: preserves ../ links)
 │   ├── AI-AGENT-GUIDE.md                # cross-agent usage guide
 │   ├── api-platform-crud/SKILL.md
@@ -58,6 +59,7 @@ plugins/php-backend-sdlc/
 │   ├── openapi-development/SKILL.md
 │   ├── quality-standards/SKILL.md
 │   ├── query-performance-analysis/SKILL.md
+│   ├── security-audit/SKILL.md          (+ reference/ — OWASP catalog, playbooks, remediation)
 │   ├── structurizr-architecture-sync/SKILL.md
 │   └── testing-workflow/SKILL.md
 ├── scripts/                             # pure bash, shellcheck-clean, bats-covered
@@ -160,6 +162,7 @@ System-prompt body — six mandatory sections per FR-9..14 AC: **Role**, **Input
 | qa-manual-tester | sonnet | Bash, Read | verdicts from HTTP behavior only; read-only tool surface (no Edit/Write); report-only contract — the logs/specs-only Read scope is a prompt-level rule (tool frontmatter cannot path-restrict Read) |
 | ci-fixer | sonnet | Bash, Read, Edit, Glob, Grep | `gh run/checks` polling; root-cause fixes; degrade: no checks → report-and-skip |
 | pr-comment-resolver | sonnet | Bash, Read, Edit, Glob, Grep | `get-pr-comments.sh` source of truth; fix or reasoned reply, never silent dismissal |
+| security-auditor | opus | Bash, Read, Glob, Grep | red-team unit, one per OWASP family; grey-box SAST+DAST, verify-by-reproduction; report-and-route (no Edit/Write — findings fixed by php-implementer) |
 
 ## 4. Skill Anatomy & Project Profile
 

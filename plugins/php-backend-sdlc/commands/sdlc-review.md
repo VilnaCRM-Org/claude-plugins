@@ -1,5 +1,5 @@
 ---
-description: "Review implemented changes: 21-skill applicability triage, multi-lens quality and FR/NFR review, gate loop until zero new findings"
+description: "Review implemented changes: 22-skill applicability triage, multi-lens quality and FR/NFR review, gate loop until zero new findings"
 argument-hint: "[specs-dir]"
 allowed-tools: ["Bash", "Read", "Glob", "Grep", "Task"]
 ---
@@ -40,7 +40,7 @@ subagent, and this command commits that remediation between iterations
 ## Procedure
 
 1. **Applicability triage (ADR-5, NFR-5)** — for EVERY skill directory
-   at `${CLAUDE_PLUGIN_ROOT}/skills/*/SKILL.md` (21 in v1):
+   at `${CLAUDE_PLUGIN_ROOT}/skills/*/SKILL.md` (22 in v1):
    - Decide from the skill's frontmatter (`name` + trigger-rich
      `description`, including profile-gating conditions like "Skip when
      `capabilities.structurizr` is false") plus the decision guide —
@@ -48,7 +48,7 @@ subagent, and this command commits that remediation between iterations
    - Record one verdict per skill: `EXECUTE` with one-line evidence
      (which changed file or behavior triggers it) or `NOT-APPLICABLE`
      with a one-line reason (including profile-gated skips).
-   - All 21 verdicts are recorded before any body loads. Token bound
+   - All 22 verdicts are recorded before any body loads. Token bound
      (NFR-5): full SKILL.md bodies + reference files load only for
      EXECUTE verdicts.
 2. **Execute applicable skills** — load each EXECUTE skill's body and
@@ -124,7 +124,7 @@ subagent, and this command commits that remediation between iterations
    That dispatch-commit-reinvoke cycle is one iteration of the loop
    below.
 5. **Report** — render the report template below. Every section is
-   mandatory; verdicts must cover 21/21 skills, and threshold rows must
+   mandatory; verdicts must cover 22/22 skills, and threshold rows must
    cite the actual values read from the profile.
 
 ### Report template
@@ -132,10 +132,11 @@ subagent, and this command commits that remediation between iterations
 ```text
 # SDLC Review Report — <slug>, iteration <n>/5
 
-## Skill triage (21/21 verdicts)
+## Skill triage (22/22 verdicts)
 | skill | verdict | evidence / reason |
 |---|---|---|
-| <one row per skill, all 21> | EXECUTE \| NOT-APPLICABLE | <one line> |
+| <one row per skill, all 22> | EXECUTE \| NOT-APPLICABLE | <one line> |
+| security-audit | EXECUTE \| NOT-APPLICABLE | <adversarial vuln-hunt against the running service when in scope, else one-line reason> |
 
 ## code-quality-reviewer
 | metric | profile threshold | observed | status |
