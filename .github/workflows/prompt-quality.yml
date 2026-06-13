@@ -1,0 +1,117 @@
+# Prompt-quality guardrails for Claude Code plugins (tools/plugin-quality/).
+# Separate from ci.yml: ci.yml gates the plugin's runtime surfaces (manifest,
+# markdownlint, shellcheck, bats, frontmatter, profile-keys, generalization);
+# THIS workflow gates the *prompt quality and structural integrity* of every
+# plugin under plugins/*/ — frontmatter/naming/structure/reference/escalation
+# lint, plus an LLM-as-judge (sonnet) for the qualities a regex cannot see.
+#
+# Tier 1 (static lint) and the self-test suite are deterministic, need no
+# network, and always gate. The LLM-judge runs only when an Anthropic
+# credential is present; with none it SKIPS with an explicit message (never a
+# false green) so a fork PR without the secret still goes green on the
+# deterministic gates.
+name: Prompt Quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least-privilege: jobs only read repo contents.
+permissions:
+  contents: read
+
+jobs:
+  prompt-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Ensure PyYAML
+        run: python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet pyyaml || python3 -m pip install --quiet --break-system-packages pyyaml
+      - name: Tier-1 static prompt lint over plugins/*
+        run: python3 tools/plugin-quality/lint/lint_all.py
+
+  lint-selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Ensure PyYAML
+        run: python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet pyyaml || python3 -m pip install --quiet --break-system-packages pyyaml
+      - name: Validator + judge-engine unit tests (no network)
+        run: |
+          cd tools/plugin-quality
+          python3 -m unittest discover -s tests -v
+
+  plugin-validate-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: claude plugin validate --strict (best-effort, skips if auth-gated)
+        run: |
+          set -uo pipefail
+          if ! npm install -g @anthropic-ai/claude-code@2.1.177 >/dev/null 2>&1; then
+            echo "SKIP: @anthropic-ai/claude-code not installable on this runner"
+            exit 0
+          fi
+          fail=0
+          for dir in plugins/*/; do
+            [ -f "${dir}.claude-plugin/plugin.json" ] || continue
+            rc=0
+            out=$(claude plugin validate "$dir" --strict 2>&1) || rc=$?
+            echo "$out"
+            # Best-effort heuristic over the CLI's human-readable output: there is
+            # no structured auth-status flag, so we match common auth-gating
+            # phrasings. On a match we skip-with-message; any other non-zero
+            # exit is a real validation failure and fails the job.
+            if printf '%s' "$out" | grep -qiE 'not logged in|please run /login|requires authentication|not authenticated|unauthorized|login required|no credentials|ANTHROPIC_API_KEY'; then
+              echo "SKIP: 'claude plugin validate' is auth-gated on this runner — relying on manifest-validate-py (lint_all)"
+              continue
+            fi
+            if [ "$rc" -ne 0 ]; then
+              echo "FAIL: claude plugin validate $dir exited ${rc}"
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+  prompt-judge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Decide whether credentials are available
+        id: creds
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "SKIP: no ANTHROPIC_API_KEY secret — LLM-judge skipped. Deterministic lint still gates."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Ensure PyYAML
+        if: steps.creds.outputs.run == 'true'
+        run: python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet pyyaml || python3 -m pip install --quiet --break-system-packages pyyaml
+      - name: Install claude CLI
+        if: steps.creds.outputs.run == 'true'
+        run: npm install -g @anthropic-ai/claude-code@2.1.177
+      - name: LLM-as-judge (sonnet, blocks on critical score <= 2)
+        if: steps.creds.outputs.run == 'true'
+        run: |
+          python3 tools/plugin-quality/judge/run_judge.py \
+            --gate --require --votes 3 --model sonnet --report judge-report.md
+      - name: Publish judge report to job summary
+        if: steps.creds.outputs.run == 'true' && (success() || failure())
+        run: |
+          if [ -f judge-report.md ]; then
+            cat judge-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi

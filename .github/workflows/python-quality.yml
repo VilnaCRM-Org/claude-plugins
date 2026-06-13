@@ -1,0 +1,125 @@
+# Python code-quality gates for the repo's Python (tools/plugin-quality/).
+# Conventions mirror VilnaCRM-Org/bootstrap-infrastructure (ruff, ty,
+# radon/xenon maintainability, bandit, branch coverage). That repo runs them in
+# Docker via `make` + uv; this repo has no Docker dev-env, so each job installs
+# `uv` and runs the same tools via `uvx` (pinned versions) directly on the
+# runner. Tool config lives in pyproject.toml.
+name: Python Quality Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+env:
+  PY_SRC: tools/plugin-quality
+  PROD_SRC: tools/plugin-quality/lint tools/plugin-quality/judge
+
+jobs:
+  ruff:
+    name: Ruff
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install uv (pinned)
+        run: |
+          pipx install uv==0.9.21
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Ruff lint
+        run: uvx ruff@0.15.6 check $PY_SRC
+      - name: Ruff format check
+        run: uvx ruff@0.15.6 format --check $PY_SRC
+
+  ty:
+    name: Ty
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install uv (pinned)
+        run: |
+          pipx install uv==0.9.21
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # Type-check the library code (lint/ + judge/). Tests are excluded: they
+      # rely on monkeypatch reassignment + assertIn-on-Optional idioms that a
+      # static checker flags as false positives. --extra-search-path resolves
+      # the toolkit's runtime sys.path imports; --with pyyaml gives ty the
+      # PyYAML types used by _model.
+      - name: Ty type check (library)
+        run: |
+          uvx --with pyyaml ty@0.0.21 check $PROD_SRC \
+            --extra-search-path tools/plugin-quality/lint \
+            --extra-search-path tools/plugin-quality/judge
+
+  maintainability:
+    name: Maintainability
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install uv (pinned)
+        run: |
+          pipx install uv==0.9.21
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Radon complexity + maintainability report (informational)
+        run: |
+          uvx radon@6.0.1 cc -s -a $PROD_SRC
+          uvx radon@6.0.1 mi -s -n B $PROD_SRC
+      - name: Xenon complexity gate (max block B, module B, average A)
+        run: uvx xenon@0.9.3 --max-absolute B --max-modules B --max-average A $PROD_SRC
+
+  security:
+    name: Security (bandit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install uv (pinned)
+        run: |
+          pipx install uv==0.9.21
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Bandit security scan
+        run: uvx 'bandit[toml]@1.8.6' -c pyproject.toml -r $PROD_SRC
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install uv (pinned)
+        run: |
+          pipx install uv==0.9.21
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      # Branch coverage of the library, exercised by the stdlib unittest suite
+      # (config: pyproject.toml [tool.coverage]). Floor is 100% line+branch; the
+      # only excluded lines are `if __name__ == "__main__":` guards (and any
+      # `# pragma: no cover`), all of which are unreachable from the suite.
+      - name: Coverage (unittest)
+        run: |
+          uvx --with pyyaml coverage@7.6.7 run -m unittest discover \
+            -s tools/plugin-quality/tests -t tools/plugin-quality
+      - name: Coverage report (fail under 100%)
+        run: uvx coverage@7.6.7 report --fail-under=100

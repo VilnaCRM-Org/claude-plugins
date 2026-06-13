@@ -1,0 +1,7 @@
+# Judge verdict cache (content-addressed, regenerated on demand).
+.judge-cache/
+# Generated judge reports.
+judge-report*.md
+# Python bytecode.
+__pycache__/
+*.pyc
