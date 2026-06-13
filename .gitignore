@@ -1,4 +1,8 @@
 node_modules/
-.ralph/logs/
-_bmad-output/
 *.log
+# bmalph-generated local tooling (reproduce with: bmalph init --platform claude-code)
+_bmad/
+_bmad-output/
+.ralph/
+bmalph/
+.claude/

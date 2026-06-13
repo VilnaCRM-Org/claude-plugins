@@ -1,0 +1,32 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "pageInfo": { "hasNextPage": true },
+          "nodes": [
+            {
+              "isResolved": true,
+              "comments": {
+                "pageInfo": { "hasNextPage": false },
+                "nodes": [
+                  {
+                    "author": { "login": "coderabbitai" },
+                    "body": "First page resolved thread.",
+                    "path": "src/Catalog/Handler.php",
+                    "line": 42,
+                    "url": "https://github.com/acme/sample-api/pull/7#discussion_r100"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": {
+          "pageInfo": { "hasNextPage": false },
+          "nodes": []
+        }
+      }
+    }
+  }
+}

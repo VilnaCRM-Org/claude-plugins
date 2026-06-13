@@ -1,0 +1,568 @@
+# Test Plan — profile-fuzz
+
+Surface: `scripts/generate-profile.sh` + `scripts/validate-profile.sh`
+against mutated target-repo shapes and hand-edited profiles.
+
+Contracts: FR-2/FR-17 (PRD), `docs/profile-schema.md`, script headers
+(A3/NFR-3/NFR-4: missing capability never fails generation; default mode
+diff-and-keep, `--refresh` overwrites; validator prints every violation and
+exits 1 on any).
+
+Environment: sandboxes under `/tmp/sdlc-test-profile-fuzz/`; QA template
+clone at `/home/kravtsov/Projects/tmp/php-sdlc-qa/php-service-template`.
+`yq` is absent on this host, so the python3+PyYAML backend is exercised
+(the yq path is covered by CI bats on hosts with yq; recorded as an
+environment limitation, not a gap fixed here).
+
+Invariants checked in every generation case:
+
+- generation exits 0 whenever the target dir exists (capability absence is
+  null/false, never an error);
+- the emitted file is parseable YAML;
+- detection is truthful: every non-null emitted value corresponds to a
+  real fact of the target repo, and validator verdicts match the schema.
+
+## Positive cases — generation
+
+| ID | Target-repo shape | Expected | Result |
+| --- | --- | --- | --- |
+| GEN-01 | No `composer.json` at all | exit 0; `php.version`/`framework.name`/`persistence.*` null; profile written; validator then exits 1 naming exactly those required keys | PASS |
+| GEN-02 | `composer.json` without `require` key | exit 0; same nulls as GEN-01; no crash | PASS |
+| GEN-03 | `composer.json` with invalid JSON syntax | exit 0; detection degrades to nulls; no jq/python traceback on stdout/stderr | PASS |
+| GEN-04 | `composer.json` is a JSON array, not object | exit 0; nulls; no crash | PASS |
+| GEN-05 | Multi-constraint PHP versions: `>=7.3 <8`, `^8.2 \|\| ^8.3`, `7.2.*`, `>=8.1,<8.4` | first version wins, clean MAJOR.MINOR: `7.3`, `8.2`, `7.2`, `8.1` | PASS |
+| GEN-06 | `"php": "*"` constraint | exit 0; `php.version` null (no digits to extract) | PASS |
+| GEN-07 | Monorepo: full app under `backend/`, run on root then on `backend/` | root run: exit 0, nulls, profile at root `.claude/`; subdir run: full detection, profile at `backend/.claude/php-sdlc.yml`, validator exit 0 | PASS |
+| GEN-08 | `.env` with UTF-8 BOM prefixing the `DATABASE_URL` line | engine still detected (`mysql`) | PASS |
+| GEN-09 | `.env` with CRLF line endings | engine still detected (`mysql`) | PASS |
+| GEN-10 | Multiple active DSNs: (a) mysql then pg; (b) pg then mysql; (c) commented mysql + active pg; (d) active pg + `serverVersion=mariadb` | first active line decides: (a) `mysql`, (b) `postgresql`, (c) `postgresql`, (d) `mariadb` (global mariadb override) | PASS |
+| GEN-11 | Makefile using `include targets.mk` where `ci:` lives in the include | exit 0; included targets are not scanned → `make.ci` null (documented Makefile-only scan; degrade, judged for truthfulness) | PASS |
+| GEN-12 | Makefile with only `.PHONY:`, variable assignments, comments | exit 0; all `make.*` null; `capabilities.load_testing` false | PASS |
+| GEN-13 | Makefile mixing tabs/spaces, pattern rules (`%.o: %.c`, `test%:`), double-colon `ci::`, plain `tests:` | pattern/percent targets never enter the map; `ci` and `tests` detected | PASS |
+| GEN-14 | Makefile with no-space variable assignment `tests:=unit src` and no `tests` target | `make.tests` should be null (a `:=` assignment is not a target) | FAIL → BUG-1 |
+| GEN-15 | No `src/` directory | exit 0; `source_root` null, `bounded_contexts: []`; validator exits 1 naming `architecture.source_root` + empty context list | PASS |
+| GEN-16 | `src/` containing only `Shared/` | `shared_context: "Shared"`, contexts `[]`; validator flags empty `bounded_contexts` | PASS |
+| GEN-17 | Context dirs with hostile names: space, unicode, `"` quote, backslash, `$(touch marker)`, `#`, `null` | exit 0; YAML parses; every name round-trips byte-exact via PyYAML; no command execution (marker file absent); validator exit 0 | PASS |
+| GEN-18 | Context dir with embedded newline/control char in its name | control chars stripped on emission; YAML stays single-line valid | PASS |
+| GEN-19 | Existing profile hand-edited to `schema_version: 2`, regenerate | default run keeps file + prints unified diff mentioning `--refresh`; `--refresh` run restores `schema_version: 1` | PASS |
+| GEN-20 | Unknown flag `--bogus`; nonexistent TARGET_DIR | die with usage/`target directory not found`, exit 1, no partial profile written | PASS |
+| GEN-21 | Real QA template clone (php-service-template) | exit 0; validator exit 0; spot-truth: `php.version`, `framework.name`, `persistence.engine`, every non-null `make.*` exists as a real Makefile target, contexts == `src/` dirs | PASS (see notes) |
+
+## Negative / hand-edited profile validation
+
+Baseline profile for VAL cases: the valid profile generated in GEN-21
+(copied per-case, then mutated).
+
+| ID | Mutation | Expected | Result |
+| --- | --- | --- | --- |
+| VAL-01 | None (template-generated profile) | exit 0, `profile valid` | PASS |
+| VAL-02 | `schema_version`: `2`, `0`, and key deleted | one violation each (`unsupported`/`missing`), exit 1 | PASS |
+| VAL-03 | `schema_version: "1"` (quoted string) | reads back as `1`, exit 0 (type-lenient by design) | PASS |
+| VAL-04 | `persistence.engine: sqlite`; `persistence.mapper: eloquent` | enum violation per key, exit 1 | PASS |
+| VAL-05 | Lowered floors: `complexity: 90`, `infection_msi: 99`, `quality: 99` | ADR-7 raise-only violation per key, exit 1 | PASS |
+| VAL-06 | Raised floors: `complexity: 100`, `infection_msi: 150` | exit 0 (raising is legal) | PASS |
+| VAL-07 | `deptrac_violations: 5`; `psalm_errors: -1` | ceiling-relaxed violation; `-1` rejected as non-integer; exit 1 | PASS |
+| VAL-08 | Wrong types: `bounded_contexts: core` (scalar); `bounded_contexts: {a: 1}` (map); `complexity: high`; `infection_msi: 99.5` | each is a violation (list-type or non-integer), exit 1 | PASS |
+| VAL-09 | `make.load_tests` line deleted vs all 12 make keys explicit `null` | deletion → `make map incomplete` violation; all-null map → no make violations | PASS |
+| VAL-10 | Extra unknown keys (`extra: stuff` top-level, `make.custom: x`) | accepted; exit unchanged (unknown keys are not a documented violation class) | PASS |
+| VAL-11 | `ci.provider` line deleted vs `ci.provider: null` | deletion → `not declared` violation; explicit null → legal | PASS |
+| VAL-12 | Empty (0-byte) profile file | every required-key violation listed, exit 1, no crash | PASS |
+| VAL-13 | Syntactically invalid YAML (tab indentation; also unclosed quote) | clean failure (non-zero exit) with a `[php-sdlc]` diagnostic, not a raw traceback | FAIL → BUG-2 |
+| VAL-14 | Leading zeros: `complexity: 094`; `schema_version: 01` | `094` passes (10# guard, 94 ≥ 94); `01` resolves per YAML 1.1 to integer `1` → accepted (judged correct; initial `01 ≠ 1` expectation was wrong, no contract requires rejecting it) | PASS (judged) |
+| VAL-15 | PROFILE arg is a directory; PROFILE arg missing file | `die` with `profile not found … run /sdlc-setup` remediation, exit 1 | PASS |
+| VAL-16 | Many seeded errors at once (bad enum + lowered floor + missing make key + bad schema_version) | all 4 violations printed in one pass; `INVALID: 4 violation(s)` summary matches | PASS |
+| VAL-17 | Hand-edited profile saved with UTF-8 BOM; with CRLF line endings | PyYAML tolerates both; exit 0, `profile valid` | PASS |
+
+## Edge-case notes / environment limitations
+
+- `yq` backend untestable on this host (binary absent); python3+PyYAML
+  path exercised everywhere. CI bats cover both backends via
+  `SDLC_FORCE_PYTHON_YAML`.
+- `composer.json` with UTF-8 BOM degrades to null detection in both jq and
+  python backends; Composer itself rejects BOM'd `composer.json`, so this
+  is not a reachable valid repo state — observation only, not a bug.
+- GEN-21 notes: `project.name: "php-serice-template"` reproduces the
+  upstream composer-name typo (truthful, not a plugin bug). `ci.workflows`
+  lists `"code quality"` twice because `psalm.yml` and `phpinsights.yml`
+  both carry that `name:` — truthful duplication. During the session the
+  generated profile vanished from the shared QA clone once: a concurrent
+  surface's `git clean -fd` reset (clone mtime evidence), environment
+  artifact, not a script defect; all GEN-21 evidence was captured before
+  the reset and the run was re-executed cleanly from a sandbox copy.
+- An adversarial GEN-17 variant with `/` in the injected context name is
+  unreachable: the filesystem treats `/` as a path separator, so the
+  detector truthfully reports the actual child dir of `src/`.
+- The generator is NOT affected by BUG-2: with a malformed existing
+  profile it takes the byte-diff path (no YAML parse), exits 0, and keeps
+  the existing file with the usual `--refresh` hint.
+
+## Round-1 verdict
+
+38 case items executed (21 GEN + 17 VAL). 36 PASS, 2 FAIL:
+
+- **BUG-1 (GEN-14, S3)**: a no-space `name:=value` Makefile variable
+  assignment is captured as a make *target*: `tests:=unit src` with no
+  `tests` rule emits `make.tests: tests` although `make tests` fails —
+  untruthful detection with exit 0. Reproduced twice (fresh dirs).
+  Repro: `printf 'tests:=unit src\nci:\n\ttrue\n' > Makefile` then run
+  `generate-profile.sh <dir>` and read `make.tests` from the profile.
+- **BUG-2 (VAL-13, S3)**: a syntactically invalid profile YAML (tab
+  indentation, or an unclosed quote) makes `validate-profile.sh` abort via
+  `set -e` with a raw PyYAML traceback on stderr — exit 1 but zero
+  `VIOLATION:`/`[php-sdlc]` lines and no remediation hint. Reproduced
+  twice with two distinct malformations (python backend; yq backend
+  untested on this host).
+  Repro: `printf 'project:\n\tname: "x"\n' > p.yml && validate-profile.sh p.yml`.
+
+## Round 2
+
+Tree state under test: branch `feature/php-backend-sdlc-plugin` working
+tree (includes the uncommitted fixes for BUG-1 and BUG-2 plus three
+hardening changes landed since round 1):
+
+1. Makefile target scan: `grep -E '^[A-Za-z0-9_-]+:{1,2}([^=:].*)?$'`
+   excludes `name:=` / `name::=` / `name:::=` variable assignments (BUG-1
+   fix).
+2. `yaml_parses` up-front guard in `validate-profile.sh` → clean
+   `[php-sdlc]` diagnostic with `/sdlc-setup` remediation on malformed
+   YAML (BUG-2 fix).
+3. Wrap-safe `num_gt`/`num_lt` digit-string threshold comparison replacing
+   `(( 10#$val ))` bash arithmetic (≥2⁶³ values no longer wrap negative).
+4. Workflow basename fallback routed through `sanitize_inline` (control
+   chars in workflow *filenames* can no longer leak into the profile).
+5. Symlink write-target rejection: symlinked profile file, symlinked
+   `.claude` dir, and a resolved profile dir escaping `$TARGET` all `die`.
+
+Environment unchanged: no `yq` on this host → python3+PyYAML backend
+(yq path covered by CI bats). Sandboxes under
+`/tmp/sdlc-test-profile-fuzz/r2-*`, deleted after the round. Truthfulness
+of `make.*` detection is now cross-checked with real
+`make -n <target>` (GNU make available on this host).
+
+### Re-runs — highest-risk round-1 cases
+
+| ID | Re-run of | Expected | Result |
+| --- | --- | --- | --- |
+| R2-RERUN-01 | GEN-05 multi-constraint PHP versions (`>=7.3 <8`, `^8.2 \|\| ^8.3`, `7.2.*`, `>=8.1,<8.4`) | `7.3`, `8.2`, `7.2`, `8.1` | PASS |
+| R2-RERUN-02 | GEN-10 multiple active DSNs (mysql→pg, pg→mysql, commented-mysql+active-pg, pg+mariadb serverVersion) | first active line wins: `mysql`, `postgresql`, `postgresql`, `mariadb` | PASS |
+| R2-RERUN-03 | GEN-13 Makefile tabs/spaces mix, `%.o: %.c`, `test%:`, `ci::`, plain `tests:` | pattern targets excluded; `ci`, `tests` detected | PASS |
+| R2-RERUN-04 | GEN-14 `tests:=unit src`, no `tests` rule (BUG-1 regression) | `make.tests: null` | PASS (BUG-1 fixed) |
+| R2-RERUN-05 | GEN-17 hostile context dir names (space, unicode, quote, backslash, `$(touch marker)`, `#`, `null`) | YAML parses, byte-exact round-trip, no execution, validator exit 0 | PASS |
+| R2-RERUN-06 | GEN-19 `schema_version: 2` drift; default keeps + diff, `--refresh` restores | diff mentions `--refresh`; refreshed file has `schema_version: 1` | PASS |
+| R2-RERUN-07 | GEN-21 QA template clone end-to-end + spot-truth | generation exit 0, validator exit 0, make map truthful | PASS |
+| R2-RERUN-08 | VAL-05 lowered floors (`complexity: 90`, `infection_msi: 99`, `quality: 99`) | 3 ADR-7 violations, exit 1 | PASS |
+| R2-RERUN-09 | VAL-07 `deptrac_violations: 5`; `psalm_errors: -1` | ceiling violation + non-integer violation, exit 1 | PASS |
+| R2-RERUN-10 | VAL-13 tab-indent + unclosed-quote profile (BUG-2 regression) | exit 1, `[php-sdlc][ERROR] profile is not valid YAML … /sdlc-setup`, zero traceback lines | PASS (BUG-2 fixed) |
+| R2-RERUN-11 | VAL-16 4 seeded errors at once | all 4 violations + `INVALID: 4 violation(s)` | PASS |
+
+### New generation cases — targeting the Makefile, sanitize, symlink fixes
+
+| ID | Target-repo shape | Expected | Result |
+| --- | --- | --- | --- |
+| R2-GEN-01 | Colon-flavored assignments only: `tests::=unit`, `ci:::=x`, `e2e::= y`, plus `start:=now` | all four `make.*` null; `load_testing: false` | PASS |
+| R2-GEN-02 | Same name as variable AND target: `tests:=val` assignment + real `tests:` rule | `make.tests: tests` (target exists; `make -n tests` exit 0) | PASS |
+| R2-GEN-03 | Double-colon rule `ci:: deps`, order-only prereq `tests:\| build`, comment-trailing `psalm:# note` | all three detected; each runs under `make -n` | PASS |
+| R2-GEN-04 | Truthfulness sweep: for every R2 Makefile, each non-null `make.*` must `make -n <v>` exit 0 and each null candidate must fail `make -n` | zero contradictions | PASS |
+| R2-GEN-05 | Workflow file whose FILENAME embeds a control char (`ci\x01x.yml`), no `name:` field | basename sanitized; profile single-line, parses; validator runs normally | PASS |
+| R2-GEN-06 | `.claude` in target is a symlink to an outside dir | `die` "(.claude) is a symlink", exit 1, no file created outside | PASS |
+| R2-GEN-07 | Existing `.claude/php-sdlc.yml` is a symlink to an outside file | `die` "profile path is a symlink", exit 1, outside file byte-identical after | PASS |
+| R2-GEN-08 | TARGET_DIR argument is itself a symlink to a real repo | exit 0; profile written inside the real repo dir | PASS |
+| R2-GEN-09 | Mode preservation: existing profile `chmod 600` then `--refresh`; fresh create under `umask 027` | refreshed file keeps 600; fresh file 640 | PASS |
+
+### New validation cases — targeting yaml_parses + num_gt/num_lt
+
+Baseline: freshly generated valid QA-template profile, mutated per case.
+
+| ID | Mutation | Expected | Result |
+| --- | --- | --- | --- |
+| R2-VAL-01 | Tab-indented YAML (BUG-2 shape A) | exit 1, clean `[php-sdlc][ERROR] profile is not valid YAML … /sdlc-setup`, no `Traceback` | PASS |
+| R2-VAL-02 | Unclosed double quote (BUG-2 shape B) | same clean failure | PASS |
+| R2-VAL-03 | Profile parses to a non-map: bare scalar `hello`; top-level list `- a` | no crash; every required-key violation listed; exit 1 | PASS |
+| R2-VAL-04 | `psalm_errors: 18446744073709551615` (2⁶⁴−1, old code wrapped to −1) | ceiling violation, exit 1 | PASS |
+| R2-VAL-05 | `infection_msi: 99999999999999999999999999` (26 digits) | exit 0 (raise-only allows it; no crash/wrap) | PASS |
+| R2-VAL-06 | Leading zeros: `complexity: 0000094` / `complexity: 093` / `psalm_errors: 00` | pass / violation / pass | PASS |
+| R2-VAL-07 | YAML 1.1 int forms: `deptrac_violations: 1_000`; `infection_msi: 0x64` | violation naming value 1000; pass (0x64 = 100) | PASS |
+| R2-VAL-08 | `infection_msi: 1e3` (string in YAML 1.1) | non-integer violation, exit 1 | PASS |
+| R2-VAL-09 | Anchor/alias reuse: `quality: &q 100` then `architecture: *q` | aliases resolve; exit 0 | PASS |
+| R2-VAL-10 | All five floors exactly at shipped defaults, ceilings at 0 (boundary equality) | exit 0 | PASS |
+
+### Round-2 notes
+
+- R2-GEN-04 sweep also confirmed the one *intentional* asymmetry: `make -n`
+  resolves targets from `include`d files while the profile scan is
+  Makefile-only (round-1 GEN-11 degrade); the sweep therefore only asserts
+  "non-null ⇒ runnable", which held everywhere, and "null candidate ⇒ not
+  runnable" on include-free Makefiles.
+- R2-GEN-05: with the filename `ci\x01x.yml` and no `name:` field the
+  emitted entry is `"cix"` — control char stripped, no YAML structure
+  damage. A literal-newline filename variant was also run: profile stays
+  valid single-line YAML.
+- R2-VAL-07 observation (not a bug): PyYAML applies YAML 1.1 resolution,
+  so `1_000` and `0x64` are integers by spec; the validator judges the
+  resolved value, which is the correct reading of a hand-edited file.
+- QA clone note: the clone contained a stray untracked file `ok` from a
+  previous session; removed before R2-RERUN-07 and the clone restored
+  with `git checkout . && git clean -fd` afterwards.
+
+### Round-2 verdict
+
+30 case items executed (11 re-runs + 9 GEN + 10 VAL). 30 PASS, 0 FAIL.
+Both round-1 bugs verified fixed; no new bugs confirmed. Sandboxes under
+`/tmp/sdlc-test-profile-fuzz/` removed.
+
+## Round 2 (verification campaign — independent re-execution)
+
+Tree under test: the round-1-fixed working tree (commit `ad6497e`,
+branch `feature/php-backend-sdlc-plugin`). This section is an independent
+second-campaign verification: every result below was executed for real on
+this host (no `yq`; python3 + PyYAML 6.0.3; GNU make 4.4.1), not copied
+from the round-1 author's "Round 2" notes above. Focus per the campaign
+charter: confirm the round-1 fixes hold and hunt regressions introduced
+*by* those fixes — wrap-safe `num_gt`/`num_lt`, the `is_int` ceiling/floor
+type guards, the `:=` Makefile-assignment exclusion regex, the
+`yaml_parses` up-front guard, the symlink write-target rejection, and the
+workflow-filename `sanitize_inline` routing.
+
+Sandboxes: `/tmp/sdlc-test2-profile-fuzz/`, removed after the round.
+Truthfulness of every non-null `make.*` cross-checked with real
+`make -n <target>` and `make -p` (a `make -n` failure on a *dangling
+prerequisite* is not treated as "target absent": `make -p` confirms the
+target is declared, which is what the scan reports).
+
+### R2v re-runs — round-1 FAILs and highest-risk cases
+
+| ID | Re-run of | Expected | Result |
+| --- | --- | --- | --- |
+| R2V-RERUN-01 | GEN-14 / BUG-1: `tests:=unit src`, no `tests` rule | `make.tests: null`; `make -n tests` fails (consistent) | PASS |
+| R2V-RERUN-02 | VAL-13 / BUG-2 shape A: tab-indented profile | exit 1, `[php-sdlc][ERROR] profile is not valid YAML … /sdlc-setup`, 0 `Traceback` lines | PASS |
+| R2V-RERUN-03 | VAL-13 / BUG-2 shape B: unclosed double quote | same clean diagnostic, 0 `Traceback` lines | PASS |
+| R2V-RERUN-04 | GEN-21 baseline generation (synthetic symfony+orm+mysql repo) | exit 0; emitted defaults `complexity:94`, quality/arch/style/msi `100`, ceilings `0`; validator exit 0 | PASS |
+| R2V-RERUN-05 | VAL-05 lowered floors (0/50/99 vs 94/100) | ADR-7 raise-only violation each, exit 1 | PASS |
+| R2V-RERUN-06 | VAL-07 ceiling relaxed (`deptrac_violations:1`, `psalm_errors:1`) | ceiling violation each, exit 1 | PASS |
+
+### R2v generation — Makefile assignment-operator matrix (`:=` focus)
+
+Each candidate cross-checked against `make -n` / `make -p`.
+
+| ID | Target-repo shape | Expected | Result |
+| --- | --- | --- | --- |
+| R2V-GEN-01 | Every GNU make assignment op on candidate names: `tests = unit`, `ci := build`, `psalm ::= run`, `deptrac :::= x`, `infection ?= y`, `phpinsights += z`, `e2e!=echo hi`, plus real `start:` / `load-tests:` | all six assignments → null; `start`/`load-tests` detected and runnable | PASS |
+| R2V-GEN-02 | No-space colon assignments: `tests:=unit`, `ci::=build`, `deptrac:::=x`, `psalm:= run` | all four → null (none is a target per `make -p`) | PASS |
+| R2V-GEN-03 | Colon-prereq target forms: `infection: prereq`, `start:\| order-only`, `phpinsights:: deps`, `e2e: # …`, `pr-comments:`, `load-tests:; @true` | all detected as declared targets (confirmed via `make -p`); the three with dangling prereqs fail `make -n` only on the missing prereq, not on target absence | PASS |
+| R2V-GEN-04 | Assignment + real target collision: `tests:=val` then real `tests:` rule | `make.tests: tests` (real target wins; `make -n tests` runnable) | PASS |
+| R2V-GEN-05 | Triple-colon-no-equals `ci::: x` (a make syntax error) + a `tests:` line with trailing whitespace + `psalm:  build` + `%.o: %.c` + `e2e-tests:` | `ci` null (invalid line), `tests`/`psalm` detected, pattern rule excluded, `e2e` ← `e2e-tests` | PASS |
+| R2V-GEN-06 | `find_target` substring safety: only `tests:` present, candidates `tests test` | `make.tests: tests` (exact `grep -qxF`, not the shorter `test`) | PASS |
+| R2V-GEN-07 | Workflow FILENAME embeds control char `ci\x01x.yml`, no `name:` field | basename `sanitize_inline`'d to `"cix"`; profile single-line, parses; emitted `ci.workflows: ["cix"]` | PASS |
+| R2V-GEN-08 | `.claude` is a symlink to an outside dir | `die` "(.claude) is a symlink"; outside dir stays empty | PASS |
+| R2V-GEN-09 | existing `.claude/php-sdlc.yml` is a symlink to an outside file | `die` "profile path is a symlink"; outside file byte-identical | PASS |
+| R2V-GEN-10 | TARGET_DIR is itself a symlink to a real repo | exit 0; profile written inside the real repo | PASS |
+| R2V-GEN-11 | Malformed *existing* profile (tab + `: : :`), default run | exit 0, byte-diff path keeps the file, `--refresh` hint, no traceback | PASS |
+| R2V-GEN-12 | `schema_version: 2` drift: default vs `--refresh` | default keeps + mentions `--refresh`; `--refresh` restores `schema_version: 1` | PASS |
+
+### R2v validation — extreme numerics on every threshold key
+
+Floors checked: `quality.phpinsights.{quality,architecture,style}` (100),
+`quality.phpinsights.complexity` (94), `quality.infection_msi` (100).
+Ceilings checked: `quality.deptrac_violations`, `quality.psalm_errors` (0).
+Each value below was run against every applicable key (174 mutate-and-run
+rows logged); table groups by behavior class.
+
+| ID | Mutation class (applied to each threshold key) | Expected | Result |
+| --- | --- | --- | --- |
+| R2V-VAL-01 | uint64 wrap `18446744073709551615` (2⁶⁴−1) | floor → pass (raise); ceiling → VIOLATION (no wrap to −1) | PASS |
+| R2V-VAL-02 | 26-digit `99999999999999999999999999` | floor → pass; ceiling → VIOLATION; no crash/wrap | PASS |
+| R2V-VAL-03 | negative `-1` / `-100` / `-.inf` | non-integer VIOLATION (`-` fails `^[0-9]+$`) | PASS |
+| R2V-VAL-04 | float `99.5` / `0.0` / `94.5` | non-integer VIOLATION | PASS |
+| R2V-VAL-05 | `1e3` / `1e0` / `1e999` (YAML 1.1 strings) | non-integer VIOLATION | PASS |
+| R2V-VAL-06 | `.inf` / `-.inf` / `.nan` (parse to float) | non-integer VIOLATION | PASS |
+| R2V-VAL-07 | hex `0x64` (=100) / `0x0` (=0) | judged on resolved int (pass/fail per floor/ceiling rule) | PASS |
+| R2V-VAL-08 | `0o144` / `0o0` (NOT YAML 1.1 octal → string) | non-integer VIOLATION | PASS |
+| R2V-VAL-09 | underscore `100_000` / `9_4` (YAML 1.1 int) | judged on resolved int | PASS |
+| R2V-VAL-10 | leading zeros `094`/`093`/`0000…094`/`0000…093`/`00`/`000` | `strip_zeros` → 94 passes, 93 violates, all-zero → 0 | PASS |
+| R2V-VAL-11 | `+100` / `+0` (signed) | resolve to int, judged normally | PASS |
+| R2V-VAL-12 | bool words `yes`/`no`/`on`/`off`/`true`/`false` (→ `true`/`false`) | non-integer VIOLATION | PASS |
+| R2V-VAL-13 | `null` / `~` / `""` / empty | required-key-missing-or-null VIOLATION | PASS |
+| R2V-VAL-14 | boundary equality: floor==default, ceiling==0 | exit 0 | PASS |
+
+### R2v validation — enums, types, structure, YAML edge scalars
+
+| ID | Mutation | Expected | Result |
+| --- | --- | --- | --- |
+| R2V-VAL-15 | `persistence.engine`: `mysql`/`"mysql"` ok; `MySQL`/`sqlite`/`yes`/`on` enum VIOLATION; `null` missing | as expected, exit 1 on each bad | PASS |
+| R2V-VAL-16 | `persistence.mapper`: `doctrine-orm`/quoted ok; `eloquent` enum VIOLATION | as expected | PASS |
+| R2V-VAL-17 | `schema_version`: `1`/`"1"`/`01`/`+1` ok; `1.0`/`on`(→true) unsupported VIOLATION | as expected | PASS |
+| R2V-VAL-18 | `architecture.bounded_contexts`: `[Core]`/`[123]` valid; `[]` "at least one"; `core`/`{a:1}`/`null`/`yes` "must be a list" | distinct, correct messages; exit 1 on each bad | PASS |
+| R2V-VAL-19 | `ci.provider`: explicit `null` legal (exit 0); key deleted → "not declared" VIOLATION | as expected | PASS |
+| R2V-VAL-20 | `num_gt`/`num_lt`/`strip_zeros` unit suite (21 asserts incl. same-length lexicographic, 19-vs-20-digit length, all-zero) under `LC_ALL=C/POSIX/en_US.UTF-8/C.UTF-8` | all pass; comparison locale-insensitive for digit strings | PASS |
+
+### Round-2 (verification campaign) verdict
+
+Cases executed this campaign: 6 re-runs + 12 generation + 20 validation
+groups, backed by 174 logged numerics mutate-and-run rows and a 21-assert
+`num_gt`/`num_lt` unit suite — 250+ individual assertions. All PASS, 0
+FAIL. Every round-1 FAIL re-run (BUG-1 GEN-14, BUG-2 VAL-13 both shapes)
+now passes. No new bugs found; no regression from the five hardening
+changes. The wrap-safe digit-string threshold comparison, the `is_int`
+type guards, the `:=`/`::=`/`:::=` assignment-exclusion regex, the
+`yaml_parses` guard, the symlink rejection, and the workflow-filename
+sanitize all behave to contract. Sandboxes under
+`/tmp/sdlc-test2-profile-fuzz/` removed.
+
+## Round 3
+
+Tree under test: branch `feature/php-backend-sdlc-plugin` working tree at
+commit `180a282` (round-2 fixes landed; tree clean). Independent third
+campaign: every row below was executed for real on this host — no `yq`
+(python3 3.14.4 + PyYAML 6.0.3 backend, `SDLC_FORCE_PYTHON_YAML=1`); GNU
+make 4.4.1; `jq` 1.8.1 present (composer.json read path). Charter: prove
+the round-1/2 fixes HOLD and hunt any remaining or fix-introduced defect.
+Priority targets per the round-3 brief: the uint64-wrap ceiling fix now
+sourced from the *shared* `num_gt`/`num_lt` in `lib/common.sh`; the full
+`:=` / `?=` / `+=` / `=` Makefile assignment-operator matrix; malformed-YAML
+clean diagnostics (zero raw tracebacks); and confirmation that legitimate
+raises are still accepted.
+
+Sandboxes under `/tmp/sdlc-test3-profile-fuzz/`, removed after the round.
+Every non-null `make.*` candidate cross-checked against real `make -p`
+(declared-target proof) and `make -n` (runnable proof). The QA clone was
+copied to a sandbox (`qa-copy`, stray untracked `ok` dropped in the copy
+only) and never mutated in place.
+
+### R3 re-runs — round-1 FAILs and highest-risk cases
+
+| ID | Re-run of | Expected | Result |
+| --- | --- | --- | --- |
+| R3-RERUN-01 | GEN-14 / BUG-1: `tests:=unit src`, no `tests` rule (2 fresh dirs) | `make.tests: null`; `make -n tests` fails (consistent) | PASS |
+| R3-RERUN-02 | VAL-13 / BUG-2 shape A: tab-indented profile (2 fresh files) | exit 1, `[php-sdlc][ERROR] profile is not valid YAML … /sdlc-setup`, 0 `Traceback` lines | PASS |
+| R3-RERUN-03 | VAL-13 / BUG-2 shape B: unclosed double quote (2 fresh files) | same clean diagnostic, 0 `Traceback` lines | PASS |
+| R3-RERUN-04 | GEN-05 multi-constraint PHP version first-wins, via baseline `^8.2` and QA-clone `>=8.2` | clean `8.2` | PASS |
+| R3-RERUN-05 | GEN-10 first-active-DSN engine (baseline mysql; QA-clone active `postgres://` after commented lines) | `mysql` / `postgresql` | PASS |
+| R3-RERUN-06 | GEN-19 `schema_version: 2` drift: default keeps + unified diff mentioning `--refresh`; `--refresh` restores `1` | as expected | PASS |
+| R3-RERUN-07 | GEN-21 QA-template clone end-to-end + spot-truth | gen exit 0, validator exit 0, all 8 non-null `make.*` REAL, contexts == `src/` dirs minus `Shared` | PASS |
+| R3-RERUN-08 | VAL-05 lowered floors (`complexity: 93`, `infection_msi: 99`) | ADR-7 raise-only VIOLATION each, exit 1 | PASS |
+| R3-RERUN-09 | VAL-07 ceiling relaxed (`deptrac_violations: 1`, `psalm_errors: 5`) | ceiling VIOLATION each, exit 1 | PASS |
+
+### R3 validation — uint64-wrap ceiling fix (shared `num_gt`/`num_lt`)
+
+Every magic value applied to every applicable threshold key off a freshly
+generated valid baseline profile (28 mutate-and-run rows). Ceilings:
+`quality.deptrac_violations`, `quality.psalm_errors` (default 0). Floors:
+`quality.phpinsights.{quality,architecture,style}` (100),
+`quality.phpinsights.complexity` (94), `quality.infection_msi` (100).
+
+| ID | Mutation (value → applied to) | Expected | Result |
+| --- | --- | --- | --- |
+| R3-VAL-01 | `9223372036854775808` (2⁶³) → both ceilings | VIOLATION "relaxed above 0", exit 1 (no wrap to negative passing) | PASS |
+| R3-VAL-02 | `18446744073709551616` (2⁶⁴) → both ceilings | VIOLATION, exit 1 (no wrap to 0) | PASS |
+| R3-VAL-03 | `18446744073709551617` (2⁶⁴+1) → both ceilings | VIOLATION, exit 1 | PASS |
+| R3-VAL-04 | `100000000000000000000` (10²⁰) → both ceilings | VIOLATION, exit 1 | PASS |
+| R3-VAL-05 | 2⁶³ / 2⁶⁴ / 2⁶⁴+1 / 10²⁰ → each of the 5 floors | exit 0 `profile valid` (raising is legal; no false "lowered" from a negative wrap) | PASS |
+| R3-VAL-06 | legitimate raises: `complexity 94→95/99`, `infection_msi 100` | exit 0 | PASS |
+| R3-VAL-07 | legitimate lower: `complexity 94→93`, `infection_msi 100→99` | ADR-7 VIOLATION, exit 1 | PASS |
+| R3-VAL-08 | ceiling relaxed small: `deptrac_violations 0→1`, `psalm_errors 0→5` | VIOLATION, exit 1 | PASS |
+| R3-VAL-09 | boundary equality: all floors == default, both ceilings == 0 | exit 0 | PASS |
+| R3-VAL-10 | big-but-normal raise `complexity → 1000000`; same-length lexicographic `complexity → 89` | raise exit 0; 89 < 94 VIOLATION exit 1 | PASS |
+| R3-VAL-11 | `num_gt`/`num_lt`/`strip_zeros` unit suite (15 asserts incl. length-path, same-length lex, 2⁶⁴ vs 0, 2⁶⁴+1 vs 2⁶⁴, 10²⁰ vs 2⁶³) under `LC_ALL=C/POSIX/en_US.UTF-8/C.UTF-8` | all pass; locale-insensitive | PASS |
+
+### R3 validation — numerics, non-integers, malformed YAML
+
+| ID | Mutation | Expected | Result |
+| --- | --- | --- | --- |
+| R3-VAL-12 | leading zeros `094`/`0000094` (PyYAML string, `is_int` matches) → complexity | `strip_zeros` → 94, exit 0 | PASS |
+| R3-VAL-13 | `093` → complexity; `01` → deptrac_violations | 93 VIOLATION; 1 VIOLATION; exit 1 | PASS |
+| R3-VAL-14 | `00`/`000` → ceilings (resolve to int 0); `0144` → complexity (PyYAML 1.1 octal = 100) | exit 0 | PASS |
+| R3-VAL-15 | non-integers `99.5`/`-1`/`high`/`yes`(→bool); `null` | non-integer / missing VIOLATION, exit 1 | PASS |
+| R3-VAL-16 | malformed-YAML sweep (11 shapes): tab-indent, unclosed double/single quote, unclosed flow map, `a: b: c`, undefined alias, bad block struct, lone tab, bare scalar, top-level list, empty file | every one exits 1, **0** `Traceback`/`yaml.scanner`/`File "` lines | PASS |
+| R3-VAL-17 | parses-to-non-map (bare scalar, top-level list) and empty file | no crash; all 29 required-key VIOLATIONs listed, exit 1 | PASS |
+
+### R3 generation — Makefile `:=` / `?=` / `+=` / `=` assignment matrix
+
+Each candidate cross-checked against `make -p` / `make -n`.
+
+| ID | Target-repo shape | Expected | Result |
+| --- | --- | --- | --- |
+| R3-GEN-01 | spaced ops `tests = unit`, `ci := build`, `psalm ?= run`, `deptrac += x`, plus real `e2e-tests:` | four assignments → null; `e2e` ← `e2e-tests` | PASS |
+| R3-GEN-02 | no-space colon ops `tests:=unit`, `ci::=build`, `deptrac:::=x`, `psalm:= run`, `infection!=echo hi`, `phpinsights= z` | all six → null (none a target per `make -p`) | PASS |
+| R3-GEN-03 | no-space `tests?=unit`, `ci+=more`, real `psalm:` | `tests`/`ci` null, `psalm` detected | PASS |
+| R3-GEN-04 | assignment + real-target collision `tests:=val` then `tests:` rule; `ci = nope` then `ci:` rule | real targets win; `make -n tests` runnable | PASS |
+| R3-GEN-05 | target with target-specific var prereq `ci: a=b`; `:=` value with `=` `deptrac:= x=y`; real `psalm: FORCE` | `ci`/`psalm` detected (real targets), `deptrac` null (`:=`) | PASS |
+| R3-GEN-06 | assignment value containing `://` `DB_URL := mysql://localhost:3306/db`, real `ci:` | only `ci` detected; DSN line not a target | PASS |
+| R3-GEN-07 | double-colon/empty-recipe forms `tests::`, `ci:: deps`, `psalm:`, `deptrac: ;@true` | all four detected (confirmed via `make -p`) | PASS |
+| R3-GEN-08 | var-VALUE false-positive `TESTS_DIR=tests`, real `ci:` | `make.tests` null (only a value), `ci` detected | PASS |
+| R3-GEN-09 | prefix var `tests-extra := x`, `test-config = y`, real `ci:` | `make.tests` null (exact `grep -qxF`, no prefix leak), `ci` detected | PASS |
+| R3-GEN-10 | indented (recipe) line two-space-prefixed `ci:` vs anchored `start:` | `ci` null (`^` anchor rejects indented), `start` detected | PASS |
+
+### R3 generation — symlink rejection + idempotency
+
+| ID | Target-repo shape | Expected | Result |
+| --- | --- | --- | --- |
+| R3-GEN-11 | `.claude` is a symlink to an outside dir | `die` "(.claude) is a symlink", exit 1; outside dir stays empty | PASS |
+| R3-GEN-12 | existing `.claude/php-sdlc.yml` is a symlink to an outside file | `die` "profile path is a symlink", exit 1; outside file byte-identical | PASS |
+
+### R3 regression guard — bats + source-level checks
+
+| ID | Check | Expected | Result |
+| --- | --- | --- | --- |
+| R3-REG-01 | `common-lib.bats` (28), `validate-profile.bats`, `generate-profile.bats` under forced python backend | 0 failures; includes committed uint64-wrap ceiling + huge-raise tests | PASS |
+| R3-REG-02 | `ai-review-loop.bats` (shared `num_gt` consumer, 23) | 0 failures | PASS |
+| R3-REG-03 | `validate-profile.sh` defines **no** local `num_gt`/`num_lt`/`strip_zeros`; both consumers use the single `lib/common.sh` copy | one shared implementation | PASS |
+| R3-REG-04 | `grep -rE '\(\(.*10#' scripts/` — no wrap-prone bash arithmetic on profile values remains | zero matches | PASS |
+
+### Round-3 notes
+
+- The uint64-wrap fix is now genuinely *shared*: `strip_zeros`/`num_gt`/
+  `num_lt` exist only in `lib/common.sh`; `validate-profile.sh` and
+  `ai-review-loop.sh` both source it, and no divergent local copy or
+  `(( 10#$val ))` arithmetic survives anywhere in `scripts/`. The 28-row
+  magic-value matrix confirms ceilings reject 2⁶³/2⁶⁴/2⁶⁴+1/10²⁰ while the
+  same magnitudes pass as floor *raises*.
+- PyYAML 1.1 resolution observations (not bugs, judged on the resolved
+  value): `094`/`0000094` resolve to the *string* `'094'` (the `8`/`9`
+  digits make them invalid octal), which `is_int`'s `^[0-9]+$` accepts and
+  `strip_zeros` reduces to 94 — a pass; `0144` resolves to integer `100`
+  (valid YAML 1.1 octal) — a pass; `00`/`000` resolve to integer `0`.
+- QA-clone truth: `php.version 8.2` (from `>=8.2`), `framework symfony`,
+  `persistence.engine postgresql` (first active `postgres://` DSN after the
+  commented lines), `bounded_contexts ["CompanySubdomain","Internal"]`,
+  `shared_context Shared` — all match the on-disk repo. The shared clone's
+  stray untracked `ok` file (a prior-session artifact) was dropped only in
+  the `qa-copy` sandbox; the shared clone was not mutated.
+
+### Round-3 verdict
+
+Cases executed: 9 re-runs + 17 validation + 12 generation + 4 regression
+rows = 42 case items, backed by the 28-row uint64 magic-value matrix, an
+11-shape malformed-YAML sweep, a 15-assert `num_gt` unit suite run under 4
+locales, and 4 committed bats suites (74 tests) — 0 FAIL. Both round-1
+FAILs (BUG-1 GEN-14, BUG-2 VAL-13 both shapes) re-reproduced twice each and
+confirmed fixed. The shared-helper uint64-wrap ceiling fix, the full
+`:=`/`?=`/`+=`/`=` assignment-exclusion regex, the malformed-YAML
+`yaml_parses` guard, and the symlink rejection all hold to contract. No
+remaining or fix-introduced bug found. Sandboxes under
+`/tmp/sdlc-test3-profile-fuzz/` removed.
+
+## Round 4 (convergence)
+
+Tree under test: branch `feature/php-backend-sdlc-plugin` working tree at
+commit `ec27b82` (clean — `.claude/` is git-ignored; the 3 modified
+`docs/testing/plans/*.md` files in `git status` belong to concurrent
+sibling surfaces, not this one). Independent fourth campaign run for real
+on this host — no `yq` (`SDLC_FORCE_PYTHON_YAML=1`, python3 3.14.4 +
+PyYAML 6.0.3); GNU make 4.4.1; `jq` 1.8.1; bats 1.11.1; markdownlint-cli2
+v0.22.1. Charter: prove the round-3 fixes HOLD and surface any genuine
+remaining bug — clean reported clean, no manufactured findings.
+
+Sandboxes under `/tmp/sdlc-test4-profile-fuzz/`, removed after the round.
+Every non-null `make.*` candidate cross-checked against real `make -p`
+(declared-target proof) and `make -n` (runnable proof). The QA clone was
+copied to a sandbox (`qa-copy`, stray untracked `ok` dropped in the copy
+only) and never mutated in place.
+
+### R4 re-runs — prior FAILs and highest-risk cases
+
+| ID | Re-run of | Expected | Result |
+| --- | --- | --- | --- |
+| R4-RERUN-01 | GEN-14 / BUG-1: `tests:=unit src`, no `tests` rule (2 fresh dirs) | `make.tests: null`, `make.ci: ci`; `make -n tests` exit≠0 (consistent) | PASS |
+| R4-RERUN-02 | VAL-13 / BUG-2 shape A: tab-indented profile (2 fresh files) | exit 1, `[php-sdlc][ERROR] … not valid YAML … /sdlc-setup`, 0 `Traceback` lines | PASS |
+| R4-RERUN-03 | VAL-13 / BUG-2 shape B: unclosed double quote (2 fresh files) | same clean diagnostic, 0 `Traceback` lines | PASS |
+| R4-RERUN-04 | GEN-21 QA-template clone end-to-end + spot-truth (sandbox copy) | gen exit 0, validator exit 0; all 8 non-null `make.*` DECLARED via `make -p`; contexts == `src/` dirs minus `Shared` | PASS |
+
+### R4 validation — uint64-wrap ceiling fix via shared `num_gt`/`num_lt`
+
+Every magic value applied to every applicable threshold key off a freshly
+generated valid baseline (28 unique-file mutate-and-run rows; each case a
+distinct file, no shared `mut.yml` — see notes). Ceilings:
+`quality.{deptrac_violations,psalm_errors}` (default 0). Floors:
+`quality.phpinsights.{quality,architecture,style}` (100),
+`quality.phpinsights.complexity` (94), `quality.infection_msi` (100).
+
+| ID | Mutation (value → applied to) | Expected | Result |
+| --- | --- | --- | --- |
+| R4-VAL-01 | `9223372036854775808` (2⁶³) → both ceilings | VIOLATION "relaxed above 0", exit 1 (no wrap to negative passing) | PASS |
+| R4-VAL-02 | `18446744073709551616` (2⁶⁴) → both ceilings | VIOLATION, exit 1 (no wrap to 0) | PASS |
+| R4-VAL-03 | `18446744073709551617` (2⁶⁴+1) → both ceilings | VIOLATION, exit 1 | PASS |
+| R4-VAL-04 | `10³⁰` (`1` + 30 zeros) → both ceilings | VIOLATION, exit 1 | PASS |
+| R4-VAL-05 | 2⁶³ / 2⁶⁴ / 2⁶⁴+1 / 10³⁰ → each of the 5 floors | exit 0 `profile valid` (raising is legal; no false "lowered" from a negative wrap) | PASS |
+| R4-VAL-06 | legitimate raises on each floor: quality 150, architecture 1000, style 100, complexity 95 & 1000000, infection_msi 100 & 9999999999 | exit 0 each | PASS |
+| R4-VAL-07 | `num_gt`/`num_lt`/`strip_zeros` unit suite (16 asserts incl. 2⁶⁴>0, 2⁶⁴>2⁶³, 2⁶⁴+1>2⁶⁴, 10³⁰>2⁶³, same-length lex, equality false, leading-zero `094` not> `94`) under `LC_ALL=C/POSIX/en_US.UTF-8/C.UTF-8` | 16/16 per locale, locale-insensitive | PASS |
+
+### R4 validation — malformed-YAML clean diagnostics
+
+| ID | Mutation | Expected | Result |
+| --- | --- | --- | --- |
+| R4-VAL-08 | malformed-YAML sweep (7 shapes): tab-indent, unclosed double quote, unclosed single quote, unclosed flow map, `a: b: c`, undefined alias, lone tab line | every one exits 1, `not valid YAML … /sdlc-setup`, **0** `Traceback`/`File "`/`yaml.` lines | PASS |
+
+### R4 generation — Makefile `:=`/`?=`/`+=`/`::=` assignment parsing
+
+Each candidate cross-checked against `make -p` / `make -n`.
+
+| ID | Target-repo shape | Expected | Result |
+| --- | --- | --- | --- |
+| R4-GEN-01 | full op matrix on candidate names: `tests :=`, `ci ?=`, `psalm +=`, `deptrac ::=`, `infection =`, `phpinsights:=`, `pr-comments?=`, `fr-nfr-gate+=`, `load-tests:::=`, plus real `start:`/`e2e-tests:` | all nine assignments → null; only `start`+`e2e-tests` detected and runnable; each assignment-only name fails `make -n` ("No rule") | PASS |
+| R4-GEN-02 | assignment-then-real-target collision: `tests := skip` then `tests:` rule; `ci ?= skip` then `ci:` rule | real targets win; `make -n tests` exit 0 | PASS |
+| R4-GEN-03 | `+=` append twice (`psalm += …`) + `:=` (`deptrac:=x`), real `start:` | `psalm`/`deptrac` null, `start` detected | PASS |
+| R4-GEN-04 | `?=` value containing a colon (`tests ?= mysql://h:3306/db`), real `ci:` | `tests` null (DSN value not a target), `ci` detected | PASS |
+| R4-GEN-05 | `::=`/`:::=` spaced and no-space (`ci ::=`, `tests :::=`, `infection::=`, `e2e-tests:::=`), real `start:` | all four null, `start` detected | PASS |
+| R4-GEN-06 | indented recipe line `\tci:` under `start:` | `ci` null (`^` anchor rejects indented), `start` detected | PASS |
+| R4-GEN-07 | substring safety: only `tests-extra:`/`test-config:` present, candidate `tests` | `make.tests` null (exact `grep -qxF`, no prefix leak), `ci` detected | PASS |
+| R4-GEN-08 | variable VALUE contains candidate names: `TESTS_DIR = tests`, `RUN := psalm deptrac`, real `ci:` | `tests`/`psalm`/`deptrac` null (values, not targets), `ci` detected | PASS |
+
+### R4 generation — engine detection, framework version, adversarial-new
+
+| ID | Target-repo shape | Expected | Result |
+| --- | --- | --- | --- |
+| R4-GEN-09 | commented mysql DSN above active `postgresql://` | engine `postgresql` (commented line ignored) | PASS |
+| R4-GEN-10 | commented `postgresql` above active `mysql://` | engine `mysql` | PASS |
+| R4-GEN-11 | ONLY a commented mysql DSN, no active line | engine null | PASS |
+| R4-GEN-12 | leading-whitespace-indented `#` commented mysql above active `postgres://` | engine `postgresql` (indented comment also ignored) | PASS |
+| R4-GEN-13 | framework trailing-dot: symfony `6.4.*` / laravel `10.*` / symfony `5.4.* \|\| 6.4.*`; `strip_constraint` on `8.*`/`1.*.*` | versions `6.4`/`10`/`5.4`; `8`/`1` — no dangling separator anywhere | PASS |
+| R4-GEN-14 | **adversarial:** `composer.json` with `require` as a JSON **array** not object | gen exit 0; `php`/`framework`/`mapper` null; validator exit 1 (required-key violations); **0** leaked `jq:`/`Cannot index`/`Traceback` lines on either backend (3 trials) | PASS |
+| R4-GEN-15 | **adversarial:** Makefile with targets named like profile keys (`quality:`, `schema_version:`, `deptrac_violations:`, `complexity:`, `psalm_errors:`) plus real `ci:`/`deptrac:` | no key pollution — `quality.complexity` stays 94, `deptrac_violations` stays 0; only `ci`+`deptrac` enter the make map; validator reports only the 2 genuine null-key violations | PASS |
+| R4-GEN-16 | **adversarial:** `.env` with the same key twice (active + commented), 4 variants: active-mysql + commented-dup; commented-pg-dup + active-mysql; active-pg + commented-mysql-dup; two active dups (mysql then pg) | `mysql` / `mysql` / `postgresql` / `mysql` (commented dup ignored; first-active-line-wins per the documented GEN-10 contract) | PASS |
+
+### R4 regression guard — bats + source-level checks
+
+| ID | Check | Expected | Result |
+| --- | --- | --- | --- |
+| R4-REG-01 | `common-lib.bats` + `validate-profile.bats` + `generate-profile.bats` + `ai-review-loop.bats` under forced python backend | 93 `ok`, 0 `not ok` | PASS |
+| R4-REG-02 | `validate-profile.sh` and `ai-review-loop.sh` both source the single `lib/common.sh`; no local `num_gt`/`num_lt`/`strip_zeros` defined elsewhere | one shared impl | PASS |
+| R4-REG-03 | `grep -rnE '\(\(.*10#' scripts/` — no wrap-prone bash arithmetic on profile values | zero matches | PASS |
+
+### Round-4 notes
+
+- The lone transient anomaly seen mid-round (`infection_msi: 2⁶⁴` →
+  exit 1) was a **test-harness race**: two background validator loops wrote
+  the same `$SB/mut.yml` concurrently. Re-run in isolation twice with
+  unique files, `infection_msi: 2⁶⁴` validates clean (exit 0); the entire
+  28-row matrix re-run with one unique file per case is 0 FAIL. Script
+  behavior is correct — the fix was to the test, not the code.
+- R4-GEN-16 variant (d) — `DATABASE_URL` declared **twice active** (mysql
+  then pg) — reports `mysql` because the detector takes the *first active
+  line* (the documented GEN-10 contract, source comment line 148). Real
+  dotenv runtime "last-wins" semantics differ, but a doubly-active
+  `DATABASE_URL` is a degenerate `.env`; reporting the first active hint is
+  the stated, intentional contract, not a defect.
+- R4-GEN-14: `jq` itself errors on `require`-as-array
+  (`Cannot index array with string`, exit 5), but `composer_req` wraps it
+  `2>/dev/null || true`, so the error is swallowed and detection degrades
+  to null on both the jq and forced-python backends — gen exit 0, clean.
+- Framework trailing-dot fix verified on the real QA clone too:
+  `symfony/framework-bundle: 7.2.*` → `framework.version: '7.2'` exactly,
+  no dangling `.`.
+
+### Round-4 verdict
+
+Cases executed: 4 re-runs + 8 validation + 16 generation + 3 regression
+rows = 31 case items, backed by the 28-row uint64 magic-value matrix
+(re-run race-free), a 7-shape malformed-YAML sweep, a 16-assert `num_gt`
+unit suite under 4 locales (64 asserts), and 4 bats suites (93 tests) —
+**0 FAIL**. Both round-1 FAILs (BUG-1 GEN-14, BUG-2 VAL-13 both shapes)
+re-reproduced twice each and confirmed fixed. The shared-helper
+uint64-wrap ceiling fix, the `:=`/`?=`/`+=`/`::=` assignment-exclusion
+regex, the commented-`.env`-line engine detection, the framework
+trailing-dot fix, and the malformed-YAML clean diagnostics all hold to
+contract. The three adversarial-new shapes (require-as-array,
+profile-key-named Makefile targets, doubled `.env` key) degrade or resolve
+truthfully with no crash, leak, or key pollution. No remaining or
+fix-introduced bug found — surface is clean. Sandboxes under
+`/tmp/sdlc-test4-profile-fuzz/` removed.

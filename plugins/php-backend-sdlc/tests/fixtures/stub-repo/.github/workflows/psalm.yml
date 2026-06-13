@@ -1,0 +1,9 @@
+name: psalm
+on: push
+permissions:
+  contents: read
+jobs:
+  psalm:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo stub

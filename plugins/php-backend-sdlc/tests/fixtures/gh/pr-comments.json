@@ -1,0 +1,56 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": { "login": "coderabbitai" },
+                    "body": "Consider validating the input length here.",
+                    "path": "src/Catalog/Handler.php",
+                    "line": 42,
+                    "url": "https://github.com/acme/sample-api/pull/7#discussion_r100"
+                  },
+                  {
+                    "author": { "login": "maintainer" },
+                    "body": "Good catch, will fix.",
+                    "path": "src/Catalog/Handler.php",
+                    "line": 42,
+                    "url": "https://github.com/acme/sample-api/pull/7#discussion_r101"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": { "login": "reviewer" },
+                    "body": "Rename this method for clarity.",
+                    "path": "src/Order/Service.php",
+                    "line": 17,
+                    "url": "https://github.com/acme/sample-api/pull/7#discussion_r102"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": {
+          "nodes": [
+            {
+              "author": { "login": "ci-bot" },
+              "body": "Overall summary: 2 findings, 1 addressed.",
+              "url": "https://github.com/acme/sample-api/pull/7#issuecomment-900"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

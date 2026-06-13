@@ -1,0 +1,4 @@
+# markdownlint config consumed by the markdown-lint CI job (markdownlint-cli2).
+# MD013 (80-char lines) is off: the profile-schema key tables and annotated
+# YAML examples cannot fit 80 columns without harming readability.
+MD013: false
