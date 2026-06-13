@@ -175,14 +175,17 @@ def _run_claude(prompt: str, model: str, timeout: int) -> str:
     # Prompt as an argument (not stdin -> avoids the injection guard); no --bare
     # (it breaks OAuth auth here); neutral cwd (no project CLAUDE.md leakage).
     cmd = ["claude", "-p", prompt, "--model", model, "--output-format", "json"]
+    # A FRESH empty dir per call (not the shared system temp dir) so no stray
+    # /tmp/CLAUDE.md or sibling file can leak ambient instructions into the judge.
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=tempfile.gettempdir(),
-        )
+        with tempfile.TemporaryDirectory(prefix="judge-cwd-") as neutral_cwd:
+            proc = subprocess.run(  # nosec B603 -- fixed argv list, no shell; safe
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=neutral_cwd,
+            )
     except subprocess.TimeoutExpired as exc:
         raise JudgeError(f"claude call timed out after {timeout}s") from exc
     if proc.returncode != 0:

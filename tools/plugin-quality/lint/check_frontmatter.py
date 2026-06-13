@@ -60,10 +60,17 @@ def _present_tools(value) -> bool:
     A list satisfies the contract only when at least one element is a non-empty
     string: a malformed list like ``[123]`` or ``[null]`` (no usable tool name)
     must NOT count as a present ``tools`` list, so L3 still flags it.
+
+    A comma-separated string satisfies the contract only when it yields at least
+    one non-empty token: a comma/whitespace-only string like ``","`` or
+    ``" , , "`` is non-empty as a raw string yet carries no tool name, so it is
+    treated as absent and L3 still flags it.
     """
     if isinstance(value, list):
         return any(_nonempty_str(item) for item in value)
-    return _nonempty_str(value)
+    if isinstance(value, str):
+        return any(part.strip() for part in value.split(","))
+    return False
 
 
 def _is_report_only(body: str) -> bool:
@@ -105,6 +112,54 @@ def _check_command(art) -> list[Finding]:
     return findings
 
 
+def _allowed_tools_finding(art, message: str) -> Finding:
+    """An L2 ``frontmatter.command.allowed-tools`` finding (the shared shape)."""
+    return Finding(
+        check="L2",
+        rule="frontmatter.command.allowed-tools",
+        severity="S2",
+        path=art.rel,
+        message=message,
+    )
+
+
+def _check_unknown_tools(art, tools: list) -> list[Finding]:
+    """L2: every element must be a string naming a known tool.
+
+    Restricts the set-membership test to STRING elements: a non-string element
+    (``[123]``) or an unhashable one (``[["x"]]``, ``[{}]``) would otherwise
+    raise on ``t in KNOWN_TOOLS``. Such malformed elements are surfaced as
+    unknown rather than crashing.
+    """
+    unknown = [t for t in tools if not (isinstance(t, str) and t in KNOWN_TOOLS)]
+    if not unknown:
+        return []
+    return [
+        _allowed_tools_finding(
+            art, "allowed-tools contains unknown tools: " + ", ".join(map(str, unknown))
+        )
+    ]
+
+
+def _check_report_only_tools(art, tools: list) -> list[Finding]:
+    """L2: a report-only command must not allowlist mutating tools (Write/Edit).
+
+    Only STRING elements are compared, so a non-string element cannot raise on
+    the ``t in MUTATING_TOOLS`` membership test.
+    """
+    if not _is_report_only(art.body):
+        return []
+    mutating = [t for t in tools if isinstance(t, str) and t in MUTATING_TOOLS]
+    if not mutating:
+        return []
+    return [
+        _allowed_tools_finding(
+            art,
+            "report-only command must not allow mutating tools: " + ", ".join(mutating),
+        )
+    ]
+
+
 def _check_allowed_tools(art) -> list[Finding]:
     """L2: allowed-tools array shape, unknown-tool, and report-only rules."""
     fm = art.frontmatter
@@ -114,46 +169,14 @@ def _check_allowed_tools(art) -> list[Finding]:
     tools = fm.get("allowed-tools")
     if not isinstance(tools, list):
         return [
-            Finding(
-                check="L2",
-                rule="frontmatter.command.allowed-tools",
-                severity="S2",
-                path=art.rel,
-                message="allowed-tools must be a JSON array of known tools",
+            _allowed_tools_finding(
+                art, "allowed-tools must be a JSON array of known tools"
             )
         ]
 
     findings: list[Finding] = []
-    unknown = [t for t in tools if t not in KNOWN_TOOLS]
-    if unknown:
-        findings.append(
-            Finding(
-                check="L2",
-                rule="frontmatter.command.allowed-tools",
-                severity="S2",
-                path=art.rel,
-                message=(
-                    "allowed-tools contains unknown tools: "
-                    f"{', '.join(map(str, unknown))}"
-                ),
-            )
-        )
-
-    if _is_report_only(art.body):
-        mutating = [t for t in tools if t in MUTATING_TOOLS]
-        if mutating:
-            findings.append(
-                Finding(
-                    check="L2",
-                    rule="frontmatter.command.allowed-tools",
-                    severity="S2",
-                    path=art.rel,
-                    message=(
-                        "report-only command must not allow mutating tools: "
-                        f"{', '.join(mutating)}"
-                    ),
-                )
-            )
+    findings.extend(_check_unknown_tools(art, tools))
+    findings.extend(_check_report_only_tools(art, tools))
     return findings
 
 

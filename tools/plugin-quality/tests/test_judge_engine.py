@@ -1024,8 +1024,18 @@ class TestF6BRunClaudeHappyPath(unittest.TestCase):
         self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
         self.assertIn("--output-format", argv)
         self.assertEqual(argv[argv.index("--output-format") + 1], "json")
-        # cwd is a temp dir (neutral, no project CLAUDE.md leakage).
-        self.assertEqual(kwargs.get("cwd"), tempfile.gettempdir())
+        # cwd is a FRESH per-call temp dir under the system temp root (neutral,
+        # no project/ambient CLAUDE.md leakage). Not the shared temp dir itself.
+        cwd = kwargs.get("cwd")
+        self.assertIsNotNone(cwd)
+        self.assertNotEqual(cwd, tempfile.gettempdir())
+        self.assertTrue(
+            pathlib.Path(cwd)
+            .resolve()
+            .is_relative_to(pathlib.Path(tempfile.gettempdir()).resolve()),
+            f"cwd {cwd!r} must be under the system temp root",
+        )
+        self.assertIn("judge-cwd-", pathlib.Path(cwd).name)
         # No stdin input is fed (prompt is an argument, not piped).
         self.assertIsNone(kwargs.get("input"))
 
@@ -1391,6 +1401,61 @@ class TestR2FileOutsidePluginTree(unittest.TestCase):
             stderr = err.getvalue()
             self.assertIn("not inside a known plugin tree", stderr)
             self.assertIn(str(loose.resolve()), stderr)
+
+
+# ===========================================================================
+# Robustness review fix regression tests (run_judge collection)
+# ===========================================================================
+
+
+def _write_plugin_with_skill(root: pathlib.Path):
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".claude-plugin" / "plugin.json").write_text("{}", encoding="utf-8")
+    (root / "skills" / "real-skill").mkdir(parents=True)
+    (root / "skills" / "real-skill" / "SKILL.md").write_text(
+        "---\nname: real-skill\ndescription: x. Use when y.\n---\nbody",
+        encoding="utf-8",
+    )
+
+
+# ---- RB-1: a non-existent explicit path warns (not silently dropped) --------
+class TestRBNonExistentPathWarns(unittest.TestCase):
+    def test_missing_path_warns_to_stderr_and_returns_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            missing = pathlib.Path(td) / "no" / "such" / "thing.md"
+            with mock.patch("run_judge.sys.stderr", new_callable=io.StringIO) as err:
+                arts = run_judge._collect_artifacts([str(missing)])
+            self.assertEqual(arts, [], "a non-existent path must not be evaluated")
+            stderr = err.getvalue()
+            self.assertIn("warning", stderr)
+            self.assertIn("does not exist", stderr)
+            self.assertIn(str(missing.resolve()), stderr)
+
+
+# ---- RB-2: overlapping inputs (dir + a file within it) dedupe ---------------
+class TestRBOverlappingInputsDedupe(unittest.TestCase):
+    def test_dir_plus_inner_file_yields_each_artifact_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "plugins" / "p"
+            _write_plugin_with_skill(root)
+            inner = root / "skills" / "real-skill" / "SKILL.md"
+            # The plugin dir AND a file inside it both name the same artifact.
+            arts = run_judge._collect_artifacts([str(root), str(inner)])
+            paths = [a.path for a in arts]
+            self.assertEqual(
+                paths,
+                [inner.resolve()],
+                "overlapping inputs must yield each artifact exactly once",
+            )
+
+    def test_duplicate_dir_inputs_dedupe(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td) / "plugins" / "p"
+            _write_plugin_with_skill(root)
+            inner = root / "skills" / "real-skill" / "SKILL.md"
+            # The same plugin dir passed twice must not double-count its artifacts.
+            arts = run_judge._collect_artifacts([str(root), str(root)])
+            self.assertEqual([a.path for a in arts], [inner.resolve()])
 
 
 if __name__ == "__main__":

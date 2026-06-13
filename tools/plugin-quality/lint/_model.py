@@ -80,10 +80,13 @@ def split_frontmatter(text: str) -> tuple[bool, dict, str | None, str]:
     ``error`` is non-None when a frontmatter block exists but fails to parse.
     """
     lines = text.splitlines(keepends=True)
-    if not lines or lines[0].rstrip("\n") != "---":
+    # Strip the carriage return too (not just "\n") so a CRLF file's "---\r\n"
+    # delimiter is still recognised; otherwise a trailing "\r" would make valid
+    # frontmatter silently parse as absent.
+    if not lines or lines[0].rstrip("\r\n") != "---":
         return False, {}, None, text
     for idx in range(1, len(lines)):
-        if lines[idx].rstrip("\n") == "---":
+        if lines[idx].rstrip("\r\n") == "---":
             fm_text = "".join(lines[1:idx])
             body = "".join(lines[idx + 1 :])
             try:

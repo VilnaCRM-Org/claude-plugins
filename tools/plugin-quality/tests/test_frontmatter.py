@@ -160,6 +160,59 @@ class TestFM2(FrontmatterTestBase):
             self.run_check(), "L2", "frontmatter.command.allowed-tools", "unknown tool"
         )
 
+    # --- regression (Fix 3): non-string / unhashable elements must not crash
+    def test_allowed_tools_non_string_int_element_no_crash(self):
+        # Fix 3: an int element ([123]) must not crash ``t not in KNOWN_TOOLS``;
+        # it is a non-string element, surfaced as unknown rather than raised.
+        self.write_command(
+            "intelem",
+            '---\ndescription: "Run X"\nargument-hint: "[x]"\n'
+            "allowed-tools: [123]\n---\nbody\n",
+        )
+        # Must complete without raising; the bad element is flagged as unknown.
+        self.assert_finding(
+            self.run_check(), "L2", "frontmatter.command.allowed-tools", "unknown tool"
+        )
+
+    def test_allowed_tools_unhashable_nested_list_element_no_crash(self):
+        # Fix 3: an unhashable element ([["x"]]) would raise TypeError on the set
+        # membership test; restricting membership to string elements avoids it.
+        self.write_command(
+            "nestlist",
+            '---\ndescription: "Run X"\nargument-hint: "[x]"\n'
+            'allowed-tools: [["x"]]\n---\nbody\n',
+        )
+        # Must complete without raising; the bad element is flagged as unknown.
+        self.assert_finding(
+            self.run_check(), "L2", "frontmatter.command.allowed-tools", "unknown tool"
+        )
+
+    def test_allowed_tools_unhashable_dict_element_no_crash(self):
+        # Fix 3: an unhashable mapping element ([{}]) must not crash either.
+        self.write_command(
+            "dictelem",
+            '---\ndescription: "Run X"\nargument-hint: "[x]"\n'
+            "allowed-tools: [{}]\n---\nbody\n",
+        )
+        # Must complete without raising; the bad element is flagged as unknown.
+        self.assert_finding(
+            self.run_check(), "L2", "frontmatter.command.allowed-tools", "unknown tool"
+        )
+
+    def test_allowed_tools_mixed_non_string_and_write_report_only_no_crash(self):
+        # Fix 3: a report-only command with a non-string element alongside Write
+        # must still flag the mutating Write (report-only path) without crashing
+        # on the non-string element during the ``t in MUTATING_TOOLS`` test.
+        self.write_command(
+            "mixedro",
+            '---\ndescription: "Run X"\nargument-hint: "[x]"\n'
+            'allowed-tools: [123, "Write"]\n---\n'
+            "This command is report only and never fix anything.\n",
+        )
+        self.assert_finding(
+            self.run_check(), "L2", "frontmatter.command.allowed-tools", "report-only"
+        )
+
 
 # --- FM-3 (L3) agent four keys ---------------------------------------------
 class TestFM3(FrontmatterTestBase):
@@ -234,6 +287,41 @@ class TestFM3(FrontmatterTestBase):
             "tools: Read, Bash\nmodel: opus\n---\nbody\n",
         )
         self.assert_no_findings(self.run_check())
+
+    # --- regression: comma-only tools string is absent (Fix 4) -------------
+    def test_negative_tools_comma_only_string_flagged(self):
+        # Fix 4: a comma/whitespace-only string like "," carries no tool token,
+        # so it is treated as absent and L3 still fires for the missing tools.
+        # (Quoted so YAML keeps it a string rather than dropping the key.)
+        self.write_agent(
+            "commaonly",
+            "---\nname: commaonly\ndescription: An agent.\n"
+            'tools: ","\nmodel: opus\n---\nbody\n',
+        )
+        self.assert_finding(
+            self.run_check(), "L3", "frontmatter.agent.missing-key", "tools"
+        )
+
+    def test_negative_tools_whitespace_comma_string_flagged(self):
+        # Fix 4: " , , " likewise yields no non-empty token -> L3 fires.
+        self.write_agent(
+            "wscomma",
+            "---\nname: wscomma\ndescription: An agent.\n"
+            'tools: " , , "\nmodel: opus\n---\nbody\n',
+        )
+        self.assert_finding(
+            self.run_check(), "L3", "frontmatter.agent.missing-key", "tools"
+        )
+
+    def test_positive_tools_two_tool_comma_string_passes(self):
+        # Fix 4 control: "Read, Bash" still has non-empty tokens -> no L3.
+        self.write_agent(
+            "twotool",
+            "---\nname: twotool\ndescription: An agent.\n"
+            "tools: Read, Bash\nmodel: opus\n---\nbody\n",
+        )
+        l3 = [f for f in self.run_check() if f.check == "L3"]
+        self.assertEqual(l3, [])
 
 
 # --- FM-4 (L4) skill two keys, no tools/model ------------------------------

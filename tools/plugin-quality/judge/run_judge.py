@@ -62,6 +62,10 @@ def _collect_one_path(raw: str) -> list["_model.Artifact"]:
     if p.is_dir():
         return list(_model.discover(p))
     if not p.is_file():
+        print(
+            f"warning: {p} does not exist (not a file or directory) — skipped",
+            file=sys.stderr,
+        )
         return []
     plugin_root = _owning_plugin_root(p)
     if plugin_root is None:
@@ -89,7 +93,24 @@ def _collect_artifacts(paths: list[str]) -> list["_model.Artifact"]:
     arts = []
     for raw in paths:
         arts.extend(_collect_one_path(raw))
-    return arts
+    return _dedupe_by_path(arts)
+
+
+def _dedupe_by_path(arts: list["_model.Artifact"]) -> list["_model.Artifact"]:
+    """Drop duplicate artifacts (preserve order, dedupe by resolved ``.path``).
+
+    Overlapping CLI inputs — e.g. a plugin dir plus a file inside it — would
+    otherwise yield the same artifact more than once and judge it twice.
+    """
+    seen: set[pathlib.Path] = set()
+    unique: list[_model.Artifact] = []
+    for a in arts:
+        key = a.path.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(a)
+    return unique
 
 
 def _owning_plugin_root(file_path: pathlib.Path) -> pathlib.Path | None:

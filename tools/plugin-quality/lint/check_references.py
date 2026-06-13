@@ -58,7 +58,8 @@ _AGENT_RE = re.compile(
 _SKILL_PROSE_RE = re.compile(r"\b([a-z0-9]+(?:-[a-z0-9]+)*)\s+skill\b")
 # backticked dotted profile-key candidate.
 _PROFILE_PREFIX = (
-    r"(?:make|quality|capabilities|framework|persistence|architecture|ci|project)"
+    r"(?:make|quality|capabilities|framework|persistence|architecture"
+    r"|ci|project|php|review)"
 )
 _PROFILE_RE = re.compile(r"^" + _PROFILE_PREFIX + r"\.[a-z0-9_.<>*-]+$")
 # any backticked token (used for the agent/skill negative-set guards).

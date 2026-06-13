@@ -47,7 +47,8 @@ class _Tree:
         )
         _write(
             self.root / "docs" / "profile-schema.md",
-            "# schema\n\n`make.psalm` `make.ci` `quality.phpinsights.complexity`\n",
+            "# schema\n\n`make.psalm` `make.ci` `quality.phpinsights.complexity`"
+            " `review.coderabbit`\n",
         )
 
     def command(self, name: str, body: str) -> None:
@@ -396,6 +397,40 @@ class ReferenceCheckTests(unittest.TestCase):
             "# code-review\n\nReads `make.bom_key`.\n",
         )
         self.assertEqual([], self.tree.run())
+
+    # RF-9 php/review namespaces (Fix 5) ------------------------------------
+    def test_rf9_review_unknown_key_flagged(self):
+        # Fix 5: the `review.*` namespace is now detected, so a backticked
+        # `review.bogus_key` absent from profile-schema.md is flagged L25.
+        self.tree.skill(
+            "code-review",
+            "# code-review\n\nReads `review.bogus_key`.\n",
+        )
+        findings = self.tree.run()
+        self.assertEqual(1, len(findings))
+        self.assertEqual("references.profile-key.unknown", findings[0].rule)
+        self.assertIn("review.bogus_key", findings[0].message)
+
+    def test_rf9_review_known_key_not_flagged(self):
+        # Fix 5 control: `review.coderabbit` IS declared in the schema, so the
+        # newly-detected namespace must not produce a false positive.
+        self.tree.skill(
+            "code-review",
+            "# code-review\n\nReads `review.coderabbit`.\n",
+        )
+        self.assertEqual([], self.tree.run())
+
+    def test_rf9_php_unknown_key_flagged(self):
+        # Fix 5: the `php.*` namespace is detected; an unknown `php.bogus` key is
+        # flagged L25 (php.version, the only real php key, is in the schema).
+        self.tree.skill(
+            "code-review",
+            "# code-review\n\nReads `php.bogus`.\n",
+        )
+        findings = self.tree.run()
+        self.assertEqual(1, len(findings))
+        self.assertEqual("references.profile-key.unknown", findings[0].rule)
+        self.assertIn("php.bogus", findings[0].message)
 
 
 class RealPluginCleanTest(unittest.TestCase):

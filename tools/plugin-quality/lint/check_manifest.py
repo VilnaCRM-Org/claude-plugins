@@ -182,6 +182,20 @@ def check(plugin_root: pathlib.Path) -> list[Finding]:
             )
         ]
 
+    # A valid JSON file whose root is not an object (``[]``, ``"x"``, ``42``)
+    # has no fields to validate and would crash ``data.get(...)`` below: report
+    # the wrong shape once and stop rather than raise.
+    if not isinstance(data, dict):
+        return [
+            Finding(
+                check="M1",
+                rule="manifest.plugin.fields",
+                severity="S1",
+                path=rel,
+                message="plugin.json root is not a JSON object",
+            )
+        ]
+
     findings: list[Finding] = []
     findings.extend(_check_plugin_fields(data, rel))
     findings.extend(_check_plugin_semver(data, rel))
@@ -306,6 +320,11 @@ def check_marketplace(repo_root: pathlib.Path) -> list[Finding]:
     data, error = _load_json(manifest)
     if error is not None:
         return [_market_finding(rel, f"marketplace.json does not parse: {error}")]
+
+    # A non-object root (``[]``, ``"x"``, ``42``) has no fields to validate and
+    # would crash ``data.get(...)`` below: report the wrong shape once and stop.
+    if not isinstance(data, dict):
+        return [_market_finding(rel, "marketplace.json root is not a JSON object")]
 
     # name + owner.name present and non-empty.
     findings.extend(_check_market_top_fields(data, rel))

@@ -150,6 +150,19 @@ class ManifestCase(unittest.TestCase):
         self.assertEqual(fs[0].check, "M1")
         self.assertIn("does not parse", fs[0].message)
 
+    def test_mf1_non_object_root_is_one_finding_no_crash(self):
+        # Fix 1: a valid JSON file whose root is not an object (``[]``) must not
+        # crash ``data.get(...)``; it yields exactly ONE M1 finding.
+        root = self.repo / "plugins" / "acme"
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / ".claude-plugin" / "plugin.json").write_text("[]", encoding="utf-8")
+        fs = self._plugin_findings(root)
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].check, "M1")
+        self.assertEqual(fs[0].rule, "manifest.plugin.fields")
+        self.assertEqual(fs[0].severity, "S1")
+        self.assertIn("not a JSON object", fs[0].message)
+
     # --- MF-2 (M2) semver -------------------------------------------------
 
     def test_mf2_semver_passes(self):
@@ -297,6 +310,19 @@ class ManifestCase(unittest.TestCase):
         self.assertEqual(len(fs), 1)
         self.assertEqual(fs[0].check, "M4")
         self.assertIn("does not parse", fs[0].message)
+
+    def test_mf4_non_object_root_is_one_finding_no_crash(self):
+        # Fix 2: a marketplace.json whose root is not an object (``[]``) must not
+        # crash ``data.get(...)``; it yields exactly ONE M4 finding.
+        (self.repo / ".claude-plugin" / "marketplace.json").write_text(
+            "[]", encoding="utf-8"
+        )
+        fs = self._market_findings()
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].check, "M4")
+        self.assertEqual(fs[0].rule, "manifest.marketplace")
+        self.assertEqual(fs[0].severity, "S1")
+        self.assertIn("not a JSON object", fs[0].message)
 
     # --- real shipped repo is clean today --------------------------------
 

@@ -55,7 +55,7 @@ jobs:
       - name: claude plugin validate --strict (best-effort, skips if auth-gated)
         run: |
           set -uo pipefail
-          if ! npm install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
+          if ! npm install -g @anthropic-ai/claude-code@2.1.177 >/dev/null 2>&1; then
             echo "SKIP: @anthropic-ai/claude-code not installable on this runner"
             exit 0
           fi
@@ -103,7 +103,7 @@ jobs:
         run: python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --quiet pyyaml || python3 -m pip install --quiet --break-system-packages pyyaml
       - name: Install claude CLI
         if: steps.creds.outputs.run == 'true'
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@2.1.177
       - name: LLM-as-judge (sonnet, blocks on critical score <= 2)
         if: steps.creds.outputs.run == 'true'
         run: |

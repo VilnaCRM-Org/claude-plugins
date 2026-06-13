@@ -35,9 +35,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
-      - name: Install uv
+      - name: Install uv (pinned)
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
+          pipx install uv==0.9.21
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Ruff lint
         run: uvx ruff@0.15.6 check $PY_SRC
@@ -52,9 +52,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
-      - name: Install uv
+      - name: Install uv (pinned)
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
+          pipx install uv==0.9.21
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # Type-check the library code (lint/ + judge/). Tests are excluded: they
       # rely on monkeypatch reassignment + assertIn-on-Optional idioms that a
@@ -75,9 +75,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
-      - name: Install uv
+      - name: Install uv (pinned)
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
+          pipx install uv==0.9.21
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Radon complexity + maintainability report (informational)
         run: |
@@ -94,9 +94,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
-      - name: Install uv
+      - name: Install uv (pinned)
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
+          pipx install uv==0.9.21
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Bandit security scan
         run: uvx 'bandit[toml]@1.8.6' -c pyproject.toml -r $PROD_SRC
@@ -109,9 +109,9 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
-      - name: Install uv
+      - name: Install uv (pinned)
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
+          pipx install uv==0.9.21
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # Branch coverage of the library, exercised by the stdlib unittest suite
       # (config: pyproject.toml [tool.coverage]). Floor mirrors the current
