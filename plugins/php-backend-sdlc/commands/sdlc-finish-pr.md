@@ -28,11 +28,30 @@ report instead of failing (NFR-4).
 
 ## Procedure
 
-1. **PR create/update** — if the branch has no PR, create it:
-   `gh pr create` with a spec-linked description: the issue URL, links
-   to the `specs/<slug>/` artifacts, the implemented-stories summary,
-   and the acceptance-criteria checklist. If a PR exists, refresh the
-   description with `gh pr edit` instead.
+1. **PR create/update** — first resolve the PR and its state with
+   `gh pr view --json state,url,number` (or `gh pr view <pr-number>`
+   when the argument is given):
+
+   - **No PR for the branch** — create it: `gh pr create` with a
+     spec-linked description: the issue URL, links to the `specs/<slug>/`
+     artifacts, the implemented-stories summary, and the
+     acceptance-criteria checklist. If `gh pr create` FAILS (gh
+     unauthenticated/unavailable, no remote, branch not pushed, etc.),
+     that is a blocking finding — escalate with the verbatim error and
+     the named remediation (do NOT proceed to push to a branch with no
+     PR).
+   - **Open PR** — refresh the description with `gh pr edit` instead,
+     then continue to step 2.
+   - **MERGED or CLOSED PR** — a finished PR is a blocking finding:
+     escalate immediately and do NOT edit the PR or push to its branch
+     (the branch may be deleted, and editing/pushing a merged or closed
+     PR has no defined bounded outcome). Tell the user the PR is already
+     `<state>` and that finishing is complete or the PR must be reopened
+     before re-running.
+
+   Any blocking finding in this step emits the canonical escalation
+   block below with `blocking_finding: PR <state>/create-failure` and
+   stops — it never enters the counter-A or counter-B loops.
 
 2. **CI fix loop — counter A** — degrade check first: if the profile's
    `ci.provider` is `null`, or the PR reports no checks at all, SKIP
@@ -44,14 +63,31 @@ report instead of failing (NFR-4).
    `gh pr checks`; for each failing check, fetches the failure logs
    (`gh run view --log-failed`), diagnoses the root cause, and fixes the
    CAUSE in the working tree — never suppressing findings, never editing
-   quality thresholds (governance-protected). The agent runs NO git; it
-   returns `ALL-GREEN` (nothing to fix) or `FIXES-READY` (working-tree
-   edits await commit/push). When it returns `FIXES-READY`, THE COMMAND
-   commits the working-tree fixes and pushes, then re-polls
-   `gh pr checks`. That command-owned commit-push-repoll is one iteration
-   of counter A (`ci_fix iteration <a>/5`). Loop until every check (at
-   minimum the profile's `ci.required_checks`) is green, or counter A is
-   exhausted → escalate.
+   quality thresholds (governance-protected). The agent runs NO git and
+   returns exactly one of its four contract statuses
+   (`ALL-GREEN | FIXES-READY | SKIPPED-NO-CI | BLOCKED`); handle each
+   with a bounded outcome:
+
+   - `ALL-GREEN` — nothing to fix; the CI half of the exit condition is
+     satisfied. Leave counter A as-is and continue to step 3.
+   - `FIXES-READY` — working-tree edits await commit/push. THE COMMAND
+     commits the working-tree fixes and pushes, then re-polls
+     `gh pr checks`. That command-owned commit-push-repoll is one
+     iteration of counter A (`ci_fix iteration <a>/5`). Re-dispatch and
+     loop until every check (at minimum the profile's
+     `ci.required_checks`) is green, or counter A is exhausted →
+     escalate.
+   - `SKIPPED-NO-CI` — the agent hit the degrade path at dispatch time
+     (the PR turned out to have zero checks even though `ci.provider`
+     was non-null). Treat the CI half as satisfied-with-report exactly
+     like the up-front degrade above, record the degrade note, and
+     continue to step 3. Consumes no counter-A iteration.
+   - `BLOCKED` — no progress is possible (e.g. `gh` unauthenticated, or
+     no PR exists; see ci-fixer Degrade paths). This is NOT a counter-A
+     breach and never loops: escalate immediately with the agent's
+     verbatim blocking finding and its recommended action
+     (`blocking_finding: ci-fixer BLOCKED — <reason>`). Do NOT commit or
+     push on a `BLOCKED` return.
 
 3. **Comment source selection** — if `review.coderabbit` is true (or
    any AI reviewer app posts review comments on the PR), the PR's own
@@ -123,15 +159,20 @@ exhausting either one escalates.
 
 ## Failure escalation
 
-On either counter breaching, emit the canonical report and stop;
-`blocking_finding` names which loop breached:
+Escalate — emit the canonical report and stop — on ANY of: either
+counter breaching; a step-1 PR-state/create blocking finding (merged,
+closed, or `gh pr create` failure); or a `ci-fixer` `BLOCKED` return in
+step 2. The escalation is identical in form for every case; the
+`blocking_finding` line names the cause, and the `iteration` line
+carries whatever counter values had been reached (both `0/5` for a
+pre-loop step-1/step-2 block):
 
 ```text
 === SDLC ESCALATION ===
 stage: finish-pr         iteration: A <a>/5, B <b>/5
 exit_condition: CI green + 0 unresolved AI review comments
 status: NOT MET
-blocking_finding: <which loop breached + first unresolved item>
+blocking_finding: <cause — which loop breached + first unresolved item, OR "PR <state>/create-failure", OR "ci-fixer BLOCKED — <reason>">
 iteration_log: <one line per iteration, both counters>
 recommended_action: <human next step>
 === END ===

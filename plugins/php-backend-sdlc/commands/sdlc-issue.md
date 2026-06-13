@@ -31,6 +31,26 @@ duplicate).
 
 ### Create mode (argument is task text)
 
+0. **Pre-create dedup search (never open a duplicate)** — before
+   drafting, search the repo for an existing SDLC-managed issue that
+   already covers this task, so a cross-session resume (where the
+   `ISSUE_URL:` stdout line from a prior run is gone) does not create a
+   second issue:
+
+   ```bash
+   gh issue list --state open --label php-backend-sdlc \
+     --json number,url,title,body --limit 100
+   ```
+
+   Match an existing issue by title/problem overlap with the task text.
+   If one matches, do NOT create — switch to **adopt mode** on that
+   issue's URL (validate it, ensure ≥3 testable AC, keep the marker
+   label) and emit its `ISSUE_URL:`. Only when no managed issue matches
+   does create mode proceed to draft a new one. (If `gh issue list`
+   fails — `gh` unauthenticated/unavailable — that is a blocking
+   finding: escalate, do not create blind, since a blind create is
+   exactly how the duplicate appears.)
+
 1. Draft the issue from the task text:
    - **Title**: imperative, specific, ≤72 characters.
    - **Problem statement**: what is missing or broken today and why it

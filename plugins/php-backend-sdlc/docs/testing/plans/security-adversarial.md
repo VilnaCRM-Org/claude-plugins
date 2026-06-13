@@ -209,3 +209,118 @@ regression introduced by any round-1 fix. No out-of-repo write, no canary
 execution, sentinel byte-stable, and no hostile value achieved YAML/key
 injection, prompt shell-escape, git-hook execution, or threshold-ceiling
 wrap bypass.
+
+## Round-3 (re-prove fixes hold + fresh hostile battery)
+
+Re-ran every re-runnable round-1/2 case against HEAD `180a282` (the
+twice-fixed scripts), then added fresh adversarial cases for the round-3
+mandate: symlinks at the composer/Makefile/.env/specs/AGENTS.md/temp
+paths, injection in filenames/branch names/.env values/Makefile targets
+flowing into shell or claude prompts, `core.hooksPath` hijack, and the
+TOCTOU window between every `-L` check and the corresponding write.
+Repros were executed for real, not trusted from commit messages. All 188
+regression bats pass under the python3+PyYAML backend (`yq` absent on the
+host, as in rounds 1-2; `jq` present; stub `gh`/`claude`/`bmalph` on a
+prepended PATH).
+
+Environment note: the shared out-of-repo canary/sentinel directory was
+moved under the surface sandbox (`/tmp/sdlc-test3-security-adversarial/OUTSIDE/`)
+after a sibling surface agent removed the flat `/tmp/sdlc-test3-OUTSIDE/`
+mid-run; the canary-sensitive cases (P5, N15, N16, all R3-*) were re-run
+against the surface-scoped path so every canary check is sound. The
+plugin's own `rm -rf /` injection payloads never executed (every canary
+check below is clean).
+
+### Round-1/2 cases re-run (verification)
+
+| ID | Result R3 | Note |
+| --- | --- | --- |
+| SEC-P1 | PASS | hostile repo → profile inside `.claude/`, no canary, no out-of-repo write |
+| SEC-P2 | PASS | only the 11 schema top-keys; every hostile value an inert quoted scalar |
+| SEC-P3 | PASS | validate-profile exit 0 on hostile-derived profile |
+| SEC-P4 | PASS | hostile origin slug passed to gh as a literal `-f name=...)` arg, never eval'd |
+| SEC-P5 | PASS | orphan/nested markers → one block; shell-metachar user lines kept verbatim |
+| SEC-P6 | PASS | in-repo `--spec-path` accepted; claude ran; success status posted |
+| SEC-N1 | PASS | `.claude` symlink-to-existing-dir refused; nothing written into target |
+| SEC-N2 | PASS | dangling `.claude` symlink: out-of-repo dir NOT created |
+| SEC-N3 | PASS | symlinked profile file refused; no out-of-repo file |
+| SEC-N4 | PASS | symlinked CLAUDE.md (write) refused; victim byte-stable; link intact |
+| SEC-N5 | PASS | symlinked CLAUDE.md (`--diff` read) refused; victim untouched |
+| SEC-N6 | PASS | absolute out-of-repo `--spec-path` → boundary die, claude never called |
+| SEC-N7 | PASS | `..`-escaping `--spec-path` → boundary die |
+| SEC-N8 | PASS | symlinked-dir `--spec-path` → symlink die |
+| SEC-N9 | PASS | symlinked-file `--spec-path` → symlink die |
+| SEC-N10 | PASS | all `--pr` injection/negative payloads → "must be a number"; no canary |
+| SEC-N11 | PASS | composer name / origin metachars quoted+sanitized, no YAML injection |
+| SEC-N12 | PASS | hostile src/ dir names (`$(touch`, backtick) sanitized+quoted in flow list |
+| SEC-N13 | PASS | hostile quoted/`$(shell ...)` Makefile targets ignored (only legit captured) |
+| SEC-N14 | PASS | `.env` engine by hint only; raw `DATABASE_URL`/`SECRET` never emitted |
+| SEC-N15 | PASS | hostile agent names compared/logged as strings, warn+skip, exit 1, no canary |
+| SEC-N16 | PASS | malicious `.git/config` plumbing reads run no command (see R3-hooksPath) |
+| SEC-N17 | PASS | symlinked composer→/etc/passwd read-only, degrades to basename, no leak |
+| SEC-E1 | PASS | 5000-deep + 200 KB name → degrade to basename, exit 0, <1 s, single line |
+| SEC-E2 | PASS | billion-laughs profile validates in ~1 s, bounded memory |
+| SEC-E3 | PASS | billion-laughs workflow name folds to benign scalar `Bomb CI` |
+| SEC-E4 | PASS (BUG-1 fix HOLDS) | newline workflow filename → single-line `["evilINJECT: x"]`, no raw newline |
+
+### Round-3 new adversarial cases
+
+| ID | Attack | Expected | Result |
+| --- | --- | --- | --- |
+| SEC-R3-1 | TOCTOU: race `.claude/php-sdlc.yml` between regular file and symlink-to-outside during 15×800 swaps under `--refresh` | `mktemp`+`mv -f` into the realpath-resolved dir replaces, never follows; out-of-repo victim byte-stable | PASS |
+| SEC-R3-2 | composer.json is a symlink to an outside secret (read path) | victim byte-stable; name degrades to basename; no secret in profile | PASS |
+| SEC-R3-3 | AGENTS.md is a symlink to an outside secret (CLAUDE.md benign) | CLAUDE.md gets the block; AGENTS.md symlink refused; outside victim byte-stable; link intact | PASS |
+| SEC-R3-4 | `specs/` (default, trailing slash) is a symlink to outside; also probes `specs` (no slash) and an in-repo symlink target | trailing slash bypasses the `-L` guard but the boundary-containment check still refuses the outside target (claude never called); no-slash hits the `-L` guard; in-repo target proceeds legitimately — defense-in-depth holds, no escape | PASS |
+| SEC-R3-5 | Makefile target names with `$(shell touch …)` / backtick metachars | only `^[A-Za-z0-9_-]+:` targets reach detection; hostile names excluded; no canary | PASS |
+| SEC-R3-6 | hostile git branch name (`evil$(touch …)branch`) + `--diff-base` carrying `$()` across fr-nfr-gate, ai-review-loop, get-pr-comments | branch/ref text never shell-eval'd by any script; no canary | PASS |
+| SEC-R3-7 | `.env` `DATABASE_URL` with `$(touch …)` + a `mariadb` server-version hint | engine detected as `mariadb` by hint match only; raw value never emitted; no canary | PASS |
+| SEC-R3-8 | `.env` is a symlink to an outside secret (read path) | victim byte-stable; engine still detected by hint; `SECRET` not leaked into profile | PASS |
+| SEC-R3-9 | Makefile is a symlink to an outside secret (read path) | victim byte-stable; legit `ci` target still captured from the link target | PASS |
+| SEC-R3-10 | pre-plant symlinks at guessed `.sdlc-governance.*` mktemp suffixes pointing outside | mktemp's random suffix never reuses a planted path; out-of-repo victim byte-stable; block still written; user content kept | PASS |
+| SEC-R3-11 | TOCTOU: swap CLAUDE.md → symlink-to-outside during 12×600-swap inject races | atomic `mv -f` over the swapped-in symlink replaces it (never follows); out-of-repo victim byte-stable | PASS |
+| SEC-R3-12 | composer.json is a FIFO with no writer (DoS hang risk) | `composer_req`'s `[[ -f ]]` guard treats a FIFO as absent → never opened; exit 0 in 0 s, no hang | PASS |
+| SEC-R3-13 | CLAUDE.md is a directory | `reject_irregular` dies non-zero; directory intact; zero temp litter; AGENTS.md not created | PASS |
+| SEC-R3-14 | CLAUDE.md is a FIFO | `reject_irregular` dies non-zero; FIFO intact; no hang | PASS |
+| SEC-R3-15 | Makefile with duplicate/`:`-prereq/double-colon/quoted targets feeding the UNQUOTED `scalar()` emission | every emitted make value matches `[A-Za-z0-9_-]+`; profile parses; 11 top keys, no YAML break | PASS |
+| SEC-R3-16 | prompt injection in `--impact-context` (`$(touch …)` + fake `FR_NFR_NEW_FINDINGS: 999`) | text passed to claude as one `-p` data arg, never shell-eval'd; gate parses claude OUTPUT (`0`) not the injected `999`; status success; no canary | PASS |
+| SEC-R3-hooksPath | plant `core.hooksPath` + `core.fsmonitor` + `core.pager` + `alias` with canary-firing hooks, then run every git call across all 6 scripts | read-only plumbing (rev-parse, remote get-url, show-toplevel, rev-parse HEAD, is-inside-work-tree) invokes no hook/fsmonitor/pager/alias; no canary | PASS |
+
+### Round-3 findings
+
+No new security escape, crash, silent failure, contract violation, or
+doc-reality mismatch was found. Every round-1/2 fix re-verified holds:
+
+- The BUG-1 sanitization fix (SEC-E4) still folds a newline-bearing
+  workflow filename to a single-line scalar.
+- The inject-governance and generate-profile write paths are TOCTOU-safe
+  by construction: `mktemp` in the realpath-resolved target dir followed
+  by `mv -f` renames over any swapped-in symlink rather than following it
+  (re-proven with fresh 15×800 and 12×600 swap races; out-of-repo victims
+  stayed byte-stable).
+- `reject_irregular` rejects directory/FIFO managed files non-zero with no
+  temp litter, and the `[[ -f ]]` guards in `composer_req` incidentally
+  make a FIFO composer.json a no-op (no DoS hang).
+
+One non-defect worth recording (defense-in-depth, not a bug): the
+fr-nfr-gate `--spec-path` symlink guard `[[ -L "$SPEC_PATH" ]]` does NOT
+fire when the path carries a trailing slash (the default is `specs/`),
+because `-L 'specs/'` resolves through the link. The attack is still
+refused: the subsequent boundary-containment check (`cd "$SPEC_PATH" &&
+pwd -P` against `$repo_root`) catches an outside target and dies before
+claude is ever called (SEC-R3-4 / probe A). An in-repo symlink target is
+correctly allowed (probe C). No out-of-tree context can route into the
+gate, so this is a redundant-guard subtlety, not an escape.
+
+## Round-3 verdict
+
+44 cases executed (27 round-1/2 re-runs + 17 new). 44 PASS, 0 FAIL. Two
+prior FAILs were rechecked across the campaign's history (SEC-E4/BUG-1,
+the only ever-FAIL case, plus a confirmation pass on the round-2 TOCTOU
+hardening); SEC-E4 stays PASS. No out-of-repo write or directory was
+created, no planted canary command executed across any script (the
+`rm -rf /` payloads were inert quoted scalars), the sentinel stayed
+byte-stable, every symlink write/read target was refused or read-only,
+`core.hooksPath`/fsmonitor/pager/alias hijack ran no command, and no
+hostile value achieved YAML/key injection, prompt shell-escape, git-hook
+execution, threshold-ceiling wrap bypass, or a TOCTOU follow-the-symlink
+escape.

@@ -35,10 +35,14 @@ they never fix.
    (from the repo's compose/start configuration).
 2. **Boot the service** — run the profile's `make.start` target. If
    `make.start` is `null` (capability absent), do NOT hard-fail:
-   record the degrade note and finish as SUCCESS-WITH-REPORT stating
-   that black-box QA was skipped because no start capability exists
-   (NFR-4). If the start target exists but the service fails to come
-   up, that is a blocking finding — escalate.
+   record the degrade note and finish with the degrade verdict
+   `PASS (SUCCESS-WITH-REPORT — black-box QA skipped, make.start: null)`
+   (NFR-4). This is the PASS branch of the report template's verdict
+   enum, qualified with the degrade reason — the bare `PASS` token is
+   what satisfies the orchestrator's stage-5 gate ("QA verdict PASS",
+   sdlc.md), while the parenthetical records that no checks actually
+   ran. If the start target exists but the service fails to come up,
+   that is a blocking finding — escalate.
 3. **Dispatch `qa-manual-tester`** (Task tool) with the AC list, the
    base URL, the report contract, and the current QA iteration number
    from this command's iteration guard — on a re-dispatch after an
@@ -83,6 +87,11 @@ reproduction:
 expected: <...>   observed: <...>
 
 ## Verdict: PASS | FAIL
+# The make.start:null degrade (step 2) is the PASS branch, written
+# `PASS (SUCCESS-WITH-REPORT — black-box QA skipped, make.start: null)`:
+# the leading `PASS` token satisfies the stage-5 gate, the parenthetical
+# records that no checks ran. FAIL is reserved for an executed-and-failed
+# check or a boot failure (those escalate / route back to stage 3).
 ```
 
 ## Loop & exit condition

@@ -297,3 +297,198 @@ reproduced twice. Host tools: jq 1.8.1, python3 3.14.4, gh 2.x, bats
   text overstates the guarantee.
 - All FAILs reproduced twice; sandboxes under
   `/tmp/sdlc-test2-gh-integration/` removed after the run.
+
+## Round 3
+
+Third pass against the committed tree (HEAD `180a282`), after the
+round-2 fixes landed. Goal: prove the round-1/2 fixes HOLD (re-run their
+real repros, never trust commit messages), and hunt for any remaining or
+fix-introduced defect. The visible round-3 fixes in this surface:
+`get-pr-comments.sh` now (a) dies on an empty gh body before the backend
+split (lines 126-127), (b) strips a leading UTF-8 BOM once so both
+backends agree (line 107), (c) runs `pr_data_check` to refuse exit-0
+payloads carrying no PR data — GraphQL error envelopes, wrong-shape
+objects, `pullRequest:null` (lines 142-173), and (d) re-validates a
+gh-resolved PR number with `^[0-9]+$` (lines 53-55); `fr-nfr-gate.sh` now
+zero-tests the findings count as a DIGIT STRING (`findings_norm`, lines
+131-133) instead of bash arithmetic, so any multiple of 2^64 fails.
+
+Method unchanged: sandboxes under `/tmp/sdlc-test3-gh-integration/<id>/`,
+removed after the run; routing `gh`/`claude` wrappers built per case
+(copied, never symlinked); both jq (1.8.1) and python3 (3.14.4) backends
+where the transform can diverge; every FAIL reproduced twice. Host tools:
+jq 1.8.1, python3 3.14.4, gh 2.92.0, bats 1.11.1, markdownlint-cli
+0.48.0. No git mutations.
+
+### Round 3 — get-pr-comments.sh: BUG-1/2/4 fix re-runs (prove they hold)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-GPC-1 | BUG-2 re-run, jq: gh exit 0, empty stdout | exit 1; clean die `returned an empty response` | PASS — fix holds |
+| R3-GPC-2 | BUG-2 re-run, python (jq stripped): empty stdout | exit 1; identical die (no backend divergence) | PASS — divergence gone |
+| R3-GPC-3 | BUG-2 re-run, jq: wrong-shape `{"ok":true}` | exit 1; `no pull-request data` | PASS |
+| R3-GPC-4 | BUG-2 re-run, python: wrong-shape `{"ok":true}` | exit 1; identical die | PASS |
+| R3-GPC-5 | BUG-2 re-run, jq: `data.repository.pullRequest:null` | exit 1; `no pull-request data` | PASS |
+| R3-GPC-6 | BUG-2 re-run, python: `pullRequest:null` | exit 1; identical die | PASS |
+| R3-GPC-7 | BUG-2 re-run, jq: GraphQL error envelope `{"data":null,"errors":[…]}` | exit 1; surfaces the error message | PASS |
+| R3-GPC-8 | BUG-2 re-run, python: GraphQL error envelope | exit 1; surfaces identical message | PASS |
+| R3-GPC-9 | BUG-1 re-run, jq: gh exit 0, HTML garbage | exit 1; `returned non-JSON output`, no raw jq parse error | PASS |
+| R3-GPC-10 | BUG-1 re-run, python: HTML garbage | exit 1; identical die, no traceback | PASS |
+| R3-GPC-11 | BUG-4 re-run, jq: `gh pr view` exit 0 prints `not-a-number`, no `--pr` | exit 1; `resolved PR number is not numeric`, no raw `--argjson` error | PASS |
+| R3-GPC-12 | BUG-4: `gh pr view` exit 0 prints empty string, no `--pr` | exit 1; `resolved PR number is not numeric: ''` | PASS |
+| R3-GPC-13 | BUG-4 re-run, python: gh-resolved `not-a-number` | exit 1; identical die | PASS |
+
+### Round 3 — get-pr-comments.sh: pagination guard at exactly 100 (new)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-GPC-14 | Exactly 100 review threads (37 unresolved), every `hasNextPage:false`, jq | exit 0; no refusal; `unresolved threads: 37` | PASS |
+| R3-GPC-15 | Same 100-thread payload, python backend | exit 0; identical render | PASS |
+| R3-GPC-16 | 100 threads, `reviewThreads.pageInfo.hasNextPage:true`, jq | exit 1; pagination refusal | PASS |
+| R3-GPC-17 | Same truncation payload, python | exit 1; identical refusal | PASS |
+| R3-GPC-18 | 1 thread with exactly 100 comments, `comments.pageInfo.hasNextPage:true`, jq | exit 1; refusal (comment-level guard) | PASS |
+| R3-GPC-19 | Comment-level truncation payload, python | exit 1; identical refusal | PASS |
+
+### Round 3 — get-pr-comments.sh: injection bodies w/ backticks & `$()` (new)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-GPC-20 | Body `` `touch CANARY` ``/`$(touch CANARY)`/`\(env)`/`${HOME}`, jq human render | exit 0; verbatim; no canary; no `${HOME}` expansion | PASS |
+| R3-GPC-21 | Same injection body, python human render | exit 0; verbatim; no canary | PASS |
+| R3-GPC-22 | Same injection body, `--json`, both backends | parse-identical canonical JSON; bodies byte-faithful | PASS |
+
+### Round 3 — get-pr-comments.sh: pr_data_check seams (new)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-GPC-23 | GraphQL error message itself contains `$(touch ERRCANARY)`/backticks | exit 1; message rendered verbatim in the die; no canary | PASS |
+| R3-GPC-24 | `data.repository:null` (not just pullRequest) | exit 1; `no pull-request data` | PASS |
+| R3-GPC-25 | `errors:[…]` present ALONGSIDE valid `pullRequest` data | exit 1; errors take precedence, surfaced | PASS |
+| R3-GPC-26 | `errors:[]` (empty) with valid PR data | exit 0; legitimately `unresolved threads: 0` (length 0 is not an error) | PASS |
+
+### Round 3 — get-pr-comments.sh: standard positive/edge re-runs
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-GPC-27 | Empty PR: both arrays `[]` | exit 0; `unresolved threads: 0` | PASS |
+| R3-GPC-28 | Issue comments only, one with `author:null` | exit 0; `unknown` fallback | PASS |
+| R3-GPC-29 | `--unresolved-only`: issue comments excluded, resolved thread filtered | exit 0; only the open thread; `unresolved threads: 1` | PASS |
+| R3-GPC-30 | All `pageInfo` objects absent | exit 0; no false refusal | PASS |
+| R3-GPC-31 | `--pr 007` (leading zeros) | exit 0; renders `PR #7` | PASS |
+| R3-GPC-32 | `author:null`,`body:null`,`path:null`,`line:null` | exit 0; `?:0` placeholder, `unknown` author | PASS |
+
+### Round 3 — get-pr-comments.sh: adversarial JSON type-confusion (new)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-GPC-33 | Top-level JSON array `[1,2,3]`, jq | exit 1; clean script-level die naming PR | FAIL — exit 5 (raw jq), zero `[php-sdlc]` diagnostic lines (NEW BUG-5, S3) |
+| R3-GPC-34 | Top-level array `[1,2,3]`, python | exit 1; clean die | FAIL — exit 1 but zero script-level diagnostic (BUG-5) |
+| R3-GPC-35 | Top-level scalar `"hello"` / `42` / `true`, jq | exit 1; clean die | FAIL — exit 5 raw jq, no diagnostic (BUG-5) |
+| R3-GPC-36 | Top-level scalar, python | exit 1; clean die | FAIL — bare exit 1, no diagnostic (BUG-5) |
+| R3-GPC-37 | `pullRequest` non-null but `reviewThreads` a string (wrong type), jq | exit 1; clean die | FAIL — leaks raw `jq: error … Cannot index string with string "nodes"`, exit 5 (BUG-5) |
+| R3-GPC-38 | Same wrong-type child, python | exit 1; clean die | FAIL — leaks python `Traceback … for t in (p.get("reviewThreads") …` (BUG-5) |
+| R3-GPC-39 | `pullRequest:{}` (empty object) / `reviewThreads:{}`,`comments:{}` | exit 0; treated as empty PR; `unresolved threads: 0` | PASS (informational — a non-null empty PR object is legitimately empty; NOT a silent gate escape) |
+
+### Round 3 — get-pr-comments.sh: BUG-5 fix element-level residue (BUG-6)
+
+The BUG-5 fix (committed `pr_data_check` SHAPE guard) validates connections
+only down to "`nodes` is a list" — it never checks that each `nodes`
+ELEMENT is an object. A scalar comment node slips the guard and dies in
+`normalize` with the exact raw error BUG-5 was built to suppress.
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-GPC-40 | Issue comment node is a scalar: `comments.nodes:[42]`, jq | exit 1; clean `unexpected response shape` die naming PR; no `jq: error`, no `Cannot index` | FAIL → BUG-6 — leaked `jq: error … Cannot index number with string "author"`, exit 5, ZERO `[php-sdlc]` line |
+| R3-GPC-41 | Same scalar issue-comment node, python | exit 1; clean die | FAIL → BUG-6 — leaked `Traceback … AttributeError: 'int' object has no attribute 'get'`, exit 1 |
+| R3-GPC-42 | Thread comment node is a scalar: `reviewThreads.nodes[0].comments.nodes:[42]`, jq | exit 1; clean die | FAIL → BUG-6 — same raw `jq: error … Cannot index number`, exit 5 |
+| R3-GPC-43 | Same scalar thread-comment node, python | exit 1; clean die | FAIL → BUG-6 — same `AttributeError` traceback |
+| R3-GPC-44 | BUG-6 fix verify: all four payloads, both backends | exit 1; `unexpected response shape`; no `jq: error`/`Cannot index`/`Traceback`/`AttributeError` | PASS — `pr_data_check` now forces per-element object access (`has("author")` under try/catch in jq; `comments_ok` isinstance loop in python); healthy multi-comment payload still renders `unresolved threads: 1` on both backends |
+
+### Round 3 — fr-nfr-gate.sh: BUG-3 digit-string zero-test (prove it holds)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-FNG-1 | `FR_NFR_NEW_FINDINGS: 18446744073709551616` (2^64) | exit 1; FAILURE status; PR comment | PASS — `state=failure`, comment posted, exit 1; SUCCESS no longer escapes (BUG-3 FIXED) |
+| R3-FNG-2 | 2^64 second independent repro | exit 1; FAILURE status | PASS — reproduced; `state=failure` |
+| R3-FNG-3 | `36893488147419103232` (2×2^64, also wraps to 0 in bash) | exit 1; FAILURE status | PASS — `state=failure`; digit-string check catches all multiples |
+| R3-FNG-4 | `18446744073709551617` (2^64+1) | exit 1; FAILURE status | PASS — description carries the original string |
+| R3-FNG-5 | `00018446744073709551616` (leading zeros + 2^64) | exit 1; FAILURE | PASS — `findings_norm` strips zeros, still nonzero |
+| R3-FNG-6 | `FR_NFR_NEW_FINDINGS: 0000` (all zeros) | exit 0; SUCCESS; no comment | PASS — normalizes to `0` |
+| R3-FNG-7 | `FR_NFR_NEW_FINDINGS: 010` (octal-looking) | exit 1; FAILURE; sane description | PASS — `state=failure`, description `010 new FR/NFR finding(s)` |
+
+### Round 3 — fr-nfr-gate.sh: positive/negative posting paths
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-FNG-8 | Zero findings, all gh succeed | exit 0; SUCCESS status, exact context `BMAD FR/NFR Review Gate`; no comment | PASS |
+| R3-FNG-9 | 2 findings, all gh succeed | exit 1; FAILURE status `2 new FR/NFR finding(s)`; comment on #12 | PASS |
+| R3-FNG-10 | SSH origin `git@github.com:acme/sample-api.git` | status POSTed to `repos/acme/sample-api/statuses/<sha>` | PASS |
+| R3-FNG-11 | Malformed verdict (no `FR_NFR_NEW_FINDINGS` line) | exit 1; FAILURE status; contract-violation die; no comment | PASS |
+| R3-FNG-12 | Zero findings; statuses POST exits 1 (auth expired) | warn; exit 0 (warn-only posting) | PASS |
+| R3-FNG-13 | 2 findings; `gh pr view` fails mid-run | warn `skipping PR comment`; FAILURE status still POSTed; exit 1 | PASS |
+| R3-FNG-14 | `gh` absent from `PATH` | exit 1 `gh CLI not found on PATH`; claude never invoked | PASS |
+| R3-FNG-15 | Finding body with `` `touch GATE-CANARY` ``/`$(…)`/`${HOME}` | exit 1; body posted verbatim in PR comment; no canary; no `${HOME}` expansion | PASS |
+
+### Round 3 verdict summary
+
+- Cases run: 66 distinct (FAIL-confirmation re-runs not counted). 55 PASS
+  (2 informational), 11 FAIL rows collapsing into 2 new defects (BUG-5,
+  BUG-6) — both fixed this round with bats coverage.
+- Prior fixes RE-RUN for real, NOT trusted from commit messages:
+  - BUG-1 (S3, r1) — HOLDS: non-JSON gh stdout dies cleanly on both
+    backends (R3-GPC-9/10).
+  - BUG-2 (S2, r1, persisted through r2) — NOW FIXED and holding: empty
+    stdout, wrong-shape JSON, `pullRequest:null`, GraphQL error envelopes
+    all die `exit 1` with a script-level diagnostic on BOTH backends; the
+    prior jq/python divergence on empty stdout is gone (R3-GPC-1..8,
+    23..25). The FR-8 "0 unresolved" exit condition is no longer poisoned
+    by these payloads.
+  - BUG-3 (S2, r1, persisted through r2) — NOW FIXED and holding: the
+    `findings_norm` digit-string zero-test fails the gate for 2^64,
+    2×2^64, and leading-zero 2^64, posting a FAILURE status and exiting 1
+    (R3-FNG-1..5); `0000` still passes (R3-FNG-6). A 2^64 findings count
+    no longer posts SUCCESS. Reproduced twice (R3-FNG-1/2).
+  - BUG-4 (S3, r1 NEW) — NOW FIXED and holding: a gh-resolved PR that is
+    non-numeric or empty dies `resolved PR number is not numeric` before
+    `--argjson`, no raw jq error (R3-GPC-11/12/13).
+  - BOM divergence (S3, r2) — FIXED: line 107 strips a leading BOM once;
+    both backends now tolerate it identically (bats test 14 green).
+- NEW this round — BUG-5 (S3, fix-introduced gap in the BUG-1/2 guard
+  family): when gh exits 0 with VALID JSON that is not a top-level object
+  (`[1,2,3]`, `"hello"`, `42`, `true`), or an object whose `pullRequest`
+  is non-null but a child connection has the wrong type
+  (`reviewThreads:"oops"`), `raw_is_json` accepts it (it is valid JSON)
+  and `pr_data_check` swallows its own jq/python error via `2>/dev/null`
+  (returning empty ⇒ "no problem"), so the script proceeds to
+  `normalize`, where jq dies with a raw `jq: error … Cannot index …`
+  (exit 5) or python emits a bare `Traceback`, with ZERO `[php-sdlc]`
+  script-level diagnostic. This is the exact defect class the round-1
+  BUG-1 fix and round-2 BUG-2 fix were built to eliminate; they cover
+  non-JSON text and no-PR-data OBJECTS but not valid-JSON-of-wrong-type.
+  Not a silent success (it exits nonzero, no false "0 unresolved"), so
+  S3/minor — same rating as the original BUG-1. gh's GraphQL endpoint
+  returns a top-level object in practice, so runtime likelihood is low,
+  but it is exactly the "gh exit 0 with unexpected JSON" scenario the
+  guards exist to handle. Reproduced twice on both backends
+  (R3-GPC-33..38). FIXED this round (`pr_data_check` SHAPE guard).
+- NEW this round — BUG-6 (S3, residue in the BUG-5 fix itself): the
+  committed BUG-5 SHAPE guard validates each connection only down to
+  "`nodes` is a list" and never checks that each `nodes` ELEMENT is an
+  object. A scalar comment node — `comments.nodes:[42]` (an issue
+  comment) or `reviewThreads.nodes[0].comments.nodes:[42]` (a thread
+  comment) — passes the guard and reaches `normalize`, which leaks the
+  exact raw error BUG-5 set out to suppress: `jq: error … Cannot index
+  number with string "author"` (exit 5) on jq, and `Traceback …
+  AttributeError: 'int' object has no attribute 'get'` (exit 1) on
+  python. Reproduced 4× (issue-comment and thread-comment positions ×
+  both backends; also under `--unresolved-only` and `--json`)
+  (R3-GPC-40..43). FIXED: `pr_data_check` now forces per-element object
+  access — jq runs `[…nodes]|all(has("author"))` (and `has("isResolved")`
+  for thread nodes) inside the same try/catch so a non-object node aborts
+  to SHAPE; python adds a `comments_ok` isinstance loop over every issue
+  and thread comment node. Healthy payloads, empty PRs, and null-author
+  comments are NOT over-rejected (R3-GPC-44).
+- Regression suites green on this tree: `tests/get-pr-comments.bats`
+  31/31 (4 new R3 Bug 6 cases), `tests/fr-nfr-gate.bats` 17/17.
+- All FAILs reproduced twice (BUG-6 reproduced 4×); sandboxes under
+  `/tmp/sdlc-test3-*/` removed after the run.

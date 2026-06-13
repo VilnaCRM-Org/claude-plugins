@@ -129,37 +129,121 @@ json.load(sys.stdin)' >/dev/null 2>&1
 raw_is_json \
   || die "gh api graphql returned non-JSON output for PR #$PR in $OWNER/$NAME (check 'gh auth status' and network/proxy, then retry)"
 
-# pr_data_present — the payload must actually carry pull-request data before
-# any "0 unresolved" conclusion is drawn (FR-8). gh can exit 0 with a body
-# that parses as JSON yet has NO usable PR: a GraphQL error envelope
-# ({"data":null,"errors":[...]}), a wrong-shape object ({"ok":true}), or an
-# explicit null pullRequest ({"data":{"repository":{"pullRequest":null}}}).
-# All three previously normalized to an empty listing and "unresolved
-# threads: 0" with exit 0 — a false "nothing to resolve" that lets
-# /sdlc-finish-pr exit the FR-8 loop early on a fetch that returned no PR.
-# Surface the GraphQL error message when present; otherwise diagnose the
-# missing pullRequest. Both backends apply the identical check.
+# pr_data_present — the payload must actually carry pull-request data of the
+# expected SHAPE before any "0 unresolved" conclusion is drawn (FR-8). gh can
+# exit 0 with a body that parses as JSON yet has NO usable PR: a GraphQL error
+# envelope ({"data":null,"errors":[...]}), a wrong-shape object ({"ok":true}),
+# or an explicit null pullRequest ({"data":{"repository":{"pullRequest":null}}}).
+# It can ALSO exit 0 with valid JSON of the wrong TYPE: a top-level array or
+# scalar ([1,2,3], 42, "hello", true), or an object whose pullRequest (or one
+# of its child connections) is the wrong type
+# ({"data":{"repository":{"pullRequest":{"reviewThreads":"oops",...}}}}).
+# The null/error/wrong-shape cases previously normalized to "unresolved
+# threads: 0" with exit 0 (a false "nothing to resolve"); the wrong-TYPE cases
+# slipped past this guard entirely — every guard here runs under 2>/dev/null,
+# so a type error in the guard itself was swallowed into "no problem" and the
+# un-guarded normalize()/has_next_page() step downstream died with a bare jq
+# exit 5 / python traceback and ZERO script-level diagnostic. This check must
+# therefore positively validate the structural contract those later steps rely
+# on (a top-level object; a pullRequest that is an object; reviewThreads /
+# comments connections of the expected type) and emit a clean diagnostic for
+# any deviation, never silently pass it through. Both backends apply the
+# identical check.
 pr_data_check() {
   if command -v jq >/dev/null 2>&1; then
     # Plain `jq -r` (no -e): -e sets exit 4 when the result is empty, which
     # is exactly the healthy "no problem" case, and that nonzero status
     # would propagate through the command substitution. Emit the diagnostic
-    # string on a problem, nothing otherwise.
+    # string on a problem, nothing otherwise. `type` never errors on any
+    # value, and the connection traversal is wrapped in try/catch so a
+    # wrong-type child surfaces here as SHAPE rather than aborting jq.
     printf '%s' "$raw" | jq -r '
-      if (.errors | type == "array" and length > 0)
-      then "ERRORS: " + ([.errors[].message] | join("; "))
+      if (type != "object")
+        then "SHAPE: top-level JSON is a \(type), not an object"
+      elif (.errors | type == "array" and length > 0)
+        then "ERRORS: " + ([.errors[].message] | join("; "))
+      elif ((try (.data.repository.pullRequest == null) catch "ERR") == "ERR")
+        then "SHAPE: response is not the expected repository/pullRequest object"
       elif (.data.repository.pullRequest == null)
-      then "NOPR"
+        then "NOPR"
+      elif ((try (
+              (.data.repository.pullRequest) as $p
+              # Force per-ELEMENT object access exactly as normalize does:
+              # each review thread, each thread comment, and each issue
+              # comment must be an object. A scalar node (e.g. comments
+              # .nodes:[42]) passes a nodes-is-a-list check but makes the
+              # later .author/.body index abort with a bare
+              # "jq error Cannot index number". has(...) forces an index that
+              # errors on a non-object node; all(...) over a collected array
+              # consumes the whole stream and still yields a single value, so
+              # the pipe below always reaches "ok" on healthy data while any
+              # wrong-type node aborts the try and surfaces as SHAPE here.
+              | ([ ($p.reviewThreads.nodes // [])[] ] | all(has("isResolved")))
+              | ([ ($p.reviewThreads.nodes // [])[] | (.comments.nodes // [])[] ]
+                 | all(has("author")))
+              | ([ ($p.comments.nodes // [])[] ] | all(has("author")))
+              | ($p.reviewThreads.pageInfo.hasNextPage // false)
+              | "ok"
+            ) catch "ERR") == "ERR")
+        then "SHAPE: pull-request data has an unexpected structure"
       else empty end' 2>/dev/null
   else
     printf '%s' "$raw" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
+if not isinstance(d, dict):
+    print("SHAPE: top-level JSON is a %s, not an object" % type(d).__name__)
+    sys.exit(0)
 errs = d.get("errors")
 if isinstance(errs, list) and errs:
-    print("ERRORS: " + "; ".join(str(e.get("message", e)) for e in errs))
-elif (((d.get("data") or {}).get("repository") or {}).get("pullRequest")) is None:
+    print("ERRORS: " + "; ".join(
+        str(e.get("message", e)) if isinstance(e, dict) else str(e) for e in errs))
+    sys.exit(0)
+data = d.get("data")
+if data is not None and not isinstance(data, dict):
+    print("SHAPE: .data is not an object")
+    sys.exit(0)
+repo = (data or {}).get("repository")
+if repo is not None and not isinstance(repo, dict):
+    print("SHAPE: .data.repository is not an object")
+    sys.exit(0)
+pr = (repo or {}).get("pullRequest")
+if pr is None:
     print("NOPR")
+    sys.exit(0)
+if not isinstance(pr, dict):
+    print("SHAPE: pullRequest is not an object")
+    sys.exit(0)
+
+def conn_ok(obj, key):
+    v = obj.get(key)
+    if v is None:
+        return True
+    if not isinstance(v, dict):
+        return False
+    nodes = v.get("nodes")
+    return nodes is None or isinstance(nodes, list)
+
+def nodes_of(obj, key):
+    return ((obj.get(key) or {}).get("nodes")) or []
+
+# Each comment node (issue comments AND thread comments) must itself be an
+# object: a scalar node (e.g. comments.nodes:[42]) passes conn_ok (nodes IS a
+# list) but makes the later c.get("author") raise a bare AttributeError.
+def comments_ok(nodes):
+    return all(isinstance(c, dict) for c in nodes)
+
+if not conn_ok(pr, "reviewThreads") or not conn_ok(pr, "comments"):
+    print("SHAPE: pull-request data has an unexpected structure")
+    sys.exit(0)
+if not comments_ok(nodes_of(pr, "comments")):
+    print("SHAPE: pull-request data has an unexpected structure")
+    sys.exit(0)
+for t in nodes_of(pr, "reviewThreads"):
+    if (not isinstance(t, dict) or not conn_ok(t, "comments")
+            or not comments_ok(nodes_of(t, "comments"))):
+        print("SHAPE: pull-request data has an unexpected structure")
+        sys.exit(0)
 ' 2>/dev/null
   fi
 }
@@ -168,6 +252,9 @@ pr_data_problem="$(pr_data_check)"
 if [[ -n "$pr_data_problem" ]]; then
   if [[ "$pr_data_problem" == ERRORS:* ]]; then
     die "gh api graphql reported an error for PR #$PR in $OWNER/$NAME: ${pr_data_problem#ERRORS: }"
+  fi
+  if [[ "$pr_data_problem" == SHAPE:* ]]; then
+    die "gh api graphql returned an unexpected response shape for PR #$PR in $OWNER/$NAME: ${pr_data_problem#SHAPE: } (the unresolved count is unknowable)"
   fi
   die "gh api graphql returned no pull-request data for PR #$PR in $OWNER/$NAME (the PR may not exist, or the response shape is unexpected; the unresolved count is unknowable)"
 fi

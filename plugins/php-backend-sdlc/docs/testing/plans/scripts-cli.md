@@ -477,3 +477,154 @@ confirmed fixed at the root cause.
 - Orphan `.sdlc-governance.*` temp files from a SIGKILLed run are not
   swept by later runs (each run's `trap` only removes its own temp). The
   kill window was not hittable in this round; design observation only.
+
+## Round 3 — fix-hold verification + fence-aware coverage
+
+Goal: prove rounds 1–2 fixes HOLD (do not trust commit messages — every
+prior FAIL repro re-run for real) and hunt any remaining or fix-introduced
+defect. All 8 surfaces re-exercised as real CLI invocations against
+disposable sandboxes under `/tmp/sdlc-test3-scripts-cli/`; a real
+`yq v4.44.3` binary was downloaded for the yq backend, and the forced
+python fallback (`SDLC_FORCE_PYTHON_YAML=1`) was run alongside it.
+Locale matrix: `en_US.UTF-8` and `LC_ALL=C`. The bundled `tests/*.bats`
+suite has grown to 188 cases and passes clean on both backends
+(`bats tests/*.bats` and `SDLC_FORCE_PYTHON_YAML=1 bats tests/*.bats`,
+188/188 each); `bash -n` is clean on all 7 scripts + `lib/common.sh`.
+
+Since round 2, `inject-governance.sh` gained FENCE-AWARE marker matching
+(a documented marker inside a balanced ``` / ~~~ code fence is treated as
+user content, not a real marker; an odd/unclosed fence disables
+suppression and falls back to whole-line matching). That new code path
+is the freshest fix and was the primary fix-introduced-bug target this
+round.
+
+### R3 — round-1/2 FAIL cases re-run (must still PASS)
+
+| ID | Re-run case | Round-3 result |
+| --- | --- | --- |
+| SP-E1 | bare repo, default + `--report` | PASS (git-repo FAILs, exit 1; `--report` still runs later checks) |
+| SP-E6 | inside a normal repo's `.git/` | PASS (git-repo FAILs, exit 1) |
+| VP-E7 | `psalm_errors: 2^64-1` (yq + py) | PASS (VIOLATION "relaxed above 0", exit 1, both backends) |
+| VP-E7b | `deptrac_violations: 2^64` | PASS (VIOLATION, exit 1) |
+| VP-E7c | `infection_msi: 2^64-1` (a raise) | PASS (exit 0, no misleading "lowered below") |
+| IG-E5 | CRLF file carrying a CRLF managed block (two independent repros) | PASS (1 begin/1 end/1 banner, stale gone, user CRLF lines kept, run 2 "unchanged", 0 stray temp) |
+| R2-AR3 | `--max-iterations` huge (2^64, 2^63, 22-digit) | PASS (ceiling 1000 rejects, exit 1, 0 claude calls); boundary 1000 accepted |
+| R2-FG2 | `FR_NFR_NEW_FINDINGS: 2^64` | PASS (exit 1, `failure` status posted — no silent escape) |
+
+All eight prior FAIL repros still PASS. Bugs 1–5 are confirmed fixed at
+the root cause; no regression observed.
+
+### R3 — setup-preflight + work-tree shapes
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R3-SP1 | all-green normal repo (stubs) | every check PASS, exit 0 | PASS |
+| R3-SP2 | linked `git worktree add` work tree | git-repo PASS, exit 0 | PASS |
+| R3-SP3 | inside `.git/worktrees/<wt>` admin dir | git-repo FAIL | PASS |
+| R3-SP4 | `--help` / `-h` / unknown flag | usage `die`, exit 1 | PASS |
+
+### R3 — validate-profile type/ceiling/floor + locale
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R3-VP1 | `psalm_errors` `-1` / `0.5` / `0x10` (yq + py) | "is not an integer" (yq); py `0x10`→16 "relaxed above 0"; all exit 1 | PASS |
+| R3-VP2 | `psalm_errors: "5"` quoted | "relaxed above 0", exit 1 | PASS |
+| R3-VP3 | leading zeros `000`→0 PASS, `007`→7 violation, `complexity: 094`→94 PASS | as stated, both backends | PASS |
+| R3-VP4 | unicode/CJK `bounded_contexts: [Café, Ordén, 注文]`, 4 backend×locale combos | valid, exit 0 | PASS |
+| R3-VP5 | `--help` / `-h` (treated as PROFILE_FILE) | `die` "profile not found: --help", exit 1 (no crash) | PASS (note) |
+
+### R3 — generate-profile make `:=` parsing + engine + symlink
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R3-GP1 | Makefile mixing `:=`/`::=`/`:::=`/`?=`/`+=` with real `ci:`/`start:`/`psalm:` (value-side colon) targets | assignments → null; real targets detected | PASS |
+| R3-GP2 | `ci :=` assignment with NO real `ci:` target | `ci` null | PASS |
+| R3-GP3 | `test-unit:` target + `test-unit-flag := 1` | only `test-unit` extracted | PASS |
+| R3-GP4 | engine: commented mysql + active postgresql / commented pgsql + active mysql / mariadb global win / ODM→mongodb | correct active-line winner each time | PASS |
+| R3-GP5 | engine hint from `config/packages/doctrine.yaml` (commented mysql + active `pdo_pgsql`) | postgresql | PASS |
+| R3-GP6 | unicode `src/Café`, `src/Ordén` under UTF-8 vs `LC_ALL=C` | `bounded_contexts` byte-identical | PASS |
+| R3-GP7 | unknown flag / nonexistent target / regular-file target / symlinked `.claude` dir | `die` each; symlink target untouched | PASS |
+
+### R3 — inject-governance fence-aware (new code) + repair + contention
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R3-IG1 | documented marker inside a balanced ``` fence, no real block | fenced example kept, real block appended after fence; re-run idempotent | PASS |
+| R3-IG2 | documented marker inside a `~~~` fence | same as R3-IG1 | PASS |
+| R3-IG3 | real block already present + a separate fenced example | real block replaced in place, example kept, idempotent | PASS |
+| R3-IG4 | odd/unclosed fence + a marker-delimited block | falls back to whole-line matching, treats it as a real block, replaces in place; all user content outside markers kept | PASS |
+| R3-IG5 | indented (4-space) fence; fence with info string | no crash, fenced markers suppressed, idempotent | PASS |
+| R3-IG6 | IG-E1/E2/E3 marker repair (dup, orphan BEGIN, END-before-BEGIN) | each repairs to one block, user content kept, idempotent | PASS |
+| R3-IG7 | CRLF + unicode user content under `LC_ALL=C` | 1 block/banner, unicode CRLF lines kept, idempotent | PASS |
+| R3-IG8 | 20 parallel runs into a pre-seeded dir | serialize to 1 block, user kept, 0 stray temp | PASS |
+| R3-IG9 | symlinked / read-only CLAUDE.md; `--diff` preview | refused (target untouched); `--diff` writes nothing | PASS |
+
+### R3 — ai-review-loop iteration counting + arg matrix
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R3-AR1 | call-counting stub: PASS=1, fail→pass=2, 5×FAIL=5, malformed=10 (1 retry/iter), missing-verdict=5 (NO retry), is_error→PASS=2, non-zero→PASS=2 | exact counts | PASS |
+| R3-AR2 | `--max-iterations` `0`/`-1`/`abc`/`05`/`3.5`/`''` rejected; `1000` accepted; `>1000`/`2^63`/`2^64`/22-digit rejected by ceiling (0 calls) | as stated | PASS |
+| R3-AR3 | `--agents` end-of-argv error; unknown flag; codex-only `die`; `,` → claude fallback; `codex,claude` → skip+run | as stated | PASS |
+| R3-AR4 | claude absent from PATH | `die` claude CLI not found | PASS |
+
+### R3 — fr-nfr-gate findings + containment + transport
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R3-FG1 | findings sweep `0,00,1,999,2^63,2^64,2^64-1` (digit-string compare) | 0/00→success exit 0; all nonzero→failure exit 1 | PASS |
+| R3-FG2 | missing/trailing-space `FR_NFR_NEW_FINDINGS` line | `failure` status, "contract violation", exit 1 | PASS |
+| R3-FG3 | `--spec-path` missing / `/etc` / symlinked / `specs/../specs` | `die` for first three; allowed for the last (findings 0 → success) | PASS |
+| R3-FG4 | non-git dir / bare repo / zero-commit repo | `die` "not inside a git work tree" (first two); `die` "cannot resolve HEAD" (zero commit, git's own stderr is cosmetic) | PASS |
+| R3-FG5 | claude absent / gh absent (truly isolated PATH incl. bash) | `die` naming the CLI, exit 1 | PASS |
+| R3-FG6 | transport failure both attempts | exactly 2 claude calls, `failure` status, exit 1 | PASS |
+
+### R3 — get-pr-comments parity + locale + guards
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R3-PC1 | human listing, `--unresolved-only`, fixture PR 7 | `unresolved threads: 1`; resolved + issue comments dropped in unresolved mode | PASS |
+| R3-PC2 | pagination guard (truncated fixture, human + `--json`) | `die` "more than 100", exit 1 | PASS |
+| R3-PC3 | jq vs python `--json` | canonically equal JSON | PASS |
+| R3-PC4 | human listing under `LC_ALL=C` | `unresolved threads: 1` | PASS |
+| R3-PC5 | unknown flag; `--pr abc`/`''`; non-JSON gh; pullRequest null; GraphQL error envelope; empty body | clean `die` each, exit 1 | PASS |
+| R3-PC6 | no `--pr` (gh-resolved) | PR 7 resolved, listing rendered, exit 0 | PASS |
+
+### R3 — lib/common.sh wrap-safe helpers under set -e + locale
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R3-CL1 | `strip_zeros` `007`→7, `000`→0, `''`→0, `100`→100 | as stated | PASS |
+| R3-CL2 | `num_gt`/`num_lt` length-then-lex (incl. 2^64 vs 0, 999 vs 1000, 10 vs 9, 5 vs 5) | correct ordering, survives `set -euo pipefail` | PASS |
+| R3-CL3 | `num_gt` same-length pairs under `LC_ALL=C` vs `en_US.UTF-8` | byte-identical results (ASCII-digit collation stable) | PASS |
+
+## Round-3 execution summary
+
+- Cases executed: 56 round-3 IDs (8 re-run prior FAILs + 48 new/edge),
+  plus the 188-case bundled bats suite run clean on BOTH the yq and the
+  forced-python backends, and `bash -n` clean on all scripts.
+- Every round-1 and round-2 FAIL repro re-run still PASSES — Bugs 1–5 are
+  confirmed fixed at the root cause; no regression in re-sampled prior
+  PASS cases.
+- The new fence-aware `inject-governance.sh` code path was probed
+  adversarially (balanced ``` / `~~~` fences, info strings, indented
+  fences, odd/unclosed-fence fallback, real-block-plus-example
+  coexistence): user content is preserved and runs are idempotent in
+  every case.
+- NO new or fix-introduced bugs found this round.
+- Sandboxes under `/tmp/sdlc-test3-scripts-cli/` removed after the run.
+
+## Round-3 notes (observations, not defects)
+
+- `validate-profile.sh` has no `--help` flag by contract (`[PROFILE_FILE]`
+  is a single positional path), so `--help`/`-h` are read as filenames and
+  die with "profile not found: --help" (exit 1, no crash). Cosmetic
+  divergence from the other scripts' `unknown argument` usage line.
+- FG zero-commit repo: `git rev-parse HEAD` prints its own
+  `fatal: ambiguous argument 'HEAD'` to stderr before the script's clean
+  `cannot resolve HEAD` message. The git line is cosmetic noise; the exit
+  code and the script-level diagnostic are correct.
+- The `/tmp/sdlc-test3-*` sandbox tree is shared with sibling QA surfaces
+  and was twice wiped mid-run by concurrent cleanup; re-created each time
+  with a fresh `yq` download. No effect on results (each case is
+  self-contained), recorded only as a test-harness observation.

@@ -40,10 +40,26 @@ On every invocation, FIRST detect the current stage instead of
 restarting: resume at the first stage (in order 0→6) whose exit
 condition is not yet met.
 
+**Durable issue detection (FR-1 resumability):** stage-1 resume MUST
+NOT key on the transient `ISSUE_URL:` stdout line — that line does not
+survive across sessions, so relying on it would re-enter create mode
+and open a duplicate. Instead, query the durable GitHub-side signal:
+
+```bash
+gh issue list --state open --label php-backend-sdlc \
+  --json number,url,title,body --limit 100
+```
+
+If a managed issue already covers the task argument (title/problem
+overlap), the issue stage is satisfied — adopt that URL and skip to
+stage 2. Only when no managed issue matches does the run enter stage 1,
+and stage 1 itself (`/sdlc-issue`) repeats this dedup search before
+creating, so a duplicate cannot be opened even on a racing re-run.
+
 | Observed state | Resume at |
 | --- | --- |
 | profile invalid/missing or preflight stale | stage 0 → HALT: "run `/sdlc-setup`" |
-| no open issue for the task (no `ISSUE_URL` artifact) | stage 1 |
+| no managed open issue (`gh issue list --label php-backend-sdlc` matching the task) | stage 1 |
 | issue exists; `specs/<slug>/` incomplete or readiness not PASS | stage 2 |
 | readiness PASS; stories not all done (no Ralph `EXIT_SIGNAL` success) | stage 3 |
 | stories done; no zero-findings review-gate record | stage 4 |

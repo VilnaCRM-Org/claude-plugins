@@ -56,12 +56,26 @@ never overwritten unless the user passed `--refresh` (NFR-3).
 
    On exit 1, show every `VIOLATION:` line, then enter the bounded
    fix-retry loop below: if a violation is a detection gap the user can
-   fix in place, regenerate (step 3) and re-validate (step 4), counting
-   the attempt against `MAX_ITERATIONS`. Only ABORT once the loop is
-   exhausted or a violation is not fixable by re-detection — then tell
-   the user to either fix the profile by hand or re-run
-   `/sdlc-setup --refresh` after correcting the repository signals the
-   detector reads.
+   fix in place, regenerate and re-validate (step 4), counting the
+   attempt against `MAX_ITERATIONS`. Crucially, the loop's regenerate
+   step MUST pass `--refresh` so the corrected repository signals
+   actually overwrite the invalid profile — the default step-3 generate
+   keeps the existing file (NFR-3) and would make every retry a no-op,
+   so the loop can never converge without it. This in-loop `--refresh`
+   does not violate NFR-3's no-silent-overwrite rule: the user has
+   already seen the `VIOLATION:` lines and is explicitly correcting the
+   detection gap, so the overwrite is the acknowledged remedy, not a
+   silent change. Concretely, each retry runs:
+
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/scripts/generate-profile.sh" --refresh
+   "${CLAUDE_PLUGIN_ROOT}/scripts/validate-profile.sh"
+   ```
+
+   Only ABORT once the loop is exhausted or a violation is not fixable
+   by re-detection — then tell the user to either fix the profile by
+   hand or re-run `/sdlc-setup --refresh` after correcting the
+   repository signals the detector reads.
 
 5. **Inject governance blocks** — run:
 
@@ -110,7 +124,9 @@ never overwritten unless the user passed `--refresh` (NFR-3).
 
 Single-pass command with one bounded fix-retry loop around steps 3–4:
 when validation fails because of a detection gap the user has since
-fixed, regenerate and re-validate. Exit condition (measurable):
+fixed, regenerate **with `--refresh`** (so the corrected signals
+overwrite the invalid profile — without it the retry is a no-op) and
+re-validate. Exit condition (measurable):
 `setup-preflight.sh` exits 0 AND `validate-profile.sh` exits 0 AND the
 governance block exists in `CLAUDE.md`/`AGENTS.md` AND
 `.claude/settings.json` contains the four allowlist entries.

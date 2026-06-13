@@ -233,3 +233,99 @@ markdownlint-cli2 0.22.1.
   inject-governance atomic write / CRLF, malformed-YAML diagnostic,
   counter transport) now passes from the refreshed cache.
 - Confirmed defects: 0.
+
+## Round 3 (fixes-hold proof + remaining-defect hunt)
+
+Date: 2026-06-13. Independent re-run against the freshly installed cache
+at `~/.claude/plugins/cache/vilnacrm-plugins/php-backend-sdlc/0.1.0/`
+(registry `gitCommitSha` = HEAD `180a282`, `installedAt`
+`2026-06-13T10:30:16Z`). The plugin was already installed fresh from the
+directory marketplace and is LEFT INSTALLED. Goal: prove the round-1/2
+fixes HOLD and hunt any remaining or fix-introduced defect. Per the
+campaign pattern (~half of each round's fixes regress), every repro was
+re-run for real (twice) and judged on observed behavior, not on commit
+messages. Scripts were executed FROM THE CACHE with
+`CLAUDE_PLUGIN_ROOT="$CACHE"`, cwd / target
+`/home/kravtsov/Projects/tmp/php-sdlc-qa/php-service-template`.
+Sandboxes under `/tmp/sdlc-test3-install-lifecycle/`, removed after the
+run. No git mutations. Host: claude 2.1.177, gh 2.92.0 (authed), bmalph
+2.11.0, jq 1.8.1, python3 3.14.4 + PyYAML (`yq` absent → python fallback
+is the exercised path), bats 1.11.1, markdownlint-cli2 0.22.1.
+
+### Cache integrity + inventory (real `claude` CLI)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-IL-P1 | `plugin details php-backend-sdlc` inventory | exit 0; 0.1.0; source `php-backend-sdlc@vilnacrm-plugins`; Skills(29) = 21 lib + 8 `sdlc*`; Agents(6); Hooks/MCP/LSP 0 | PASS |
+| R3-IL-P2 | `plugin list` state | present, 0.1.0, scope user, enabled (`❯`) | PASS |
+| R3-IL-P3 | `diff -r scripts` cache vs source | identical (7 `*.sh` + `lib/common.sh`) | PASS |
+| R3-IL-P4 | byte-identity of every tracked file cache vs HEAD-committed | 106 tracked files: 0 missing, 0 differ; whole-tree `diff -r` shows only the uncommitted source-side `review-loop.md` round-3 edit, which the cache correctly lacks (cache == committed HEAD) | PASS |
+| R3-IL-P5 | counts: source vs cache | 21 skill dirs, 8 command `.md`, 6 agent `.md` in BOTH; each cache skill has `SKILL.md` | PASS |
+| R3-IL-P6 | exec bits in cache | 7 `scripts/*.sh` = 775; `lib/common.sh` = 664 (sourced; self-guards direct exec, exit 64); `tests/fixtures/bin/{bmalph,gh,claude}` = 775; all match source modes | PASS |
+| R3-IL-P7 | relative skill links resolve in cache | 158 `../…md` markdown link occurrences across `skills/`; all targets (incl. `../SKILL.md` from `examples/`+`reference/` subdirs and `../code-organization/DIRECTORY-STRUCTURE.md`) resolve to existing files inside the cache; 0 broken; 0 symlinks; 0 dangling (`find -L`) | PASS |
+| R3-IL-P8 | `plugin validate` plugin dir + marketplace root | both exit 0, `Validation passed`; marketplace lists `php-backend-sdlc` with `./plugins/php-backend-sdlc` source (ADR-9) | PASS |
+| R3-IL-N1 | `plugin details no-such-plugin-xyz-r3` | exit 1; clean not-found with remediation; no stack trace | PASS |
+| R3-IL-E5 | grep cache `scripts/` for `/home/kravtsov/Projects` | 0 hits; no absolute source path baked into any cached script | PASS |
+
+### Scripts run FROM THE CACHE (env=cache, target=QA template)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-IL-S1 | `setup-preflight.sh --report` from cache, `CLAUDE_PLUGIN_ROOT=$CACHE`, cwd=QA | all 8 checks PASS (git-repo, claude 2.1.177, gh 2.92.0 authed, bmalph 2.11.0, doctor deferred on fresh repo, python3+PyYAML, jq); exit 0 | PASS |
+| R3-IL-S2 | `strace` proof of cache sourcing | `setup-preflight.sh` opens `…/0.1.0/scripts/lib/common.sh` (THE CACHE path) — scripts self-locate via `BASH_SOURCE`, not `CLAUDE_PLUGIN_ROOT` | PASS |
+| R3-IL-S3 | `generate-profile.sh "$QA"` from cache | profile created at `.claude/php-sdlc.yml`; engine `postgresql` (active `pdo_pgsql` + `postgres://`; the two commented `# DB_URL=` mysql/postgresql lines excluded — round-1 comment fix holds); `make.tests=test`/`e2e=null` match Makefile; `project.name="php-serice-template"` faithfully from composer `.name` (upstream typo, not a script bug) | PASS |
+| R3-IL-S4 | `validate-profile.sh` from cache on the generated profile | `profile valid`; exit 0 | PASS |
+| R3-IL-S5 | idempotency (NFR-3): re-run generate without `--refresh` | `profile unchanged`; md5 stable; exit 0 | PASS |
+| R3-IL-S6 | `--refresh` with identical detection | `profile unchanged`; content md5 stable; exit 0 | PASS |
+| R3-IL-S7 | bogus `CLAUDE_PLUGIN_ROOT=/nonexistent` against preflight + generate | both exit 0 (scripts never consume the plugin root; self-locate via `BASH_SOURCE`) | PASS |
+| R3-IL-S8 | `resolve_plugin_root` die contract (bogus dir) | `die` exit 1, `[php-sdlc][ERROR] CLAUDE_PLUGIN_ROOT points to a missing directory: …`; valid dir prints the root, exit 0 | PASS |
+
+### Round-1/2 fix re-verification FROM THE CACHE
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R3-IL-WT1 | preflight inside a `.git/` dir | git-repo FAIL, exit 1 (R1 work-tree fix) | PASS |
+| R3-IL-WT2 | preflight in a bare repo | git-repo FAIL, exit 1 | PASS |
+| R3-IL-WT3 | preflight in a truly isolated `mktemp -d` (outside any repo) | git-repo FAIL with remediation, exit 1 | PASS |
+| R3-IL-WT4 | preflight in a real work tree (QA template) | git-repo PASS | PASS |
+| R3-IL-MK1 | generate-profile on Makefile with `tests := v`, `psalm ::= v` (assignments) vs real `ci`/`deptrac`/`start`/`test` targets | `tests`→`test` (real), `psalm`→null (assignment excluded), `ci`/`deptrac`/`start` detected; absent targets null (R1 `:=` fix holds, NFR-4) | PASS |
+| R3-IL-RL1 | `ai-review-loop.sh --max-iterations` ceiling (R2 Bug 2) | 1000/999/500 pass validation (reach agent resolution); 1001, `2^64`, 22-digit all rejected `must not exceed 1000`, exit 1; `0` rejected `must be a positive integer`; no uint64 wrap (wrap-safe `num_gt`) | PASS |
+| R3-IL-RL2 | malformed-YAML profile guard (R2 Bug 10) | one clean `[php-sdlc][ERROR] profile is not valid YAML: <path> (…)` naming the file + remediation, exit 1, NO python traceback, in default AND `SDLC_FORCE_PYTHON_YAML=1` paths; valid `[claude]` / empty profile NOT over-rejected (agent resolves, loop runs) | PASS |
+| R3-IL-BATS | full bats suite from cache (188 tests) | 186 pass; the only 2 not-ok (#63 `plugin.json .name == basename(PLUGIN_ROOT)`, #65 repo-level `marketplace.json` exists) are source-tree-layout assumptions that hold ONLY in source — both PASS from source (`component-counts.bats` 0 not-ok); cache content is correct, not a plugin defect | PASS |
+
+### Notes (Round 3)
+
+- Cache is a faithful snapshot of HEAD `180a282`: `diff -r scripts`
+  identical; all 106 tracked files byte-identical to the committed tree.
+  The single whole-tree `diff -r` divergence is the source-side
+  uncommitted round-3 edit to `review-loop.md`; the cache reflects
+  committed content, so this is expected, not drift.
+- False alarm ruled out before recording: an early "non-repo" preflight
+  sandbox reported git-repo PASS because it was created UNDER a
+  directory already `git init`'d in the same sandbox (its toplevel was
+  the parent). Re-run in a truly isolated `mktemp -d` outside any repo
+  → git-repo FAIL, exit 1. The work-tree fix is correct; the first
+  result was a test-setup artifact.
+- `project.name: "php-serice-template"` in the generated profile carries
+  the upstream template's composer `.name` typo verbatim
+  (`vilnacrm/php-serice-template`). generate-profile faithfully reads
+  the source field; this is an upstream data point, not a plugin defect.
+- The 2 cache bats failures (#63, #65) are unchanged in nature from
+  round-2 (#56, #58 then); only the numbering shifted as the suite grew
+  to 188 tests. They assert source-tree layout invariants that the
+  per-version install cache (`…/0.1.0`, plugin subtree only)
+  deliberately does not satisfy.
+
+### Verdict summary (Round 3)
+
+- Cases run: 27 (10 cache-integrity/inventory + 8 cache-script runs + 9
+  round-1/2 fix re-verifications; sub-case repetitions and
+  reproduced-twice confirmations not counted separately).
+- priorFailsRechecked: 9 (R1 work-tree ×4, R1 `:=` make parsing, R2 Bug
+  2 ceiling, R2 Bug 10 malformed-YAML, plus the 2 cache bats layout
+  assumptions) — all re-run from the cache.
+- priorFailsNowPass: 9 — every prior FAIL that was fixed and re-run
+  still passes from the freshly installed cache; the 2 cache bats
+  not-ok are confirmed (twice) as source-tree-layout assumptions, not
+  regressions.
+- Confirmed defects: 0. Plugin LEFT INSTALLED at 0.1.0, enabled.

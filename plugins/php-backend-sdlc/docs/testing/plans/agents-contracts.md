@@ -174,3 +174,81 @@ coverage intact, script flag parsing and clean diagnostics intact,
 RALPH_STATUS parsing intact, escalation blocks consistent. One cosmetic
 parity note recorded (AG2-R09), not a bug. Sandbox
 `/tmp/sdlc-test2-agents-contracts/` deleted after the round.
+
+## Round 3 — fix-persistence proof + remaining-defect hunt (2026-06-13)
+
+Goal: prove the round-1/round-2 fixes HOLD against the committed tree
+(round-2 commit `180a282` is HEAD; the agents/commands/scripts in this
+surface carry NO uncommitted changes — verified with `git status
+--short`, only other surfaces' plan files are dirty), and hunt any
+remaining or fix-introduced defect. Everything below was EXECUTED for
+real, each harness run twice with byte-identical output. Sandbox:
+`/tmp/sdlc-test3-agents-contracts/` (deleted after the round).
+markdownlint-cli2 v0.22.1 with the repo `.markdownlint.yaml`.
+
+### Re-run of every prior FAIL (the round-1 BUG-1/BUG-2 fixes)
+
+| ID | Case | Check | Expected | Result |
+| --- | --- | --- | --- | --- |
+| AG3-R01 | BUG-1 fix persistence: qa counter transport on BOTH ends | `qa-manual-tester.md:65-71` Inputs item 1 + `:157-165` Iteration discipline vs `sdlc-qa.md:42-48` step 3 | counter carried by agent Inputs AND supplied by dispatcher | PASS — agent Inputs item 1 carries "the current QA iteration number from the stage iteration guard … plus … the prior iteration ledger" with "assume iteration 1/5 if omitted, say so" fallback; Iteration discipline declares statelessness ("owned by the `/sdlc-qa` stage guard … resumes from the dispatched iteration number"); `sdlc-qa.md:43-45` supplies "the current QA iteration number from this command's iteration guard" + ledger on re-dispatch. Symmetric. |
+| AG3-R02 | BUG-2 fix persistence: counter-B supplied by dispatcher | `pr-comment-resolver.md:79-83` Inputs item 1 vs `sdlc-finish-pr.md:69-78` step 4 | dispatcher prompt carries PR number, default branch, counter-B number, comment source | PASS — `sdlc-finish-pr.md:71-76` mandates the prompt carry "the PR number, the default branch name, the current counter-B iteration number (`comment_resolution iteration <b>/5`) … and the comment source selected in step 3", plus "Increment `<b>` … on every re-dispatch". Agent Input 1's three required elements are all supplied. |
+
+`priorFailsNowPass`: both round-1 FAILs (the only confirmed FAILs in
+rounds 1–2) re-pass against the committed tree.
+
+### Positive contract integrity — re-executed
+
+| ID | Case | Check / command | Expected | Result |
+| --- | --- | --- | --- | --- |
+| AG3-P01 | Frontmatter ≡ architecture §3 matrix | parse YAML of all 6; `name` = stem; model/tools vs `architecture.md:157-162` | 6/6 byte-match | PASS — name=stem 6/6; php-implementer sonnet `Read, Write, Edit, Glob, Grep, Bash`; the two reviewers opus; qa-manual-tester `Bash, Read`; ci-fixer/pr-comment-resolver `Bash, Read, Edit, Glob, Grep`; all byte-match the matrix. |
+| AG3-P03 | Profile keys ∈ schema (CI grep logic, agents NOT covered by CI) | replicate `ci.yml:208-221` awk+grep over all 6 agents' `## Profile keys consumed` vs `docs/profile-schema.md` | 0 undeclared | PASS — ci-fixer 13, code-quality-reviewer 11, fr-nfr-reviewer 3, php-implementer 20, pr-comment-resolver 5, qa-manual-tester 3 (55 total); 0 undeclared. All fully-namespaced, no placeholder artifacts. |
+| AG3-P04 | Tool list sufficient for Allowed actions + degrades | desk matrix: Edit-only agents (ci-fixer, pr-comment-resolver) never claim file creation; read-only agents (code-quality, fr-nfr) never write; qa Bash/Read covers all checks/degrades | no action needs an undeclared tool | PASS — grep for create/new-file/scaffold claims in the two Edit-only agents returns none; fr-nfr "never writes files", code-quality forbids write; qa degrades representable with Bash+Read. |
+| AG3-P08 | Quoted script invocations parse (stub-PATH live) | `get-pr-comments.sh --pr 42 --unresolved-only --json`, `ai-review-loop.sh --diff-base main --max-iterations 1`, `fr-nfr-gate.sh --spec-path … --impact-context …` in a throwaway git repo with stub `gh`/`claude` | canonical shapes; bogus flags rejected with clean diagnostic | PASS — `get-pr-comments` reproduced `{pr, review_threads:[{is_resolved, comments:[{author,body,path,line,url}]}], issue_comments}` byte-for-key (`--unresolved-only` dropped the resolved thread and emptied issue_comments); all three scripts reject `--bogus-flag` with `[php-sdlc][ERROR] unknown argument … (usage: …)`, no traceback. |
+| AG3-P09 | Output tokens dispatchers consume exist verbatim | cross-grep `FR_NFR_REVIEWER:` line, `ALL-GREEN`/`FIXES-READY`/`SKIPPED-NO-CI`/`BLOCKED`, `push required: yes`, `Remaining unresolved`, threshold rows | all match | PASS — `FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=…` emitted by agent (`:94`) and consumed by `sdlc-review.md:83`; `push required: yes`/`Remaining unresolved` match. ci-fixer's `SKIPPED-NO-CI`/`BLOCKED` consumption gap stays a command-side defect (commands-semantics BUG-3), not an agent-contract break — agent emits all four tokens; the command's own `ci.provider`-null pre-check means `SKIPPED-NO-CI` is never returned, and a single-dispatch `BLOCKED` is still bounded by counter-A exhaustion → escalate. |
+| AG3-P10 | RALPH_STATUS happy block parses | `extract_ralph_status_block_json` (extracted verbatim from the user-service analyzer) on the php-implementer COMPLETE template | status=COMPLETE, exit_signal=true, tasks=1, tests=PASSING | PASS — `{"status":"COMPLETE","exit_signal_found":true,"exit_signal":true,"tasks_completed_this_loop":1,"tests_status":"PASSING"}`. |
+| AG3-P11 | Threshold table ≡ command template | `code-quality-reviewer.md:88-94` vs `sdlc-review.md:143-149` metric rows | 7 identical rows | PASS — phpinsights quality/architecture/style/complexity, deptrac violations, psalm errors, infection MSI — identical on both sides. |
+| AG3-P12 | Escalation block consistency | all 6 agents: 1 `=== SDLC ESCALATION ===`…`=== END ===` block, 7 fields, stage name = dispatcher stage | 6/6 complete | PASS — 1/1 START/END each; all 7 fields (stage/iteration/exit_condition/status/blocking_finding/iteration_log/recommended_action); `<stage> (<agent>)` matches implement/review/qa/finish-pr. |
+
+### Negative + edge — degrade paths and shared state, re-executed
+
+| ID | Case | Check / command | Expected | Result |
+| --- | --- | --- | --- | --- |
+| AG3-N01 | BLOCKED after escalation preamble | analyzer parse: escalation text containing `status: NOT MET` then a BLOCKED block | escalation text outside markers does not bleed in | PASS — `{"status":"BLOCKED","exit_signal_found":true,"exit_signal":false,"tasks_completed_this_loop":0,"tests_status":"FAILING"}`; the `status: NOT MET` in the preamble does not corrupt the parse (parser slices from the FIRST `---RALPH_STATUS---`). |
+| AG3-N02 | `make.tests: null` NOT_RUN + EXIT_SIGNAL true | analyzer parse of the degrade template | exit accepted, NOT_RUN | PASS — `{"status":"COMPLETE","exit_signal":true,"tests_status":"NOT_RUN"}`; matches php-implementer degrade row + NFR-4. |
+| AG3-N07 | ai-review-loop PASS→exit 0 / FAIL→exit 1 (degrade source) | stub `claude` emitting `{result, is_error}` JSON via the new shared `lib/common.sh:254` `claude_run_once`; verdict last line PASS then FAIL | PASS→0, FAIL→1 after exactly 1 iteration | PASS — PASS verdict → `agent claude: PASS on iteration 1`, exit 0; FAIL verdict → `no PASS within 1 iterations — escalate`, exit 1; matches pr-comment-resolver's "verdict PASS counts as zero unresolved". |
+| AG3-N09 | WORK_TYPE enum vs analyzer block parser | block parser (`response_analyzer.sh:493-518`) reads only STATUS/EXIT_SIGNAL/TASKS_COMPLETED_THIS_LOOP/TESTS_STATUS; `is_test_only` set only when flat-JSON `work_type==TEST_ONLY` (`:792-795`) | WORK_TYPE ignored; agent enum never produces TEST_ONLY | PASS — parse of a block carrying `WORK_TYPE: TESTING` returned no `is_test_only` field and an unchanged result; the agent enum (`IMPLEMENTATION\|TESTING\|DOCUMENTATION\|REFACTORING`) never hits the magic `TEST_ONLY`. The block parser at `:722` overrides the flat-JSON path. |
+| AG3-E04 | Thread-resolution node IDs absent from `get-pr-comments.sh` | script GraphQL `reviewThreads.nodes` selects `isResolved`+comment fields but NOT thread `.id`; agent allowed action `:127` permits `gh api graphql` re-fetch | executable via re-fetch + `url` correlation | PASS — script JSON carries no thread node id; every comment carries `url`; agent explicitly allowed to re-fetch node IDs and correlate by url. |
+| AG3-E05 | Analyzer takes FIRST `---RALPH_STATUS---` marker | two-block output through the parser | first block wins, conformant single-block output safe | PASS — two-block input returned `status:"IN_PROGRESS"` (the first block). Latent-risk note from round 1 unchanged (conformant runs emit one block). |
+| AG3-E07 | profile-keys CI job covers `skills/*/SKILL.md` only | `ci.yml:199` glob vs agents | agents un-checked by CI — observation | PASS-with-note — `ci.yml:199` globs `skills/*/SKILL.md`, not `agents/*.md`; AG3-P03 compensated manually (0 undeclared). Consider widening the glob to `agents/*.md`. |
+| AG3-E08 | Counter-transport off-by-one after the fixes | trace counter-B: command initializes `1/5`, increments on re-dispatch, agent resumes from dispatched `<b>`; pr-comment-resolver Iteration discipline now restates statelessness | one dispatch = one tick, escalation truthful at 5/5 | PASS — smoke + report + `MAX_ITERATIONS` all anchor at `1/5`; "Increment `<b>` … on every re-dispatch" advances 1→2…; no path increments before the first dispatch. The round-2 AG2-R09 cosmetic parity gap is now CLOSED: `pr-comment-resolver.md:180-181` restates statelessness ("this agent is stateless across dispatches, so it resumes from the dispatched `<b>`"), mirroring the qa wording. |
+
+### Security re-check — fr-nfr-gate `--spec-path` confinement
+
+The gate feeds resolved spec docs into the review prompt, so an
+out-of-tree path is a context-injection escape. Re-executed live:
+
+| ID | Case | Check | Expected | Result |
+| --- | --- | --- | --- | --- |
+| AG3-S01 | Symlinked `--spec-path` | `--spec-path specs/evil-link` (→ `/etc/passwd`) | refused | PASS — `refusing to follow symlink for --spec-path`, exit 1. |
+| AG3-S02 | `../` escape | `--spec-path ../../../etc` | refused | PASS — `spec path escapes the repository boundary …`, exit 1. |
+| AG3-S03 | Absolute path outside repo | `--spec-path /etc` | refused | PASS — `spec path escapes the repository boundary …`, exit 1. |
+
+### Round-3 verdict
+
+All 6 agent contracts remain executable as written against the
+committed tree. The round-1 BUG-1/BUG-2 counter transports HOLD and are
+symmetric with no off-by-one; the round-2 AG2-R09 cosmetic parity gap is
+now closed (pr-comment-resolver restates statelessness). No regressions
+and no fix-introduced defects found: frontmatter ≡ architecture §3
+matrix, 55/55 profile keys ∈ schema, tool lists sufficient, all three
+agent-quoted scripts parse and emit canonical shapes (the new shared
+`lib/common.sh` sourcing works end-to-end), bogus flags die with the
+clean diagnostic, RALPH_STATUS parsing intact (COMPLETE/BLOCKED-after-
+escalation/NOT_RUN/two-block/WORK_TYPE all correct), escalation blocks
+consistent, and the `fr-nfr-gate` symlink/`..`/absolute confinement
+holds. The only carried items are pre-existing and out-of-scope for the
+agent contracts: the command-side ci-fixer `BLOCKED`/`SKIPPED-NO-CI`
+handling gap (commands-semantics BUG-3) and the QA degrade verdict gap
+(commands-semantics BUG-4), plus the CI keys-check scope (AG3-E07,
+matches its documented contract). No new agents-contracts bug filed.
+Sandbox `/tmp/sdlc-test3-agents-contracts/` deleted after the round.

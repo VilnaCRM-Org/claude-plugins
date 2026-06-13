@@ -222,3 +222,135 @@ call) while python3's `json.load` rejects "Extra data" and takes the
 transport retry (exit 1, 2 calls). The round-1 plan explicitly accepted
 either outcome for RL2-12, and neither path silently passes a FAIL, so this
 is logged as a documented backend ambiguity rather than a bug.
+
+## Round 3
+
+Date: 2026-06-13. Goal: prove the round-2 fixes HOLD against the post-fix
+tree (commit `180a282`) and hunt for any remaining or fix-introduced defect.
+Prior rounds fixed 23 bugs total; the documented pattern is that ~half of
+each round's "fixes" regress, so every repro below was re-run for real (twice)
+and judged on observed behavior, NOT on commit messages.
+
+The two round-2 findings that landed code changes in `ai-review-loop.sh`:
+
+- **R2 Bug 2 (uint64 loop wrap)**: a `--max-iterations` value that survives
+  the `^[1-9][0-9]*$` regex but exceeds a sane bound would wrap modulo 2^64
+  in the C-style loop. Fixed at lines 40-54 with a `MAX_ITERATIONS_CEILING`
+  of 1000 enforced by the wrap-safe `num_gt` digit-string compare.
+- **BUG-RL2 (malformed-YAML traceback leak / silent degrade)**: the profile
+  read now runs `yaml_parses` (lines 72-73) before `yaml_get_list`, so a
+  broken profile dies with one clean `[php-sdlc]` diagnostic naming the file
+  instead of dumping a raw traceback and silently degrading to the default
+  `claude` agent.
+
+Sandbox: `/tmp/sdlc-test3-review-loop/` (fresh, deleted after the round).
+Harness: copied static fixture stub + a `seqgen.sh`-generated sequenced stub
+with an argv call log (same pattern as the bats `seq_claude` helper).
+Backend on this host: `jq` PRESENT, `yq` ABSENT (so all YAML access takes the
+python3+PyYAML fallback unless `SDLC_FORCE_PYTHON_YAML` is explicit). The full
+`bats tests/ai-review-loop.bats` (23 tests) and `tests/common-lib.bats` (28
+tests) suites were also run twice — all green both times.
+
+### Round-3 key-fix verification (R2 Bug 2 — `--max-iterations` ceiling)
+
+| ID | Case | Setup / command | Expected | Result |
+| --- | --- | --- | --- | --- |
+| RL3-C01 | ceiling control: 1000 accepted | `--max-iterations 1000`, `PASS_JSON` | exit 0; `iteration 1/1000`; PASS on iteration 1 | PASS |
+| RL3-C02 | just over ceiling: 1001 rejected | `--max-iterations 1001` | exit 1; `must not exceed 1000`; 0 calls | PASS |
+| RL3-C03 | 18-digit (`999999999999999999`) | over ceiling | exit 1; `must not exceed 1000` | PASS |
+| RL3-C04 | 19-digit (`9999999999999999999`) | over ceiling | exit 1; `must not exceed 1000` | PASS |
+| RL3-C05 | 22-digit (`9999999999999999999999`) | regex-valid, would wrap to ~1.8e18 | exit 1; `must not exceed 1000` | PASS |
+| RL3-C06 | 2^63 (`9223372036854775808`) | would wrap NEGATIVE → 0 iterations | exit 1; `must not exceed 1000` | PASS |
+| RL3-C07 | 2^64 (`18446744073709551616`) | would wrap to 0 → 0 iterations | exit 1; `must not exceed 1000` | PASS |
+| RL3-C08 | 2^64+1 (`18446744073709551617`) | would wrap to 1 → 1 iteration | exit 1; `must not exceed 1000` | PASS |
+| RL3-C09 | `--max-iterations 0` / `-1` / `1.5` | sub-ceiling invalids | exit 1; `must be a positive integer`; 0 calls | PASS |
+| RL3-C10 | leading-zero `007` / `0001000` | regex rejects leading zero before ceiling | exit 1; `must be a positive integer` | PASS |
+| RL3-C11 | `num_gt` unit probe | direct source of `common.sh`; 8 boundary pairs | all 8 match expected (equal, length, lexicographic, 2^64) | PASS |
+| RL3-C12 | ordering: bad ceiling + all-skip agents | `--agents codex --max-iterations 99…99` | exit 1; ceiling die fires first (validation-before-resolution) | PASS |
+
+### Round-3 key-fix verification (BUG-RL2 — malformed-YAML guard)
+
+| ID | Case | Setup / command | Expected | Result |
+| --- | --- | --- | --- | --- |
+| RL3-Y01 | broken list + stray colons (python3) | `[unclosed` + `broken: : :`; no `--agents` | exit 1; `profile is not valid YAML`; 0 calls; no traceback; no silent PASS | PASS |
+| RL3-Y02 | same, forced python3 backend | `SDLC_FORCE_PYTHON_YAML=1` | exit 1; clean diag; 0 calls; no traceback | PASS |
+| RL3-Y03 | pure unclosed bracket `[a, b` | malformed | exit 1; clean diag; 0 calls | PASS |
+| RL3-Y04 | tab-indented mapping (YAML forbids tabs) | malformed | exit 1; clean diag; 0 calls | PASS |
+| RL3-Y05 | diagnostic content | malformed profile | message names the file path AND gives remediation (`/sdlc-setup`, `--agents`) | PASS |
+| RL3-Y06 | control: duplicate key (valid for safe_load) | `ai_review_agents` twice | exit 0; parses; 1 call (guard does NOT over-reject) | PASS |
+| RL3-Y07 | control: empty file | `.claude/php-sdlc.yml` empty | exit 0; defaults to claude; 1 call | PASS |
+| RL3-Y08 | control: valid claude list | `[claude]` | exit 0; 1 call | PASS |
+| RL3-Y09 | control: valid, no review key | unrelated keys only | exit 0; defaults to claude; 1 call | PASS |
+| RL3-Y10 | control: valid `[codex, claude]` | matrix | exit 0; codex skip; claude PASS; 1 call | PASS |
+| RL3-Y11 | control: scalar agent / empty list | `ai_review_agents: claude` and `[]` | exit 0; default-claude; 1 call each | PASS |
+
+### Round-3 verdict / is_error / prompt vectors
+
+| ID | Case | Setup / command | Expected | Result |
+| --- | --- | --- | --- | --- |
+| RL3-V01 | clean PASS (control) | `ok\nAI_REVIEW_VERDICT: PASS`; max 1 | exit 0; PASS; 1 call | PASS |
+| RL3-V02 | CRLF result, CR after verdict | `ok\r\nAI_REVIEW_VERDICT: PASS\r`; max 1 | exit 1; contract warn; no retry; 1 call; never silent pass | PASS |
+| RL3-V03 | CR only after verdict line | `…PASS\r`; max 1 | exit 1; contract warn; 1 call | PASS |
+| RL3-V04 | trailing space after PASS | verdict line is `…PASS` + one trailing space; max 1 | exit 1; contract warn; 1 call | PASS |
+| RL3-V05 | leading space / tab before token | one space or tab prefixes `AI_REVIEW_VERDICT: PASS`; max 1 | exit 1; contract warn; 1 call | PASS |
+| RL3-V06 | missing space after colon | `AI_REVIEW_VERDICT:PASS`; max 1 | exit 1; contract warn; 1 call | PASS |
+| RL3-V07 | trailing blank lines after verdict | `…PASS\n\n\n`; max 1 | exit 0; awk NF picks last non-empty line; PASS; 1 call | PASS |
+| RL3-V08 | PASS mid-text, FAIL last line | two verdicts; max 1 | exit 1; last line wins → FAIL path; NO contract warn; 1 call | PASS |
+| RL3-V09 | lowercase `pass` | `…VERDICT: pass`; max 1 | exit 1; case-sensitive contract; warn; 1 call | PASS |
+| RL3-V10 | `.result` null / empty / number 42 | three transport/contract shapes; max 1 | null+empty → transport retry (2 calls); 42 → contract no-retry (1 call); all exit 1 | PASS |
+| RL3-E01 | is_error:true bool | `{"is_error":true,…}`; max 1 | exit 1; is_error warn; one retry; 2 calls; no contract log | PASS |
+| RL3-E02 | is_error:false bool | `{"is_error":false,…PASS}`; max 1 | exit 0; verdict parsed; no is_error warn; 1 call | PASS |
+| RL3-E03 | is_error string `"true"` | strict bool compare; max 1 | exit 0; NOT a transport error; verdict parsed; 1 call | PASS |
+| RL3-E04 | is_error number `1` | not `=== true`; max 1 | exit 0; verdict parsed; 1 call | PASS |
+| RL3-E05 | is_error:true WITH a PASS body | transport wins over verdict; max 1 | exit 1; retry; 2 calls (PASS body NOT honored) | PASS |
+| RL3-E06 | is_error parity, jq ABSENT | restricted PATH (no jq); 3 shapes | python3 fallback matches jq results exactly | PASS |
+| RL3-P01 | `REVIEW_PROMPT` cmd-subst payload | `$(touch HACKED) \`touch HACKED2\` ; rm -rf x` | exit 0; NO file created; payload verbatim as one argv | PASS |
+| RL3-P02 | prompt `$(touch /tmp/…/PWNED)` | abs-path cmd-subst | no file created; verbatim argv | PASS |
+| RL3-P03 | prompt with `"`/`'`/`$VAR`/pipe/redirect/backtick/glob | 7 metachar payloads | exit 0; zero expansion; zero file creation; verbatim each | PASS |
+| RL3-P04 | multi-line `REVIEW_PROMPT` w/ embedded `$(touch ML_HACK)` | 3-line env value | newlines reach claude argv; NO file created | PASS |
+| RL3-P05 | empty `REVIEW_PROMPT` | `REVIEW_PROMPT=` | falls back to default `Review the working tree` prompt; exit 0 | PASS |
+
+### Round-3 regression re-runs (highest-risk prior cases)
+
+| ID | Case | Result |
+| --- | --- | --- |
+| RL-P02 | FAIL then PASS (2 calls) | PASS |
+| RL-N01 | perpetual FAIL hits default cap 5 (NFR-6) | PASS |
+| RL-P03 | PASS exactly at boundary (iter 3) | PASS |
+| RL2-04/06 | malformed JSON 1-retry; garbage-then-PASS recover | PASS |
+| RL-E01 | is_error-then-PASS on retry | PASS |
+| RL-E03 | mixed FAIL/missing-verdict/PASS over 3 iters | PASS |
+| RL2-07 | `.result` null → transport retry | PASS |
+| RL-N08 | empty result string → transport retry | PASS |
+| RL-E06 | `.result` number 42 → contract no-retry | PASS |
+| RL-N12/N13 | all-skip matrix (`codex`, `gemini,codex`) → no-agent fail | PASS |
+| RL-P09/E09 | `--agents codex,claude` / `claude,claude` (dup) | PASS |
+| RL2-11 | `--agents "codex, claude"` separators; empty tokens dropped | PASS |
+| RL-N14/N15 | unknown flag; `--agents`/`--max-iterations` without value | PASS |
+| RL-N16 | claude CLI absent from PATH | PASS |
+
+### Round-3 verdict
+
+**Cases run: 62** (12 ceiling + 11 YAML-guard + 24 verdict/is_error/prompt +
+15 regression re-runs), plus the 23-test bats suite and 28-test common-lib
+suite, every one executed at least twice with identical results.
+
+**Prior fails re-checked: 2** (R2 Bug 2 ceiling, BUG-RL2 malformed-YAML guard
+— the only two round-2 findings that produced code changes in this surface).
+**Prior fails now passing: 2.** Both HOLD: the `MAX_ITERATIONS_CEILING`
+`num_gt` guard rejects every 19+ digit / 2^63 / 2^64 / 2^64-multiple value
+with `must not exceed 1000` and zero claude calls; the `yaml_parses` guard
+fail-closes every malformed profile with one clean diagnostic, 0 calls, no
+traceback leak, and no silent degrade to `claude` — on BOTH backends. The
+round-2 BUG-RL2 is fully resolved (it was a MINOR diagnostics gap, now closed)
+and did not regress.
+
+**No new or fix-introduced defects found.** The ceiling check is wrap-safe
+(digit-string compare, never bash arithmetic), validation fires before agent
+resolution, and the new `yaml_parses` guard does not over-reject any valid
+profile (duplicate-key, empty file, scalar agent, empty list, no-review-key
+all still resolve correctly). Verdict matching remains strictly fail-closed on
+CRLF/whitespace/format variants; is_error is a strict bool compare with jq /
+python3 parity; `REVIEW_PROMPT` is passed verbatim as one argv with zero shell
+expansion across all 12 metacharacter payloads. Zero S1–S4 defects on this
+surface in round 3.

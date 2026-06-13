@@ -321,3 +321,116 @@ mechanism works; only the description is wrong. Severity minor
 
 - `/tmp/sdlc-test2-governance-inject/` removed after execution.
 - No QA clone was mutated (all cases used disposable sandboxes).
+
+## Round 3
+
+Independent re-run against the working-tree `scripts/inject-governance.sh`
+(branch `feature/php-backend-sdlc-plugin`, after the round-2 fix commit).
+Goal: prove every round-1 and round-2 fix HOLDS, attack the concurrency
+mechanism the prior rounds called a "lockfile", and re-confirm NFR-3
+byte-preservation with sha256 on every mutating case. Sandboxes under
+`/tmp/sdlc-test3-governance-inject/<case>/`, removed after the run. Each
+result was reproduced; FAILs (none) would be re-run in a fresh sandbox.
+
+Headline: the script ships **no lockfile** (re-confirming R2V Bug 4). A
+source grep for `flock`/`lockfile`/`mkdir.*lock`/`.lock` matches only the
+`block`/`blockfile` substrings; concurrency safety is the atomic in-dir
+`mktemp` + `mv -f` rename plus snapshot-once rendering, which is correct
+and holds under load. The "lockfile" framing in the task brief and the
+earlier commit message remains a documentation/commit-message vs. code
+mismatch (no runtime impact). All three round-1 FAIL bugs (E07 fenced,
+E15 concurrency, E11 CRLF) and all four round-2 regressions (read-only,
+directory, FIFO, `--diff`-on-directory) are now **fixed and guarded by
+bats tests** (23/23 pass).
+
+### Round-3 prior-case re-runs (every round-1 + round-2 case)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| P01 | both files missing | both created, one marker pair each, three sections | PASS |
+| P02 | non-empty file, no markers | block appended; original bytes intact prefix | PASS |
+| P03 | second run | `unchanged` logged, sha256 identical | PASS |
+| P04 | stale block between user sections | replaced in place, position preserved, outside-sha stable | PASS |
+| P05 | `--diff` vs apply parity | `--diff` writes nothing; `patch` reproduces real run byte-for-byte (CLAUDE+AGENTS) | PASS |
+| P06 | generate-profile + inject on QA clone, re-run both, `--refresh` | second full run byte-stable; `--refresh` never touches CLAUDE/AGENTS | PASS |
+| N01 | nonexistent target dir | exit 1, `target directory not found` | PASS |
+| N02 | unknown flag `--bogus` | exit 1, names the flag | PASS |
+| N03 | target is a regular file | exit 1, `target directory not found` | PASS |
+| N04 | read-only (0444) file needing a change | exit 1, file unmodified, no litter — **R2V Bug 1 fixed** | PASS |
+| N05 | read-only (0555) dir, files missing | exit 1, no partial file | PASS |
+| N06 | symlink to a file outside the repo | exit 1, `refusing to follow symlink`, target byte-identical, link intact | PASS |
+| N07 | `CLAUDE.md` is a directory | exit 1, dir intact, zero litter inside — **R2V Bug 2 fixed** | PASS |
+| E01 | only BEGIN marker | orphan removed, user lines kept, one fresh block | PASS |
+| E02 | only END marker | same repair as E01 | PASS |
+| E03 | two balanced pairs, user text between | collapse to first position, both stales gone, outside-sha stable | PASS |
+| E04 | three balanced pairs interleaved | collapse to first, all user lines kept, outside-sha stable | PASS |
+| E05 | END before BEGIN, balanced | markers removed, user kept, fresh well-ordered block | PASS |
+| E06 | nested BEGIN BEGIN END END | corrupt: markers removed, user A/B kept, one block | PASS |
+| E07 | marker pair inside a `` ``` `` fence | fenced example survives, fence intact, real block appended outside — **Bug 1 fixed** | PASS |
+| E08 | markers indented 4 spaces | treated as content, preserved, real block appended | PASS |
+| E09 | marker as substring / trailing space | not matched, preserved as content | PASS |
+| E10 | CRLF file without a block | block appended (LF), CRLF prefix preserved, idempotent | PASS |
+| E11 | unix2dos CRLF managed block | recognized, replaced in place, one copy, CRLF kept — **Bug 2 fixed** | PASS |
+| E12 | file without trailing newline | newline + separator + block; original bytes still prefix | PASS |
+| E13 | empty 0-byte file | block written, rerun idempotent | PASS |
+| E14 | 200k-line (~13 MB) file around block | completes in 1.9 s (< 60 s), outside-sha identical | PASS |
+| E15 | 10 concurrent runs, 5 trials | one block per file, user line kept, zero litter, byte-identical to single run — **Bug 3 fixed** | PASS |
+| E16 | `--diff` when files missing | reports would-be creation, exit 0, nothing written | PASS |
+| E17 | no TARGET arg | operates on `$PWD` | PASS |
+| E18 | target path with spaces + trailing slash | files created in the right place | PASS |
+| E19 | empty marker pair only | replaced with full block, rerun idempotent | PASS |
+| X01 | mixed-ending pairs (CRLF + LF) | collapse to first, MIDDLE kept, outside-sha stable | PASS |
+| X02 | `marker SPACE CR` and `marker CRCR` | only one trailing CR tolerated; malformed lines kept | PASS |
+| X03 | CRLF stale block + 10 concurrent, 3 trials | one LF block, CRLF user lines kept, no litter | PASS |
+| X04 | temp hygiene (normal, `--diff`, failed run) | zero `.sdlc-governance.*` after each | PASS |
+| X05 | mode preservation (overwrite 0600; create umask 027/077) | 0600 / 0640 / 0600 | PASS |
+| X08 | CR-only (classic Mac) file | block-absent, CR-only bytes preserved, idempotent | PASS |
+| X09 | stale block body CRLF, markers LF | whole region replaced, one copy, outside-sha stable | PASS |
+| R2V-N1 | symlink to a file inside the target | refused (exit 1), symlink intact | PASS |
+| R2V-N5 | FIFO `CLAUDE.md` | exit 1, FIFO intact, no litter — **R2V Bug 2 variant fixed** | PASS |
+| R2V-N6 | `--diff` on a directory target | exit 1, no false "would be created", reflects broken state — **R2V Bug 2 fixed** | PASS |
+| R2V-N7 | unreadable (0000) file needing a change | exit 1, no partial write, no litter | PASS |
+
+### Round-3 new probes (lockfile attack surface + fence-fix hardening)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| L01 | lockfile source probe | no `flock`/`lockfile`/`mkdir lock`/`.lock` primitive exists — re-confirms R2V Bug 4 doc mismatch | PASS (no lock; atomic-rename mechanism is the real safeguard) |
+| L02 | SIGKILL mid-write, 20 timings | managed file never torn (`begin==end` always), user line never lost | PASS (0/20 torn) |
+| L03 | two real processes racing, 50 races | exactly one block/file, no litter, user lines intact | PASS (0/50 bad) |
+| L04 | planted stale `.sdlc-governance.*` temps before a run | run ignores foreign temps, writes correct block, stays idempotent (mktemp uses a random suffix) | PASS |
+| L05 | 30 SIGKILL-killed runs on one dir | no managed-file corruption; converges to one block on a clean run; SIGKILL temp litter is inherent (EXIT trap cannot run), matches generate-profile.sh | PASS |
+| L06 | TARGET dir is a symlink to a real dir | works (only managed *files*, not the target dir, are refused), no litter | PASS |
+| L07 | planted `.sdlc-governance.PLANTED` symlink to an outside file | outside file untouched (mktemp picks a random name, never the planted one) | PASS |
+| L08 | NFR-3 rigorous: multi-section UTF-8 file (café/日本語), tabs, `$VAR`, quotes | outside-markers sha256 byte-identical, every section + special char preserved | PASS |
+| F01 | unclosed (odd) fence around a marker | fence suppression disabled, whole-line fallback, idempotent (no duplicate block) | PASS |
+| F02 | tilde `~~~` fenced marker example | example preserved, real block appended, idempotent | PASS |
+| F03 | info-string fence (` ```markdown `) | example preserved, idempotent | PASS |
+| F04 | real stale block AND a fenced example coexist | fenced example kept, real block replaced in place, idempotent | PASS |
+| F05 | stale block body containing a stray fence opener (odd global count) | whole-line fallback replaces the block in place, outside-sha stable, idempotent | PASS |
+| F06 | real stale block after an unclosed fenced example | whole-line fallback strips example marker lines, keeps example text, appends one block, idempotent | PASS |
+| F07 | doc-only fenced example, no real block | exactly one real block appended, example body kept, idempotent | PASS |
+| F08 | `--diff` parity on a fenced-example file | `--diff` writes nothing; `patch` reproduces the real run byte-for-byte | PASS |
+| F09 | CRLF fence lines + CRLF markers documenting the block | CRLF fenced example kept, real block appended, idempotent | PASS |
+
+### Round-3 results summary
+
+- Cases run: 60 (43 prior re-runs covering every round-1 + round-2 case,
+  17 new probes). PASS: 60. FAIL: 0.
+- Prior FAILs re-checked: 7 (round-1 E07/E11/E15 = Bug 1/2/3; round-2
+  R2V-20 read-only, R2V-21 directory, R2V-N5 FIFO, R2V-N6 `--diff`-on-dir).
+  Prior FAILs now passing: 7 — every one is fixed in the working tree and
+  guarded by a dedicated bats case (`tests/inject-governance.bats`, 23/23).
+- NFR-3 byte-preservation re-confirmed with sha256 on the outside-markers
+  content for every mutating case (P02, P04, E03, E04, E07, E11, E14,
+  X01, X09, L08, F04, F05 …) — all identical before/after.
+- Concurrency: the "lockfile" the brief asks to attack does not exist; the
+  real mechanism (atomic in-dir `mktemp` + `mv -f`, snapshot-once render)
+  withstood SIGKILL mid-write (0/20 torn), 50 two-process races (0 bad),
+  and 5×10 + 3×10 concurrent trials with zero defects.
+- No remaining or fix-introduced bug found.
+
+### Round-3 cleanup
+
+- `/tmp/sdlc-test3-governance-inject/` removed after execution.
+- QA clone reset with `git checkout . && git clean -fd` (no push).

@@ -314,3 +314,165 @@ EOF
   [[ "$output" == *"resolved PR number is not numeric"* ]]
   [[ "$output" != *"invalid JSON text"* ]]
 }
+
+# --- R3 Bug 5: valid-JSON-of-wrong-type from gh dies cleanly ----------------
+# gh can exit 0 with VALID JSON whose TYPE is wrong: a top-level array/scalar,
+# or an object whose pullRequest (or a child connection) is the wrong type.
+# raw_is_json accepts it (it IS valid JSON) and the old pr_data_check, which
+# only diagnosed pullRequest==null, let it slip past — every guard runs under
+# 2>/dev/null, so a type error inside a guard was swallowed into "no problem"
+# and the un-guarded normalize()/has_next_page() step downstream died with a
+# bare jq exit 5 / python traceback and ZERO [php-sdlc] diagnostic (the
+# wrong-type-child case even leaked `Cannot index string ...`). pr_data_check
+# must now diagnose every such payload itself.
+
+@test "R3 Bug 5: a top-level JSON array dies with a script diagnostic, no raw jq error (jq)" {
+  STUB_GH_OUTPUT='[1,2,3]' run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"[php-sdlc][ERROR]"* ]]
+  [[ "$output" == *"unexpected response shape"* ]]
+  [[ "$output" == *"PR #7"* ]]
+  [[ "$output" != *"jq: error"* ]]
+  [[ "$output" != *"unresolved threads:"* ]]
+}
+
+@test "R3 Bug 5: a top-level JSON scalar dies with a script diagnostic (jq)" {
+  for payload in '"hello"' '42' 'true'; do
+    STUB_GH_OUTPUT="$payload" run "$SCRIPT" --pr 7
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"[php-sdlc][ERROR]"* ]]
+    [[ "$output" == *"unexpected response shape"* ]]
+    [[ "$output" == *"PR #7"* ]]
+    [[ "$output" != *"unresolved threads:"* ]]
+  done
+}
+
+@test "R3 Bug 5: a wrong-type child connection dies cleanly, never leaks 'Cannot index' (jq)" {
+  # pullRequest is a non-null object but reviewThreads is a string: the old
+  # code reached normalize() and leaked `Cannot index string with string`.
+  STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"reviewThreads":"oops","comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}' \
+    run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"[php-sdlc][ERROR]"* ]]
+  [[ "$output" == *"unexpected response shape"* ]]
+  [[ "$output" == *"PR #7"* ]]
+  [[ "$output" != *"Cannot index"* ]]
+  [[ "$output" != *"jq: error"* ]]
+  [[ "$output" != *"unresolved threads:"* ]]
+}
+
+@test "R3 Bug 5: a non-object pullRequest dies cleanly (jq)" {
+  STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":"oops"}}}' run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"[php-sdlc][ERROR]"* ]]
+  [[ "$output" == *"unexpected response shape"* ]]
+  [[ "$output" != *"unresolved threads:"* ]]
+}
+
+@test "R3 Bug 5: wrong-type payloads die cleanly on the python fallback path too (no jq)" {
+  dir="$BATS_TEST_TMPDIR/nojq-wrongtype-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname python3 cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  ln -sf "$STUBS/gh" "$dir/gh"
+
+  # top-level array
+  STUB_GH_OUTPUT='[1,2,3]' PATH="$dir" run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected response shape"* ]]
+  [[ "$output" != *Traceback* ]]
+  [[ "$output" != *"unresolved threads:"* ]]
+
+  # top-level scalar
+  STUB_GH_OUTPUT='"hello"' PATH="$dir" run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected response shape"* ]]
+  [[ "$output" != *Traceback* ]]
+
+  # wrong-type child connection — the case that produced an AttributeError
+  STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"reviewThreads":"oops","comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}' \
+    PATH="$dir" run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected response shape"* ]]
+  [[ "$output" != *Traceback* ]]
+  [[ "$output" != *AttributeError* ]]
+  [[ "$output" != *"unresolved threads:"* ]]
+}
+
+# --- R3 Bug 6: a SCALAR comment node (not just a wrong-type connection) ------
+# The R3 Bug 5 guard validated connections down to "nodes is a list" but not
+# that each node is an object. A scalar element inside comments.nodes (an
+# issue comment OR a thread comment) — e.g. comments.nodes:[42] — passed the
+# guard and reached normalize(), which leaked a bare `jq: error (...) Cannot
+# index number with string "author"` (exit 5) on the jq path and a python
+# `Traceback ... AttributeError: 'int' object has no attribute 'get'` on the
+# fallback path: the exact raw-error class R3 Bug 5 set out to eliminate.
+# pr_data_check must diagnose every such payload itself.
+
+@test "R3 Bug 6: a scalar issue-comment node dies with a script diagnostic, no jq error (jq)" {
+  STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false},"nodes":[42]}}}}}' \
+    run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"[php-sdlc][ERROR]"* ]]
+  [[ "$output" == *"unexpected response shape"* ]]
+  [[ "$output" == *"PR #7"* ]]
+  [[ "$output" != *"Cannot index"* ]]
+  [[ "$output" != *"jq: error"* ]]
+  [[ "$output" != *"unresolved threads:"* ]]
+}
+
+@test "R3 Bug 6: a scalar thread-comment node dies with a script diagnostic, no jq error (jq)" {
+  STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"isResolved":false,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[42]}}]}}}}}' \
+    run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"[php-sdlc][ERROR]"* ]]
+  [[ "$output" == *"unexpected response shape"* ]]
+  [[ "$output" != *"Cannot index"* ]]
+  [[ "$output" != *"jq: error"* ]]
+  [[ "$output" != *"unresolved threads:"* ]]
+}
+
+@test "R3 Bug 6: scalar comment nodes die cleanly on the python fallback path too (no jq)" {
+  dir="$BATS_TEST_TMPDIR/nojq-scalarnode-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname python3 cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  ln -sf "$STUBS/gh" "$dir/gh"
+
+  # scalar issue-comment node — produced an AttributeError before the fix
+  STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"comments":{"pageInfo":{"hasNextPage":false},"nodes":[42]}}}}}' \
+    PATH="$dir" run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected response shape"* ]]
+  [[ "$output" != *Traceback* ]]
+  [[ "$output" != *AttributeError* ]]
+  [[ "$output" != *"unresolved threads:"* ]]
+
+  # scalar thread-comment node
+  STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"isResolved":false,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[42]}}]}}}}}' \
+    PATH="$dir" run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected response shape"* ]]
+  [[ "$output" != *Traceback* ]]
+  [[ "$output" != *AttributeError* ]]
+  [[ "$output" != *"unresolved threads:"* ]]
+}
+
+@test "R3 Bug 6 regression: a healthy multi-comment payload still renders (both backends)" {
+  GOOD='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"isResolved":false,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":{"login":"alice"},"body":"x","path":"a.php","line":1,"url":"u1"},{"author":{"login":"carol"},"body":"y","path":"b.php","line":2,"url":"u2"}]}}]},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":{"login":"bob"},"body":"lgtm","url":"u3"}]}}}}}'
+  STUB_GH_OUTPUT="$GOOD" run "$SCRIPT" --pr 7
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unresolved threads: 1"* ]]
+
+  dir="$BATS_TEST_TMPDIR/nojq-good-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname python3 cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  ln -sf "$STUBS/gh" "$dir/gh"
+  STUB_GH_OUTPUT="$GOOD" PATH="$dir" run "$SCRIPT" --pr 7
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unresolved threads: 1"* ]]
+}
