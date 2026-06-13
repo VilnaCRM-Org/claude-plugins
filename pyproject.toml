@@ -1,0 +1,70 @@
+# Python tooling config for the repository's Python code (the prompt-quality
+# toolkit under tools/plugin-quality/). Conventions mirror
+# VilnaCRM-Org/bootstrap-infrastructure (ruff line-length 88, lint select
+# C90/E/F/I, mccabe max-complexity 10, ty/bandit/coverage), adapted to this
+# repo: the toolkit is pure stdlib + PyYAML and runs on the runner via uv/uvx
+# (no Docker dev-env here), so this file carries tool config only — it is not a
+# distributable package.
+[project]
+name = "vilnacrm-plugins-tooling"
+version = "0.1.0"
+description = "Tooling config for the claude-plugins prompt-quality toolkit."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6,<7",
+]
+
+# Pinned to the same ranges as bootstrap-infrastructure's dev group so the gates
+# behave identically across repos. Installed/run via `uvx <tool>` in CI.
+[dependency-groups]
+dev = [
+    "ruff>=0.15.6,<1",
+    "ty>=0.0.21,<0.1",
+    "radon>=5.1,<6",
+    "xenon>=0.9,<1",
+    "bandit[toml]>=1.8,<2",
+    "coverage[toml]>=7.6,<8",
+    "deptry>=0.23,<0.24",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+# Only the Python toolkit is ours; everything else under the repo is plugin
+# markdown/shell/JSON.
+include = ["tools/plugin-quality/**/*.py"]
+
+[tool.ruff.lint]
+select = ["C90", "E", "F", "I"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# The calibration artifacts are byte-for-byte judged DATA — markdown frontmatter
+# and body that the live `--selftest` scores literally. Their long content lines
+# cannot be line-wrapped without changing the judged text, so E501 is exempt for
+# this fixtures-only module.
+"tools/plugin-quality/judge/calibration.py" = ["E501"]
+
+[tool.coverage.run]
+branch = true
+source = ["tools/plugin-quality/lint", "tools/plugin-quality/judge"]
+omit = ["tools/plugin-quality/tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+
+[tool.bandit]
+# The judge engine shells out to the `claude` CLI via subprocess with a fixed
+# argv list (never shell=True, no untrusted interpolation into a shell); B404
+# (import subprocess) and B603 (subprocess call) are accepted by design and
+# justified at each call site.
+targets = ["tools/plugin-quality/lint", "tools/plugin-quality/judge"]
+skips = ["B404", "B603"]
