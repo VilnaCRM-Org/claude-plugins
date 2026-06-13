@@ -71,11 +71,15 @@ mode = "comment"
 [[plugin]]
 name = "shellcheck"
 
-[[plugin]]
-name = "trivy"
-drivers = [
-  "config",
-]
+# trivy is intentionally omitted: qlty pins trivy@0.67.2 and the qlty
+# download proxy (github-proxy.qlty.sh) returns 404 for that release, so
+# the plugin cannot install and the job errors with "Build errored"
+# rather than producing findings — a non-deterministic CI red tied to an
+# upstream outage, not this repo. trivy was configured here with only the
+# `config` driver (GitHub Actions / IaC misconfiguration), which is fully
+# covered by checkov below (workflow token permissions, action pinning,
+# etc.); secrets and dependencies are covered by gitleaks, trufflehog,
+# semgrep, and osv-scanner. No rule coverage is lost by omitting it.
 
 [[plugin]]
 name = "trufflehog"
