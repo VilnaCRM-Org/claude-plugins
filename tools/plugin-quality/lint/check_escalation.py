@@ -48,17 +48,7 @@ COUNTER_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ATX H2 with optional trailing '#' run stripped ("## Guard ##" -> "Guard").
-H2_RE = re.compile(r"^##\s+(.*?)\s*#*\s*$")
-# ATX H1 line (e.g. "# heading"). An ATX H1 immediately followed by a '---'
-# underline is an H1 + horizontal rule, NOT a setext H2 — mirror
-# _model.extract_headings, which never treats an ATX heading line as setext
-# prelude text.
-_H1_RE = re.compile(r"^#\s+")
-# Setext H2 underline: a line of two-or-more '-' (matches _model._SETEXT_H2_RE).
-# _section_text duplicates the setext-aware slicing of check_structure here
-# (we may not edit _model.py to factor a shared helper).
-_SETEXT_H2_RE = re.compile(r"^-{2,}\s*$")
+# H2 section slicing (ATX + setext) is shared via _model.section_text.
 
 # L27: banners and the seven required fields.
 ESCALATION_BANNER = "=== SDLC ESCALATION ==="
@@ -77,63 +67,6 @@ REQUIRED_FIELDS = (
 )
 
 
-def _h2_title_at(idx: int, lines: list[tuple[str, bool]]) -> str | None:
-    """Return the H2 title that BEGINS at stream index ``idx``, else None.
-
-    Recognises both ATX (``## X``) and setext (``X`` then ``----``) H2 forms,
-    consistent with :func:`_model.extract_headings`. For a setext heading the
-    boundary line is the underline, so the title comes from the preceding
-    non-blank, non-fenced text line. Duplicated from check_structure because
-    _model.py may not be edited to share it.
-    """
-    text, in_fence = lines[idx]
-    if in_fence:
-        return None
-    m = H2_RE.match(text)
-    if m:
-        return m.group(1).strip()
-    if _SETEXT_H2_RE.match(text) and idx > 0:
-        prev_text, prev_fenced = lines[idx - 1]
-        # An ATX H1 or H2 line preceding the '---' is its own heading (the '---'
-        # is then a horizontal rule), never a setext title — mirror
-        # _model.extract_headings, which does not treat an ATX heading line as
-        # setext-prelude text.
-        if (
-            not prev_fenced
-            and prev_text.strip()
-            and not H2_RE.match(prev_text)
-            and not _H1_RE.match(prev_text)
-        ):
-            return prev_text.strip()
-    return None
-
-
-def _section_text(body: str, heading: str) -> str | None:
-    """Return the body text of the H2 ``heading`` (fence-aware), or None.
-
-    Slices from the line after the heading up to (not including) the next
-    non-fenced H2 (ATX or setext). Headings inside code fences are ignored.
-    """
-    lines = [(text, in_fence) for _lineno, text, in_fence in _model.iter_body_lines(body)]
-    start = None  # stream index of the first content line of the section
-    out: list[str] = []
-    for idx in range(len(lines)):
-        title = _h2_title_at(idx, lines)
-        if start is None:
-            if title == heading:
-                start = idx + 1
-            continue
-        if title is not None:
-            # A setext boundary's underline follows its title line, which we
-            # already appended; drop that trailing title line from the section.
-            text = lines[idx][0]
-            if _SETEXT_H2_RE.match(text) and out:
-                out.pop()
-            break
-        out.append(lines[idx][0])
-    if start is None:
-        return None
-    return "\n".join(out)
 
 
 def _has_iteration_bound(section: str) -> bool:
@@ -208,7 +141,7 @@ def check(plugin_root: pathlib.Path) -> list[Finding]:
 
         # --- L26: iteration bound stated in the guard section -------------
         heading = GUARD_SECTION[art.kind]
-        section = _section_text(art.body, heading)
+        section = _model.section_text(art.body, heading)
         if section is not None and not _has_iteration_bound(section):
             findings.append(
                 Finding(
@@ -225,7 +158,10 @@ def check(plugin_root: pathlib.Path) -> list[Finding]:
 
         # --- L27: escalation block carries all seven fields --------------
         for banner_lineno, banner_text, fields in _escalation_blocks(art.body):
-            if banner_text != ESCALATION_BANNER:
+            # Normalise interior whitespace so a near-miss banner (e.g.
+            # "=== SDLC ESCALATION  ===" with a double space) is still held to
+            # the seven-field contract instead of silently slipping through.
+            if re.sub(r"\s+", " ", banner_text) != ESCALATION_BANNER:
                 # RUN REPORT and any other banner are exempt from the
                 # seven-field escalation contract.
                 continue

@@ -387,10 +387,11 @@ class StructureCase(unittest.TestCase):
         self.assertEqual(self._findings("L18"), [])
 
     def test_h2_title_at_skips_atx_h1_above_rule(self):
-        # Fix 2 (unit): _h2_title_at must return None for the '---' line below an
+        # Fix 2 (unit): h2_title_at must return None for the '---' line below an
         # ATX H1, i.e. it does not synthesize a setext H2 from the H1 text.
+        # (Now shared in _model; reached via check_structure._model.)
         lines = [(t, False) for t in ("# Heading", "---")]
-        self.assertIsNone(check_structure._h2_title_at(1, lines))
+        self.assertIsNone(check_structure._model.h2_title_at(1, lines))
 
     # --- real shipped plugin is clean for L15-L18 -------------------------
 

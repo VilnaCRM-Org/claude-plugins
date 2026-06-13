@@ -63,71 +63,7 @@ SKIP_PREDICATE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ATX H2 with optional trailing '#' run stripped (matches _model.H2_RE).
-_H2_RE = re.compile(r"^##\s+(.*?)\s*#*\s*$")
-# ATX H1 line (e.g. "# heading"). An ATX H1 directly above a '---' underline is
-# an H1 + horizontal rule, NOT a setext H2 — mirror _model.extract_headings.
-_H1_RE = re.compile(r"^#\s+")
-# Setext H2 underline: a line of two-or-more '-' (matches _model._SETEXT_H2_RE).
-_SETEXT_H2_RE = re.compile(r"^-{2,}\s*$")
-
-
-def _h2_title_at(idx: int, lines: list[tuple[str, bool]]) -> str | None:
-    """Return the H2 title that BEGINS at stream index ``idx``, else None.
-
-    Recognises both ATX (``## X``) and setext (``X`` then ``----``) H2 forms,
-    consistent with :func:`_model.extract_headings`. For a setext heading the
-    boundary line is the underline, so the title comes from the preceding
-    non-blank, non-fenced text line.
-    """
-    text, in_fence = lines[idx]
-    if in_fence:
-        return None
-    m = _H2_RE.match(text)
-    if m:
-        return m.group(1).strip()
-    if _SETEXT_H2_RE.match(text) and idx > 0:
-        prev_text, prev_fenced = lines[idx - 1]
-        # An ATX H1 or H2 line preceding the '---' is its own heading (the '---'
-        # is then a horizontal rule), never a setext title — mirror
-        # _model.extract_headings, which never treats an ATX heading line as
-        # setext-prelude text.
-        if (
-            not prev_fenced
-            and prev_text.strip()
-            and not _H2_RE.match(prev_text)
-            and not _H1_RE.match(prev_text)
-        ):
-            return prev_text.strip()
-    return None
-
-
-def _section_text(body: str, heading: str) -> str | None:
-    """Return the fence-aware body text of the H2 ``heading``, or None.
-
-    Slices from the line after the heading up to (not including) the next
-    non-fenced H2 (ATX or setext). Headings inside code fences are ignored.
-    """
-    lines = [(text, in_fence) for _lineno, text, in_fence in _model.iter_body_lines(body)]
-    start = None  # stream index of the first content line of the section
-    out: list[str] = []
-    for idx in range(len(lines)):
-        title = _h2_title_at(idx, lines)
-        if start is None:
-            if title == heading:
-                start = idx + 1
-            continue
-        if title is not None:
-            # A setext boundary's underline follows its title line, which we
-            # already appended; drop that trailing title line from the section.
-            text = lines[idx][0]
-            if _SETEXT_H2_RE.match(text) and out:
-                out.pop()
-            break
-        out.append(lines[idx][0])
-    if start is None:
-        return None
-    return "\n".join(out)
+# H2 section slicing (ATX + setext) is shared via _model.section_text.
 
 
 def _check_spine(art, check_id: str, rule: str, spine, label: str) -> list[Finding]:
@@ -175,7 +111,7 @@ def _gate_has_skip(art) -> bool:
     """
     gate_sections = [h for h in art.h2_sections if GATE_RE.search(h)]
     in_gate_section = any(
-        "SKIPPED:" in (sec := _section_text(art.body, h) or "")
+        "SKIPPED:" in (sec := _model.section_text(art.body, h) or "")
         or SKIP_NOTE_RE.search(sec)
         for h in gate_sections
     )

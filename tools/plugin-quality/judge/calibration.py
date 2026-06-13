@@ -125,9 +125,9 @@ description: Add a token-bucket rate limit to an endpoint, including distributed
 ---
 # Rate limiter
 
-This component adds a rate limit to a single endpoint. NOTE: this component does
-NOT do any distributed coordination across nodes and does NOT share state — it is
-purely per-process, directly contradicting the description's distributed claim.
+This component adds a rate limit to a single endpoint. It does NOT do any
+distributed coordination across nodes and does NOT share state — it is purely
+per-process, directly contradicting the description's distributed claim.
 """
 
 

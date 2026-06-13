@@ -207,6 +207,25 @@ class ReferenceCheckTests(unittest.TestCase):
         self.assertEqual("references.link.dead", findings[0].rule)
         self.assertIn("dir(x)/SKILL.md", findings[0].message)
 
+    def test_rf3_angle_bracket_dead_link_flagged(self):
+        # Fix (round-3): CommonMark angle-bracket destination `](<path.md>)` — the
+        # surrounding <> must be stripped so a dead link is still resolved/flagged.
+        self.tree.skill(
+            "testing-workflow",
+            "# testing-workflow\n\nSee [crud](<../code-revew/SKILL.md>).\n",
+        )
+        findings = self.tree.run()
+        self.assertEqual(1, len(findings))
+        self.assertEqual("references.link.dead", findings[0].rule)
+
+    def test_rf3_angle_bracket_live_link_not_flagged(self):
+        # Fix (round-3) control: a LIVE angle-bracket .md link resolves cleanly.
+        self.tree.skill(
+            "testing-workflow",
+            "# testing-workflow\n\nSee [crud](<../code-review/SKILL.md>).\n",
+        )
+        self.assertEqual([], self.tree.run())
+
     # RF-4 (L22) command refs ------------------------------------------------
     def test_rf4_command_positive(self):
         self.tree.command(

@@ -126,12 +126,16 @@ def check(plugin_root: pathlib.Path) -> list[Finding]:
                 )
             )
 
-    # M2: version must be semver (prerelease suffix allowed). Only run when a
-    # non-empty version string is present: an absent/empty version is already
-    # reported by M1 above, so checking it here too would double-count one root
-    # cause. A present-but-malformed version (e.g. "0.1") is M2's concern.
+    # M2: version must be a semver STRING (prerelease suffix allowed). M1 above
+    # already reports an absent/empty version, so M2 skips only that case to
+    # avoid double-counting one root cause. Anything else present — a malformed
+    # string ("0.1") OR a non-string value (YAML float 1.0, a list) — is M2's
+    # concern; a non-string version must not silently bypass the check.
     version = data.get("version")
-    if isinstance(version, str) and version.strip() and not SEMVER_RE.match(version):
+    version_absent_or_empty = version is None or (isinstance(version, str) and not version.strip())
+    if not version_absent_or_empty and (
+        not isinstance(version, str) or not SEMVER_RE.match(version)
+    ):
         findings.append(
             Finding(
                 check="M2",
@@ -139,7 +143,7 @@ def check(plugin_root: pathlib.Path) -> list[Finding]:
                 severity="S1",
                 path=rel,
                 message=(
-                    f"plugin.json version {version!r} is not semver "
+                    f"plugin.json version {version!r} is not a semver string "
                     "MAJOR.MINOR.PATCH[-prerelease]"
                 ),
             )

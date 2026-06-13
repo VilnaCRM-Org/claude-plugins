@@ -333,6 +333,17 @@ class EscalationCase(unittest.TestCase):
         self.assertEqual(len(fs), 1)
         self.assertEqual(fs[0].rule, "escalation.max-iterations")
 
+    # --- regression: near-miss banner still validated (Fix) ---------------
+
+    def test_es2_near_miss_banner_still_validated(self):
+        # An interior-whitespace banner variant ("=== SDLC ESCALATION  ===")
+        # must still be held to the seven-field contract, not silently skipped.
+        block = "```text\n=== SDLC ESCALATION  ===\nstage: review\n=== END ===\n```"
+        self._write_command("c", _command_md("`MAX_ITERATIONS=5`.", block))
+        fs = self._findings("L27")
+        self.assertTrue(fs, "near-miss banner with missing fields must fire L27")
+        self.assertTrue(all(f.rule == "escalation.block-fields" for f in fs))
+
     # --- real shipped plugin is clean for L26-L27 -------------------------
 
     def test_real_plugin_clean_for_escalation(self):

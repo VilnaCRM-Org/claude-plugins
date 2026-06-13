@@ -192,6 +192,19 @@ class ManifestCase(unittest.TestCase):
         self.assertEqual(fs[0].check, "M1")
         self.assertEqual(self._plugin_findings(root, "M2"), [])
 
+    def test_mf2_non_string_version_is_flagged(self):
+        # Fix (cubic regression): a present-but-NON-STRING version (YAML float
+        # 1.0, a list, ...) must not silently bypass M2. It is non-empty so M1
+        # does not fire; M2 must catch it as not-a-semver-string.
+        m = _full_plugin_manifest("acme")
+        m["version"] = 1.0
+        root = self._write_plugin("acme", m)
+        m1 = self._plugin_findings(root, "M1")
+        self.assertEqual([f for f in m1 if "version" in f.message], [])
+        fs = self._plugin_findings(root, "M2")
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].rule, "manifest.plugin.semver")
+
     # --- MF-3 (M3) name == dir -------------------------------------------
 
     def test_mf3_name_matches_dir_passes(self):

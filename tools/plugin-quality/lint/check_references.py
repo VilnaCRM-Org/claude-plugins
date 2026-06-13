@@ -156,6 +156,9 @@ def _link_path(target: str) -> str | None:
         return None
     # Drop an optional Markdown link title before touching the path.
     t = _LINK_TITLE_RE.sub("", t).strip()
+    # CommonMark allows an angle-bracket-delimited destination: ](<path.md>).
+    if t.startswith("<") and t.endswith(">"):
+        t = t[1:-1].strip()
     cleaned = t.split("#", 1)[0].split("?", 1)[0].strip()
     if not cleaned.endswith(".md") or cleaned.startswith("/"):
         return None

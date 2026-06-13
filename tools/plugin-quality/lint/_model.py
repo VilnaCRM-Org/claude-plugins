@@ -300,3 +300,66 @@ def find_plugin_roots(repo_root: pathlib.Path) -> list[pathlib.Path]:
 
 def by_kind(artifacts: list[Artifact], kind: str) -> list[Artifact]:
     return [a for a in artifacts if a.kind == kind]
+
+
+# --- Shared H2 section slicing (ATX + setext) -------------------------------
+# Factored here so the escalation and structure checks share one implementation
+# instead of duplicating the setext-aware slicing logic.
+_SECT_ATX_H2_RE = re.compile(r"^##\s+(.*?)\s*#*\s*$")
+_SECT_ATX_H1_RE = re.compile(r"^#\s+")
+_SECT_SETEXT_H2_RE = re.compile(r"^-{2,}\s*$")
+
+
+def h2_title_at(idx: int, lines: list[tuple[str, bool]]) -> str | None:
+    """Return the H2 title that BEGINS at stream index ``idx`` (else None).
+
+    Recognises both ATX (``## X``) and setext (``X`` then ``----``) H2 forms,
+    consistent with :func:`extract_headings`. ``lines`` is the ``(text,
+    in_fence)`` stream from :func:`iter_body_lines`. An ATX H1/H2 line preceding
+    a ``---`` underline is its own heading (the ``---`` is a horizontal rule),
+    never a setext title.
+    """
+    text, in_fence = lines[idx]
+    if in_fence:
+        return None
+    m = _SECT_ATX_H2_RE.match(text)
+    if m:
+        return m.group(1).strip()
+    if _SECT_SETEXT_H2_RE.match(text) and idx > 0:
+        prev_text, prev_fenced = lines[idx - 1]
+        if (
+            not prev_fenced
+            and prev_text.strip()
+            and not _SECT_ATX_H2_RE.match(prev_text)
+            and not _SECT_ATX_H1_RE.match(prev_text)
+        ):
+            return prev_text.strip()
+    return None
+
+
+def section_text(body: str, heading: str) -> str | None:
+    """Return the fence-aware body text of the H2 ``heading`` (ATX or setext).
+
+    Slices from the line after the heading up to (not including) the next
+    non-fenced H2. Headings inside code fences are ignored. Returns None when the
+    heading is absent.
+    """
+    lines = [(text, in_fence) for _lineno, text, in_fence in iter_body_lines(body)]
+    start = None
+    out: list[str] = []
+    for idx in range(len(lines)):
+        title = h2_title_at(idx, lines)
+        if start is None:
+            if title == heading:
+                start = idx + 1
+            continue
+        if title is not None:
+            # A setext boundary's underline follows its title line, already
+            # appended; drop that trailing title line from the section.
+            if _SECT_SETEXT_H2_RE.match(lines[idx][0]) and out:
+                out.pop()
+            break
+        out.append(lines[idx][0])
+    if start is None:
+        return None
+    return "\n".join(out)
