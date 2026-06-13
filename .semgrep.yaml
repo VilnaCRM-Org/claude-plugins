@@ -1,0 +1,47 @@
+# Semgrep ruleset for the qlty `semgrep` plugin (which invokes
+# `semgrep --config .semgrep.yaml`). Without this file semgrep exits 7
+# ("unable to find a config"), which surfaced as the qlty check "Build errored".
+# These are offline, self-contained Python security rules — no registry fetch —
+# so the scan is deterministic in CI. They target real issues the toolkit does
+# not commit (it uses subprocess without a shell, yaml.safe_load, no eval/exec),
+# so the scan is green while still guarding against regressions.
+rules:
+  - id: no-subprocess-shell-true
+    languages: [python]
+    severity: ERROR
+    message: >-
+      subprocess called with shell=True is a command-injection risk; pass an
+      argv list and run without a shell.
+    pattern-either:
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+      - pattern: subprocess.call(..., shell=True, ...)
+      - pattern: subprocess.check_call(..., shell=True, ...)
+      - pattern: subprocess.check_output(..., shell=True, ...)
+
+  - id: no-eval
+    languages: [python]
+    severity: ERROR
+    message: "Avoid eval(); it executes arbitrary code."
+    pattern: eval(...)
+
+  - id: no-exec
+    languages: [python]
+    severity: ERROR
+    message: "Avoid exec(); it executes arbitrary code."
+    pattern: exec(...)
+
+  - id: no-unsafe-yaml-load
+    languages: [python]
+    severity: ERROR
+    message: "Use yaml.safe_load() instead of yaml.load() to avoid arbitrary object construction."
+    pattern: yaml.load(...)
+
+  - id: no-md5-sha1-for-security
+    languages: [python]
+    severity: WARNING
+    message: >-
+      hashlib.md5/sha1 are weak; use sha256+ for security-sensitive hashing.
+    pattern-either:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.sha1(...)

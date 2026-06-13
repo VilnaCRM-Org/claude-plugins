@@ -114,12 +114,12 @@ jobs:
           pipx install uv==0.9.21
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       # Branch coverage of the library, exercised by the stdlib unittest suite
-      # (config: pyproject.toml [tool.coverage]). Floor mirrors the current
-      # measured coverage with margin; the live-claude-CLI paths are not unit
-      # reachable without credentials.
+      # (config: pyproject.toml [tool.coverage]). Floor is 100% line+branch; the
+      # only excluded lines are `if __name__ == "__main__":` guards (and any
+      # `# pragma: no cover`), all of which are unreachable from the suite.
       - name: Coverage (unittest)
         run: |
           uvx --with pyyaml coverage@7.6.7 run -m unittest discover \
             -s tools/plugin-quality/tests -t tools/plugin-quality
-      - name: Coverage report (fail under 90%)
-        run: uvx coverage@7.6.7 report --fail-under=90
+      - name: Coverage report (fail under 100%)
+        run: uvx coverage@7.6.7 report --fail-under=100
