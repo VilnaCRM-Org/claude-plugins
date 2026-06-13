@@ -69,7 +69,7 @@ block_floor (hard-block threshold) is 2 for crit dimensions.
 | --- | --- | --- | --- | --- | --- | --- |
 | J1 | Trigger specificity — would the router fire on the right tasks and not adjacent ones | skill, agent | skill / agent | FR-15; arch §3/§4 | crit | JD-1 |
 | J2 | Body↔description fidelity — body delivers what description promises, no over/under-claim or self-contradiction | skill, agent, command | all | FR-15 | crit | JD-2 |
-| J3 | Degrade-path soundness — described path terminates, never loops/hard-fails, matches §8 matrix | agent, command, skill | all | NFR-4; arch §8 | crit | JD-3 |
+| J3 | Degrade-path soundness — described path terminates, never loops/hard-fails, ends in an explicit reported outcome (NFR-4). Does NOT verify per-row fidelity to the arch §8 matrix | agent, command, skill | all | NFR-4; arch §8 | crit | JD-3 |
 | J4 | Exit-condition consistency (internal: the command states its exit condition consistently across its own sections; the judge is never given the FR-1 stage table, so it cannot and does not verify fidelity to it) | command | command | FR-1 | advisory | JD-4 |
 | J5 | Loop/escalation soundness — prose loop logic actually bounds iterations, restates counter, never auto-resets breaker | command, agent | command/agent | NFR-6 | advisory | JD-5 |
 | J6 | Profile-key branching completeness — body branches on every key it lists; both conditional branches present | skill | skill | FR-15 | advisory | JD-6 |

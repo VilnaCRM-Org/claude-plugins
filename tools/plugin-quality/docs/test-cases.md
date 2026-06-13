@@ -87,7 +87,7 @@ specific message), **E** edge (boundary that must be classified correctly).
 **ST-1 (L15) command 5-spine** — P: all five H2 present · N: missing `## Loop & exit condition` → fail · E: extra H2s (report template) → PASS
 **ST-2 (L16) agent 8-spine** — P: all eight · N: missing `## Smoke prompt` → fail · E: order differs (fr-nfr-reviewer Role-first) → PASS (presence not order)
 **ST-3 (L17) skill first H2 profile-keys** — P: first H2 `## Profile keys consumed` · N: first H2 `## Overview` → fail · E: meta-guides excluded
-**ST-4 (L18) gated skill skip path** — P (literal token): `## Capability gate` + `SKIPPED: capabilities.x is false` · P (prose note tied to a predicate): gate section that says "skip when `capabilities.load_testing` is false" → PASS · N: gate section that documents NO skip path — neither a `SKIPPED:` token nor a prose skip-note tied to a `capabilities.`/`framework.`/`persistence.` predicate → fail · E: non-gated skill (no gate section) → not checked
+**ST-4 (L18) gated skill skip path** — P (literal token): `## Capability gate` + `SKIPPED: capabilities.x is false` · P (skip word in a gate-named section): a gate-named H2 containing `SKIPPED:` OR any `skip`/`skipped`/`skipping` word → PASS (no predicate-tie required inside a gate-named section) · P (out-of-gate prose note): a skip word elsewhere is accepted only when tied to a `capabilities.`/`framework.`/`persistence.` predicate · N: gate-named section with NO skip word AND no predicate-tied skip note anywhere → fail · E: non-gated skill (no gate section) → not checked
 
 ## Tier 1 — references
 
@@ -135,7 +135,7 @@ the self-test.
 **JD-1 trigger specificity** — P (skill): "Create REST CRUD with API Platform. Use when adding API resources... Skip when `framework.api_platform` is false." · N: "Helps with APIs." → low score, FAIL crit floor
 **JD-2 body↔description fidelity** — P: description matches body scope · N: description promises caching but body says "this skill does NOT cover caching" → FAIL (self-contradiction)
 **JD-3 degrade-path soundness** — P: "no CodeRabbit → fall back to `ai-review-loop.sh`, report, do not loop" · N: "if no CI, retry until checks appear" (loops) → FAIL crit
-**JD-4 exit-condition fidelity** — P: command exit condition paraphrases FR-1 row faithfully · N: command claims a different exit condition than the stage table → low score (advisory)
+**JD-4 exit-condition consistency** — P: a command states one exit condition consistently across its Procedure / Loop & exit condition / Iteration guard sections · N: a command states materially different exit conditions in different sections → low score (advisory). Judged from the artifact alone — the judge is never given the FR-1 stage table, so this checks internal consistency, not fidelity to an external table.
 **JD-5 loop/escalation soundness** — P: counter restated each turn, never reset · N: "reset the breaker and retry" → low score
 **JD-6 profile-key branching** — P: database-migrations has both ORM-migration and ODM-schema branches · N: lists `persistence.mapper` but only documents ORM → low score
 **JD-7 semantic generalization leak** — P: generic "the configured repository" · N: "the Mongo-backed repository that stores users" (no literal `Mongo<Name>Repository`, denylist misses it) → FAIL crit
