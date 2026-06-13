@@ -6,7 +6,9 @@ case text is in `test-cases.md`.
 
 Legend — **Tier**: T1 static lint · T2 manifest · T3 LLM-judge.
 **Gate**: BLOCK (fails CI) · ADVISORY (reported, never fails) · BLOCK* (judge:
-blocks only below the rubric's critical floor).
+blocks ONLY a *critical* dimension scoring `<= block_floor` (2); a critical
+score below the floor (4) but above 2 — i.e. 3 — is ADVISORY, reported but
+never blocking).
 
 ## Tier 1 — Static lint
 
@@ -55,8 +57,11 @@ blocks only below the rubric's critical floor).
 
 ## Tier 3 — LLM-as-judge (sonnet via `claude -p <prompt> --output-format json`)
 
-Each row is a rubric dimension. `crit` = blocking dimension (BLOCK* below
-floor); others ADVISORY. Floor default 4/5 for crit dimensions.
+Each row is a rubric dimension. `crit` = a dimension that *can* block — but only
+at score `<= block_floor` (2). A crit dimension scoring 3 (below the floor of 4
+but above 2) is ADVISORY, as are all non-crit dimensions at any score. Advisory
+findings are reported, never block. Floor (advisory threshold) is 4/5;
+block_floor (hard-block threshold) is 2 for crit dimensions.
 
 | # | Dimension | Rubric | Type(s) | Pins | crit? | Cases |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -90,7 +95,7 @@ checks) run *inside* `prompt-lint`, because `lint_all.py` invokes
 | Requirement | Covered by |
 | --- | --- |
 | FR-1 orchestrator exit conditions | RF-4, ES-1/2, JD-4/5 |
-| FR-6 review triage / thresholds | ST-1, JD-3 |
+| FR-6 review triage / thresholds | ST-1 (generic command spine), JD-3 (degrade-path soundness) — these are all that is statically/judge-checkable here. The 21/21 skill-applicability triage with no silent skips is a *runtime-evidence* concern (it depends on observed per-run behavior), NOT statically checkable, so it is intentionally NOT pinned by any check in this layer. |
 | FR-7/FR-12 QA black-box | L2, JD-9 |
 | FR-9..14 agent contracts | L3, L6, ST-2, RF-5, JD-1/2/3 |
 | FR-15 generalized 21 skills | L4, L7, L12, ST-3, RF-6, JD-1/2/6, GN-1, JD-7 |

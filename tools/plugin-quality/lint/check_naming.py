@@ -148,7 +148,13 @@ def _check_argument_hint(art: "_model.Artifact") -> list[Finding]:
     if "argument-hint" not in art.frontmatter:
         return []
     raw = art.frontmatter.get("argument-hint")
-    hint = raw.strip() if isinstance(raw, str) else str(raw).strip()
+    # L9 only judges string-shaped hints. A present-but-null key
+    # (``argument-hint:`` -> None) or any non-string value is L1's concern
+    # (required-key emptiness), not a bracket-shape violation; without this
+    # guard str(None) == "None" would yield a spurious/garbled L9.
+    if not isinstance(raw, str):
+        return []
+    hint = raw.strip()
     # Strip a single matched layer of surrounding quotes.
     if len(hint) >= 2 and hint[0] == hint[-1] and hint[0] in "\"'":
         hint = hint[1:-1].strip()

@@ -18,6 +18,11 @@ for arg in "$@"; do
   esac
 done
 
+if [ "$NO_JUDGE" -eq 1 ] && [ "$JUDGE_ONLY" -eq 1 ]; then
+  echo 'error: --no-judge and --judge-only are mutually exclusive' >&2
+  exit 2
+fi
+
 if [ "$JUDGE_ONLY" -eq 0 ]; then
   echo "== Tier 1: static lint =="
   python3 lint/lint_all.py

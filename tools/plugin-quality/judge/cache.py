@@ -1,9 +1,25 @@
 """Content-addressed verdict cache.
 
-Judging is non-deterministic and costs API spend, so a verdict is cached by a
-hash of (artifact bytes + rubric version + model). Re-running on unchanged files
-returns the cached verdict for free and keeps results stable. Editing a file,
-bumping ``RUBRIC_VERSION``, or switching model invalidates the entry naturally.
+Judging is non-deterministic and costs API spend, so a verdict is cached under a
+sha256 of every input that can change the verdict. The cache key (:func:`_key`)
+folds in ALL of these components:
+
+* ``artifact_bytes``  — the exact UTF-8 bytes of the artifact being judged.
+* ``RUBRIC_VERSION``  — manual bump for prompt-contract changes (see below).
+* ``model``           — the *model-identity* string, NOT a bare model name. The
+                        caller (``judge._cache_identity``) passes
+                        ``"<model>|votes=<n>|rubric=<guidance-fingerprint>"``, so
+                        the vote count and the rubric guidance fingerprint are
+                        part of the cache identity too: changing votes or editing
+                        any dimension's guidance self-invalidates the entry.
+* ``dimension_ids``   — the sorted set of dimensions scored for this artifact.
+* ``extra_context``   — injected context (e.g. a meta-guide's authoritative skill
+                        inventory); a changed context re-judges, never serves stale.
+
+Re-running on unchanged inputs returns the cached verdict for free and keeps
+results stable. Editing a file, bumping ``RUBRIC_VERSION``, switching model,
+changing votes, editing rubric guidance, changing the scored dimensions, or
+changing ``extra_context`` all invalidate the entry naturally.
 
 Cache lives under ``tools/plugin-quality/.judge-cache/`` (git-ignored).
 """
@@ -16,8 +32,12 @@ import os
 import pathlib
 import tempfile
 
-# Bump when rubric guidance or the prompt contract changes materially, to
-# invalidate stale verdicts.
+# One of the cache-key components (see module docstring). Bump manually when the
+# prompt *contract* changes in a way the guidance fingerprint does not capture
+# (e.g. the output JSON shape, the scoring scale, or the system framing in
+# build_prompt). Routine guidance edits are already covered automatically by the
+# rubric guidance fingerprint folded into the model-identity string, so a manual
+# bump here is only for contract changes outside that fingerprint.
 RUBRIC_VERSION = "1"
 
 CACHE_DIR = pathlib.Path(__file__).resolve().parent.parent / ".judge-cache"

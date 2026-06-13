@@ -1,9 +1,12 @@
 # Prompt-Quality Guardrails — Test Cases
 
 Concrete positive / negative / edge cases per check ID from `test-plan.md`.
-Tier-1/2 cases become `pytest` fixtures under `tests/fixtures/`; Tier-3 cases
-become calibration examples embedded in each rubric (a known-good and
-known-bad artifact the judge must score correctly during rubric self-test).
+Tier-1/2 cases are exercised by the stdlib `unittest` suite under `tests/`,
+which builds each case as a synthetic plugin tree inline in
+`tempfile.mkdtemp()` per test — there is no `tests/fixtures/` directory and no
+`pytest` dependency. Tier-3 cases are the known-good / known-bad calibration
+artifacts embedded in each CRITICAL rubric and exercised on demand by
+`run_judge.py --selftest` (see "Self-test gates" below).
 
 Convention: **P** positive (must PASS), **N** negative (must FAIL with a
 specific message), **E** edge (boundary that must be classified correctly).
@@ -107,7 +110,16 @@ specific message), **E** edge (boundary that must be classified correctly).
 **MF-4 (M4) marketplace** — P: entry source `./plugins/php-backend-sdlc` + dir exists · N: source `./plugins/wrong` → fail · E: multiple plugins all validated
 **MF-5 (M5) claude plugin validate** — P: real plugin passes `--strict` · N: corrupt manifest fails · E: `claude` absent → skip-with-message (job neither passes silently nor false-fails)
 
-## Tier 3 — judge calibration (each rubric ships one P and one N artifact)
+## Tier 3 — judge calibration (each CRITICAL rubric ships one P and one N artifact)
+
+Calibration artifacts ship for the CRITICAL dimensions only — **J1, J2, J3,
+J7, J10** (the dimensions that can block CI). Each ships one known-good (P) and
+one known-bad (N) artifact. `run_judge.py --selftest` runs them through the
+live judge and asserts P scores `>= floor` (4) and N scores `<= block_floor`
+(2) for the crit dimension. It needs `claude` credentials, costs API, and is
+**on demand** — it is NOT part of the no-credential CI path. The advisory rows
+below (JD-4/5/6/8/9/11) document expected judge behavior but are not gated by
+the self-test.
 
 **JD-1 trigger specificity** — P (skill): "Create REST CRUD with API Platform. Use when adding API resources... Skip when `framework.api_platform` is false." · N: "Helps with APIs." → low score, FAIL crit floor
 **JD-2 body↔description fidelity** — P: description matches body scope · N: description promises caching but body says "this skill does NOT cover caching" → FAIL (self-contradiction)
@@ -123,10 +135,14 @@ specific message), **E** edge (boundary that must be classified correctly).
 
 ## Self-test gates
 
-- Tier 1/2 validators: `pytest` must show every P fixture PASS and every N
-  fixture FAIL with the expected message substring; edge fixtures classified
-  per the documented policy.
-- Tier 3 rubrics: a `--selftest` mode runs the embedded P/N calibration
-  artifacts through the live judge and asserts P scores ≥ floor and N scores <
-  floor for the crit dimensions. Run on demand (costs API), not in the
-  no-credential CI path.
+- Tier 1/2 validators: the stdlib `unittest` suite (`python3 -m unittest
+  discover -s tests`) must show every P case PASS and every N case FAIL with
+  the expected message substring; edge cases classified per the documented
+  policy. Each case is a synthetic plugin tree built inline in
+  `tempfile.mkdtemp()` — no `tests/fixtures/` directory, no `pytest`. This
+  suite is deterministic and runs in the no-credential CI path.
+- Tier 3 rubrics: `run_judge.py --selftest` runs each CRITICAL rubric's
+  embedded P/N calibration artifacts (J1, J2, J3, J7, J10) through the live
+  judge and asserts P scores ≥ floor (4) and N scores ≤ block_floor (2) for the
+  crit dimension. It requires `claude` credentials, costs API, and is run on
+  demand — NOT in the no-credential CI path.

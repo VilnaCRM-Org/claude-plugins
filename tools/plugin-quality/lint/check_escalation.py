@@ -50,6 +50,10 @@ COUNTER_RE = re.compile(
 
 # ATX H2 with optional trailing '#' run stripped ("## Guard ##" -> "Guard").
 H2_RE = re.compile(r"^##\s+(.*?)\s*#*\s*$")
+# Setext H2 underline: a line of two-or-more '-' (matches _model._SETEXT_H2_RE).
+# _section_text duplicates the setext-aware slicing of check_structure here
+# (we may not edit _model.py to factor a shared helper).
+_SETEXT_H2_RE = re.compile(r"^-{2,}\s*$")
 
 # L27: banners and the seven required fields.
 ESCALATION_BANNER = "=== SDLC ESCALATION ==="
@@ -68,28 +72,54 @@ REQUIRED_FIELDS = (
 )
 
 
+def _h2_title_at(idx: int, lines: list[tuple[str, bool]]) -> str | None:
+    """Return the H2 title that BEGINS at stream index ``idx``, else None.
+
+    Recognises both ATX (``## X``) and setext (``X`` then ``----``) H2 forms,
+    consistent with :func:`_model.extract_headings`. For a setext heading the
+    boundary line is the underline, so the title comes from the preceding
+    non-blank, non-fenced text line. Duplicated from check_structure because
+    _model.py may not be edited to share it.
+    """
+    text, in_fence = lines[idx]
+    if in_fence:
+        return None
+    m = H2_RE.match(text)
+    if m:
+        return m.group(1).strip()
+    if _SETEXT_H2_RE.match(text) and idx > 0:
+        prev_text, prev_fenced = lines[idx - 1]
+        if not prev_fenced and prev_text.strip() and not H2_RE.match(prev_text):
+            return prev_text.strip()
+    return None
+
+
 def _section_text(body: str, heading: str) -> str | None:
     """Return the body text of the H2 ``heading`` (fence-aware), or None.
 
-    Slices from the line after the heading up to (not including) the next H2.
-    Headings inside code fences are ignored.
+    Slices from the line after the heading up to (not including) the next
+    non-fenced H2 (ATX or setext). Headings inside code fences are ignored.
     """
-    start = None
-    lines: list[str] = []
-    for lineno, text, in_fence in _model.iter_body_lines(body):
+    lines = [(text, in_fence) for _lineno, text, in_fence in _model.iter_body_lines(body)]
+    start = None  # stream index of the first content line of the section
+    out: list[str] = []
+    for idx in range(len(lines)):
+        title = _h2_title_at(idx, lines)
         if start is None:
-            if not in_fence:
-                m = H2_RE.match(text)
-                if m and m.group(1).strip() == heading:
-                    start = lineno
+            if title == heading:
+                start = idx + 1
             continue
-        # collecting: stop at the next real (non-fenced) H2.
-        if not in_fence and H2_RE.match(text):
+        if title is not None:
+            # A setext boundary's underline follows its title line, which we
+            # already appended; drop that trailing title line from the section.
+            text = lines[idx][0]
+            if _SETEXT_H2_RE.match(text) and out:
+                out.pop()
             break
-        lines.append(text)
+        out.append(lines[idx][0])
     if start is None:
         return None
-    return "\n".join(lines)
+    return "\n".join(out)
 
 
 def _has_iteration_bound(section: str) -> bool:

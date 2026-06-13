@@ -171,7 +171,11 @@ def _gate_has_skip(art) -> bool:
 
 
 def _check_skill_gate(art) -> list[Finding]:
-    """L18: a capability-gating section must emit a SKIPPED degrade path."""
+    """L18: a capability-gating section must document its skip path.
+
+    Accepted in either form (see :func:`_gate_has_skip`): a literal ``SKIPPED:``
+    token, or an in-gate-section skip note tied to a capability predicate.
+    """
     gate_sections = [h for h in art.h2_sections if GATE_RE.search(h)]
     if not gate_sections or _gate_has_skip(art):
         return []
@@ -183,8 +187,10 @@ def _check_skill_gate(art) -> list[Finding]:
             path=art.rel,
             message=(
                 "gated skill (H2 "
-                f"'## {gate_sections[0]}') must emit a 'SKIPPED:' "
-                "skip-path token in its body (NFR-4)"
+                f"'## {gate_sections[0]}') must document its skip path "
+                "(NFR-4): either a literal 'SKIPPED:' token, or an in-gate "
+                "skip note tied to a capability predicate "
+                "(capabilities./framework./persistence.)"
             ),
         )
     ]

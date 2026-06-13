@@ -25,6 +25,7 @@ REAL_PLUGIN = REPO_ROOT / "plugins" / "php-backend-sdlc"
 # clean of the literal forbidden identifiers.
 TOK_MONGO_REPO = "Mongo" + "User" + "Repository"  # mongo<word>repository
 TOK_USER_SERVICE = "user" + "-" + "service"  # user[-_ ]service
+TOK_ORG = "vilna" + "crm"  # marketplace org literal (denylisted)
 
 
 class GeneralizationCase(unittest.TestCase):
@@ -109,6 +110,29 @@ class GeneralizationCase(unittest.TestCase):
             f"{TOK_USER_SERVICE}\n", encoding="utf-8"
         )
         self.assertEqual(self._findings("L28"), [])
+
+    def test_gn1_org_token_in_root_readme_is_exempt(self):
+        # GN-1 documented edge: README/marketplace org link is exempt. A README
+        # at the PLUGIN ROOT lives outside the scoped component dirs
+        # (skills/commands/agents/scripts), so a denylisted org token there
+        # (install instructions / release URL) must NOT be flagged.
+        (self.root / "README.md").write_text(
+            f"# Plugin\n\nInstall from the {TOK_ORG} marketplace.\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(self._findings("L28"), [])
+
+    def test_gn1_org_token_inside_skills_is_flagged(self):
+        # GN-1 control: the SAME org token inside a scoped dir (skills/) IS a
+        # leak — exemption is scope-driven, not token-driven.
+        self._write_skill(
+            "s",
+            f"---\nname: s\n---\n\n# Skill\n\nReferences the {TOK_ORG} org.\n",
+        )
+        fs = self._findings("L28")
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].rule, "generalization.denylist")
+        self.assertEqual(fs[0].severity, "S1")
 
     def test_gn1_tilde_profile_example_fence_not_stripped(self):
         # Fix 5: ci.yml's awk only recognizes backtick fences, so a tilde fence

@@ -6,6 +6,7 @@
     python3 judge/run_judge.py --votes 3 --gate     # 3-vote median on the block path
     python3 judge/run_judge.py plugins/php-backend-sdlc/skills/code-review/SKILL.md
     python3 judge/run_judge.py --json --report report.md
+    python3 judge/run_judge.py --selftest             # calibrate the rubric (live)
 
 Vote count: use an ODD --votes for a stable median (median_low of an even split
 leans on a single low vote, e.g. median_low([2,5]) == 2). ``--votes 3`` is the
@@ -98,6 +99,44 @@ def _owning_plugin_root(file_path: pathlib.Path) -> pathlib.Path | None:
     return None
 
 
+def _empty_set_exit(args) -> int:
+    """Decide the exit code when zero artifacts were collected.
+
+    Mirrors lint_all's broken-manifest guard intent: a green run on an empty
+    artifact set under --gate is a false green and must fail.
+
+      * No --gate                  -> 0 (report-only, nothing to judge).
+      * --gate + explicit paths    -> 1: the paths matched nothing (already
+                                      warned by _collect_one_path); a gate over a
+                                      path that judges nothing must not pass.
+      * --gate + no explicit paths:
+          - plugin roots exist but yielded zero artifacts -> 1 (broken/empty
+            plugin tree hidden from the gate, like lint's no-valid-manifest).
+          - no plugin roots at all -> 0 (legitimately nothing to lint).
+    """
+    if not args.gate:
+        print("No artifacts to judge.", file=sys.stderr)
+        return 0
+    if args.paths:
+        print(
+            "error: --gate set but the given path(s) matched no judgeable "
+            "artifact — refusing a false green.",
+            file=sys.stderr,
+        )
+        return 1
+    roots = _model.find_plugin_roots(REPO_ROOT)
+    if roots:
+        names = ", ".join(r.name for r in roots)
+        print(
+            f"error: --gate set but {len(roots)} plugin root(s) [{names}] yielded "
+            "zero judgeable artifacts — refusing a false green.",
+            file=sys.stderr,
+        )
+        return 1
+    print("No plugin roots found — nothing to judge.", file=sys.stderr)
+    return 0
+
+
 def _render_result(res: "judge.JudgeResult") -> str:
     lines = [f"### {res.path}  ({res.kind}, model={res.model}{', cached' if res.cached else ''})"]
     if not res.dimensions:
@@ -131,6 +170,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     ap.add_argument("--require", action="store_true", help="fail (exit 2) if the claude CLI is unavailable")
     ap.add_argument("--json", action="store_true", help="emit JSON results to stdout")
     ap.add_argument("--report", default=None, help="write a markdown report to this path")
+    ap.add_argument(
+        "--selftest", action="store_true",
+        help="run the calibration self-test (live judge on known-good/bad artifacts); "
+             "requires the claude CLI",
+    )
     return ap
 
 
@@ -226,11 +270,103 @@ def _report(args, results, blocking, advisory, errors) -> None:
     )
 
 
+def _score_calibration_case(case, model: str) -> int:
+    """Live-judge one calibration case and return its TARGET dimension's score.
+
+    Caching is disabled so the self-test always reflects the current model/rubric.
+    Raises judge.JudgeError if the target dimension was not scored.
+    """
+    art = case.artifact()
+    options = judge.JudgeOptions(
+        model=model, extra_context=case.extra_context, use_cache=False, votes=1
+    )
+    res = judge.judge_artifact(art, options)
+    for d in res.dimensions:
+        if d.id == case.dimension_id:
+            return d.score
+    raise judge.JudgeError(
+        f"calibration case {case.dimension_id}/{case.polarity} did not score its "
+        f"target dimension {case.dimension_id}"
+    )
+
+
+def _selftest_one_dimension(dim_id: str, model: str) -> tuple[str, int | None, int | None, bool, str]:
+    """Run the P and N calibration cases for one dimension.
+
+    Returns ``(dim_id, p_score, n_score, passed, note)``. ``passed`` is True when
+    the good example scored at/above the dimension floor AND the bad example
+    scored at/below its block_floor. Any judge error -> not passed with a note.
+    """
+    import calibration
+
+    dim = rubrics.DIMENSIONS_BY_ID[dim_id]
+    pos = calibration.positive_for(dim_id)
+    neg = calibration.negative_for(dim_id)
+    if pos is None or neg is None:
+        return dim_id, None, None, False, "missing P or N calibration case"
+    try:
+        p_score = _score_calibration_case(pos, model)
+        n_score = _score_calibration_case(neg, model)
+    except (judge.JudgeError, judge.JudgeUnavailable) as exc:
+        return dim_id, None, None, False, f"judge error: {exc}"
+    p_ok = p_score >= dim.floor
+    n_ok = n_score <= dim.block_floor
+    note = ""
+    if not p_ok:
+        note = f"P scored {p_score} < floor {dim.floor}"
+    elif not n_ok:
+        note = f"N scored {n_score} > block_floor {dim.block_floor}"
+    return dim_id, p_score, n_score, p_ok and n_ok, note
+
+
+def run_selftest(model: str) -> int:
+    """Calibration self-test over every critical dimension. Exit 1 on any miss.
+
+    Prints a per-dimension PASS/FAIL table. Requires the claude CLI (the live
+    judge); the caller gates on cli_available before invoking this.
+    """
+    import calibration
+
+    rows = [_selftest_one_dimension(d, model) for d in calibration.CRITICAL_DIMENSION_IDS]
+    print("calibration self-test (model={}):".format(model), file=sys.stderr)
+    print(f"  {'DIM':<5} {'P':>3} {'N':>3}  RESULT  note", file=sys.stderr)
+    failures = 0
+    for dim_id, p_score, n_score, passed, note in rows:
+        if not passed:
+            failures += 1
+        ps = "-" if p_score is None else str(p_score)
+        ns = "-" if n_score is None else str(n_score)
+        tag = "PASS" if passed else "FAIL"
+        print(f"  {dim_id:<5} {ps:>3} {ns:>3}  {tag:<6}  {note}", file=sys.stderr)
+    print(
+        f"calibration self-test: {len(rows) - failures}/{len(rows)} dimension(s) calibrated.",
+        file=sys.stderr,
+    )
+    return 1 if failures else 0
+
+
+def _run_selftest_entry(args) -> int:
+    """--selftest entry point: gate on the CLI, then run the calibration check.
+
+    Without the claude CLI: skip-with-message (exit 0) unless --require (exit 2).
+    The self-test is NEVER reached on the no-cred CI path because main() runs it
+    only when --selftest is passed, which CI does not pass.
+    """
+    if not judge.cli_available():
+        msg = "claude CLI not found on PATH — calibration self-test SKIPPED."
+        print(f"SKIP: {msg}", file=sys.stderr)
+        return 2 if args.require else 0
+    return run_selftest(args.model)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_arg_parser().parse_args(argv)
 
     if _votes_error(args):
         return 2
+
+    if args.selftest:
+        return _run_selftest_entry(args)
 
     if not judge.cli_available():
         msg = "claude CLI not found on PATH — LLM-judge SKIPPED (deterministic lint still gates)."
@@ -239,8 +375,7 @@ def main(argv: list[str] | None = None) -> int:
 
     artifacts = _select_artifacts(args)
     if not artifacts:
-        print("No artifacts to judge.", file=sys.stderr)
-        return 0
+        return _empty_set_exit(args)
 
     results, errors = _judge_all(artifacts, args)
     blocking = [(r, d) for r in results for d in r.blocking_failures]

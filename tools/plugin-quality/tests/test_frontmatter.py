@@ -156,6 +156,40 @@ class TestFM3(FrontmatterTestBase):
         )
         self.assert_no_findings(self.run_check())
 
+    # --- regression: malformed tools list must still be flagged (Fix 2) ----
+    def test_negative_tools_list_of_ints_flagged(self):
+        # Fix 2: a list with no non-empty string (e.g. [123]) is NOT a present
+        # tools list; the old `or item not in (None, "")` loophole accepted it.
+        self.write_agent(
+            "intlist",
+            "---\nname: intlist\ndescription: An agent.\ntools: [123]\nmodel: opus\n---\nbody\n",
+        )
+        self.assert_finding(self.run_check(), "L3", "frontmatter.agent.missing-key", "tools")
+
+    def test_negative_tools_list_of_null_flagged(self):
+        # Fix 2: [null] yields [None] -> no non-empty string -> L3 fires.
+        self.write_agent(
+            "nulllist",
+            "---\nname: nulllist\ndescription: An agent.\ntools: [null]\nmodel: opus\n---\nbody\n",
+        )
+        self.assert_finding(self.run_check(), "L3", "frontmatter.agent.missing-key", "tools")
+
+    def test_positive_tools_single_item_list_passes(self):
+        # Fix 2 control: a list with one real tool name still passes.
+        self.write_agent(
+            "onelist",
+            "---\nname: onelist\ndescription: An agent.\ntools: [Read]\nmodel: opus\n---\nbody\n",
+        )
+        self.assert_no_findings(self.run_check())
+
+    def test_positive_tools_comma_string_passes(self):
+        # Fix 2 control: a comma-string still passes (string branch unaffected).
+        self.write_agent(
+            "csv",
+            "---\nname: csv\ndescription: An agent.\ntools: Read, Bash\nmodel: opus\n---\nbody\n",
+        )
+        self.assert_no_findings(self.run_check())
+
 
 # --- FM-4 (L4) skill two keys, no tools/model ------------------------------
 class TestFM4(FrontmatterTestBase):

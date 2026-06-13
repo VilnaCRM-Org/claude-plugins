@@ -104,7 +104,7 @@ jobs:
         if: steps.creds.outputs.run == 'true'
         run: |
           python3 tools/plugin-quality/judge/run_judge.py \
-            --gate --votes 1 --model sonnet --report judge-report.md
+            --gate --require --votes 3 --model sonnet --report judge-report.md
       - name: Publish judge report to job summary
         if: steps.creds.outputs.run == 'true' && (success() || failure())
         run: |

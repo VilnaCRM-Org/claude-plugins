@@ -662,5 +662,382 @@ def dataclasses_replace(obj, **kw):
     return dataclasses.replace(obj, **kw)
 
 
+# ===========================================================================
+# PR-review fix regression tests
+# ===========================================================================
+
+
+# ---- F1: extract_verdict — decoy-before-real is ambiguous, not first-wins ---
+class TestF1ExtractVerdictAmbiguity(unittest.TestCase):
+    def test_decoy_dimensions_object_before_real_raises(self):
+        # Two top-level objects, BOTH carrying "dimensions": a decoy placed first
+        # must NOT be silently selected — the whole answer is ambiguous.
+        text = (
+            '{"dimensions": {"J1": {"score": 5, "evidence": "DECOY"}}} '
+            'and the real one: '
+            '{"dimensions": {"J1": {"score": 2, "evidence": "REAL"}}}'
+        )
+        with self.assertRaises(judge.JudgeError) as ctx:
+            judge.extract_verdict(text)
+        self.assertIn("ambiguous", str(ctx.exception).lower())
+
+    def test_single_valid_object_still_returns(self):
+        out = judge.extract_verdict('{"dimensions": {"J1": {"score": 4, "evidence": "x"}}}')
+        self.assertEqual(out["dimensions"]["J1"]["score"], 4)
+
+    def test_single_object_with_one_non_dimension_decoy_still_returns(self):
+        # Only ONE object has "dimensions"; the other lacks it -> unambiguous.
+        text = '{"note": "ignore"} {"dimensions": {"J1": {"score": 3, "evidence": "y"}}}'
+        self.assertEqual(judge.extract_verdict(text)["dimensions"]["J1"]["score"], 3)
+
+    def test_zero_dimension_objects_raises(self):
+        with self.assertRaises(judge.JudgeError):
+            judge.extract_verdict('{"note": "no verdict here"}')
+
+
+# ---- F2: JudgeOptions.__post_init__ validation ----------------------------
+class TestF2JudgeOptionsValidation(unittest.TestCase):
+    def test_even_votes_rejected(self):
+        with self.assertRaises(ValueError):
+            judge.JudgeOptions(votes=2)
+
+    def test_zero_votes_rejected(self):
+        with self.assertRaises(ValueError):
+            judge.JudgeOptions(votes=0)
+
+    def test_negative_votes_rejected(self):
+        with self.assertRaises(ValueError):
+            judge.JudgeOptions(votes=-3)
+
+    def test_zero_timeout_rejected(self):
+        with self.assertRaises(ValueError):
+            judge.JudgeOptions(timeout=0)
+
+    def test_negative_timeout_rejected(self):
+        with self.assertRaises(ValueError):
+            judge.JudgeOptions(timeout=-1)
+
+    def test_one_and_odd_votes_allowed(self):
+        for v in (1, 3, 5, 7):
+            self.assertEqual(judge.JudgeOptions(votes=v).votes, v)
+
+    def test_positive_timeout_allowed(self):
+        self.assertEqual(judge.JudgeOptions(timeout=30).timeout, 30)
+
+
+# ---- F3: --gate over an empty artifact set is a false green ----------------
+class TestF3GateEmptySet(unittest.TestCase):
+    def setUp(self):
+        self._cli = judge.cli_available
+        judge.cli_available = lambda: True
+
+    def tearDown(self):
+        judge.cli_available = self._cli
+
+    def test_gate_with_roots_but_zero_artifacts_fails(self):
+        # No explicit paths; plugin roots DO exist but discovery found nothing.
+        with mock.patch.object(run_judge, "_collect_artifacts", return_value=[]):
+            with mock.patch.object(
+                run_judge._model, "find_plugin_roots",
+                return_value=[pathlib.Path("/x/plugins/p")],
+            ):
+                self.assertEqual(run_judge.main(["--gate"]), 1)
+
+    def test_gate_with_explicit_path_matching_nothing_fails(self):
+        with mock.patch.object(run_judge, "_collect_artifacts", return_value=[]):
+            self.assertEqual(run_judge.main(["--gate", "no/such/artifact.md"]), 1)
+
+    def test_no_gate_empty_set_is_zero(self):
+        with mock.patch.object(run_judge, "_collect_artifacts", return_value=[]):
+            self.assertEqual(run_judge.main([]), 0)
+
+    def test_gate_with_no_roots_is_zero(self):
+        # --gate, no explicit paths, and no plugin roots at all: legitimately
+        # nothing to judge -> not a false green, returns 0.
+        with mock.patch.object(run_judge, "_collect_artifacts", return_value=[]):
+            with mock.patch.object(
+                run_judge._model, "find_plugin_roots", return_value=[]
+            ):
+                self.assertEqual(run_judge.main(["--gate"]), 0)
+
+    def test_no_creds_skip_path_unaffected_by_gate(self):
+        # The skip-when-unavailable path returns BEFORE artifact collection, so
+        # --gate must not turn a credential skip into a hard failure.
+        judge.cli_available = lambda: False
+        self.assertEqual(run_judge.main(["--gate"]), 0)
+        self.assertEqual(run_judge.main(["--gate", "--require"]), 2)
+
+
+# ---- F5: calibration corpus + --selftest harness --------------------------
+import calibration  # noqa: E402
+
+
+class TestF5CalibrationData(unittest.TestCase):
+    def test_every_critical_dimension_has_P_and_N(self):
+        for dim_id in calibration.CRITICAL_DIMENSION_IDS:
+            self.assertIsNotNone(
+                calibration.positive_for(dim_id), f"{dim_id} missing a P case"
+            )
+            self.assertIsNotNone(
+                calibration.negative_for(dim_id), f"{dim_id} missing an N case"
+            )
+
+    def test_critical_ids_match_the_rubric_critical_set(self):
+        rubric_critical = {d.id for d in rubrics.DIMENSIONS if d.critical}
+        self.assertEqual(
+            set(calibration.CRITICAL_DIMENSION_IDS), rubric_critical,
+            "calibration must cover exactly the rubric's critical dimensions",
+        )
+
+    def test_each_case_targets_an_applicable_dimension(self):
+        # A case is only meaningful if its target dim is actually scored for the
+        # artifact's kind/name — otherwise the self-test could never read a score.
+        for c in calibration.CASES:
+            art = c.artifact()
+            ids = {d.id for d in rubrics.applicable_dimensions(art.kind, art.name)}
+            self.assertIn(c.dimension_id, ids, f"{c.dimension_id}/{c.polarity}")
+
+
+def _calibration_scorer(p_score: int, n_score: int):
+    """Build a mocked _run_claude that scores the target dim per the artifact's
+    polarity, detected from a marker we embedded in each N artifact's text.
+
+    Every applicable dimension still gets a passing score so unrelated dims never
+    confuse the result; only the polarity-detected score is what the self-test
+    reads for the target dimension.
+    """
+    import re
+
+    def fake(prompt, model, timeout):
+        ids = re.findall(r"- (J\d+) \(", prompt)
+        # N artifacts in calibration.py all contain a parenthetical caveat with
+        # "NOT" / "does NOT" / "loops forever" / "stale" wording; key off a stable
+        # marker present only in the negative examples.
+        is_negative = any(
+            marker in prompt
+            for marker in (
+                "directly contradicting",  # J2 N
+                "loops forever",            # J3 N
+                "assumes the user-account", # J7 N
+                "does NOT ship",            # J10 N
+                "name: helper",             # J1 N
+            )
+        )
+        score = n_score if is_negative else p_score
+        dims = {i: {"score": score, "evidence": "syn"} for i in ids}
+        return json.dumps({"dimensions": dims})
+
+    return fake
+
+
+class TestF5SelftestHarness(unittest.TestCase):
+    def test_selftest_reports_pass_for_well_scored_corpus(self):
+        # P artifacts score 5 (>= floor 4); N artifacts score 1 (<= block_floor 2).
+        with mock.patch.object(judge, "cli_available", return_value=True):
+            with mock.patch.object(
+                judge, "_run_claude", side_effect=_calibration_scorer(5, 1)
+            ):
+                rc = run_judge.main(["--selftest"])
+        self.assertEqual(rc, 0, "well-calibrated corpus must PASS (exit 0)")
+
+    def test_selftest_reports_fail_for_miscalibration(self):
+        # Force the N examples to score HIGH (5): a miscalibration the self-test
+        # must catch (N above block_floor) -> exit 1.
+        with mock.patch.object(judge, "cli_available", return_value=True):
+            with mock.patch.object(
+                judge, "_run_claude", side_effect=_calibration_scorer(5, 5)
+            ):
+                rc = run_judge.main(["--selftest"])
+        self.assertEqual(rc, 1, "miscalibrated corpus must FAIL (exit 1)")
+
+    def test_selftest_fails_when_positive_scores_below_floor(self):
+        # P scores low (1): even with N correct, P below floor is a miscalibration.
+        with mock.patch.object(judge, "cli_available", return_value=True):
+            with mock.patch.object(
+                judge, "_run_claude", side_effect=_calibration_scorer(1, 1)
+            ):
+                rc = run_judge.main(["--selftest"])
+        self.assertEqual(rc, 1)
+
+    def test_selftest_skips_without_cli(self):
+        # No claude CLI: skip-with-message, exit 0 (never reached on CI no-cred
+        # path because CI does not pass --selftest).
+        with mock.patch.object(judge, "cli_available", return_value=False):
+            self.assertEqual(run_judge.main(["--selftest"]), 0)
+
+    def test_selftest_require_fails_without_cli(self):
+        with mock.patch.object(judge, "cli_available", return_value=False):
+            self.assertEqual(run_judge.main(["--selftest", "--require"]), 2)
+
+
+# ---- F6a: rubric registry pinned to the J1..J11 contract -------------------
+class TestF6ARubricContract(unittest.TestCase):
+    def test_id_to_critical_map_is_pinned(self):
+        actual = {d.id: d.critical for d in rubrics.DIMENSIONS}
+        expected = {
+            "J1": True, "J2": True, "J3": True, "J4": False, "J5": False,
+            "J6": False, "J7": True, "J8": False, "J9": False, "J10": True,
+            "J11": False,
+        }
+        self.assertEqual(actual, expected)
+
+    def test_applicable_dimensions_for_command(self):
+        ids = {d.id for d in rubrics.applicable_dimensions("command", "deploy")}
+        # command applies_to: J2, J3, J4, J5, J7(all), J9(qa only -> excluded
+        # for a non-qa name), J11(all).
+        self.assertEqual(ids, {"J2", "J3", "J4", "J5", "J7", "J11"})
+
+    def test_applicable_dimensions_for_agent(self):
+        ids = {d.id for d in rubrics.applicable_dimensions("agent", "deploy")}
+        # agent: J1, J2, J3, J5, J7(all), J8, J9(qa only -> excluded), J11(all).
+        self.assertEqual(ids, {"J1", "J2", "J3", "J5", "J7", "J8", "J11"})
+
+    def test_applicable_dimensions_for_skill(self):
+        ids = {d.id for d in rubrics.applicable_dimensions("skill", "foo")}
+        # skill: J1, J2, J3, J6, J7(all), J8, J11(all).
+        self.assertEqual(ids, {"J1", "J2", "J3", "J6", "J7", "J8", "J11"})
+
+    def test_applicable_dimensions_for_meta_guide(self):
+        ids = {d.id for d in rubrics.applicable_dimensions("meta-guide", "guide")}
+        # meta-guide: J7(all), J10, J11(all).
+        self.assertEqual(ids, {"J7", "J10", "J11"})
+
+    def test_qa_name_filter_boundary(self):
+        # J9 only joins when the name carries a 'qa' token on a boundary.
+        qa_agent = {d.id for d in rubrics.applicable_dimensions("agent", "sdlc-qa")}
+        self.assertIn("J9", qa_agent)
+        non_qa = {d.id for d in rubrics.applicable_dimensions("agent", "equality")}
+        self.assertNotIn("J9", non_qa)
+        qa_cmd = {d.id for d in rubrics.applicable_dimensions("command", "qa-run")}
+        self.assertIn("J9", qa_cmd)
+
+
+# ---- F6b: _run_claude happy path argv/cwd contract ------------------------
+class TestF6BRunClaudeHappyPath(unittest.TestCase):
+    def test_argv_and_cwd_and_result(self):
+        envelope = json.dumps({"is_error": False, "result": "VERDICT-TEXT"})
+        with mock.patch.object(judge, "cli_available", return_value=True):
+            with mock.patch("judge.subprocess.run") as run:
+                run.return_value = mock.Mock(returncode=0, stdout=envelope, stderr="")
+                out = judge._run_claude("MY-PROMPT", "sonnet", 42)
+        self.assertEqual(out, "VERDICT-TEXT")
+        # Inspect the recorded call.
+        args, kwargs = run.call_args
+        argv = args[0]
+        self.assertEqual(argv[0], "claude")
+        self.assertIn("-p", argv)
+        # Prompt passed as an ARGUMENT (right after -p), not on stdin.
+        self.assertEqual(argv[argv.index("-p") + 1], "MY-PROMPT")
+        self.assertIn("--model", argv)
+        self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
+        self.assertIn("--output-format", argv)
+        self.assertEqual(argv[argv.index("--output-format") + 1], "json")
+        # cwd is a temp dir (neutral, no project CLAUDE.md leakage).
+        self.assertEqual(kwargs.get("cwd"), tempfile.gettempdir())
+        # No stdin input is fed (prompt is an argument, not piped).
+        self.assertIsNone(kwargs.get("input"))
+
+
+# ---- F6c: judge_artifact end-to-end (mocked) per kind --------------------
+class TestF6CJudgeArtifactDims(unittest.TestCase):
+    def _scored_payload_for(self, kind, name, score=5):
+        dims = rubrics.applicable_dimensions(kind, name)
+        return json.dumps(verdict_for(dims, score))
+
+    def test_agent_fixture_dims_match_applicable(self):
+        art = _model.Artifact(
+            path=pathlib.Path("/x/plugins/p/agents/deployer.md"),
+            plugin_root=pathlib.Path("/x/plugins/p"),
+            kind="agent", raw="# Agent\nbody", has_frontmatter=True,
+            frontmatter={"name": "deployer", "description": "x. Use when y."},
+            frontmatter_error=None, body="# Agent\nbody", h1=None, h2_sections=[],
+        )
+        expected = {d.id for d in rubrics.applicable_dimensions("agent", "deployer")}
+        with _StubClaude(self._scored_payload_for("agent", "deployer")):
+            res = judge.judge_artifact(art, judge.JudgeOptions(use_cache=False))
+        self.assertEqual({d.id for d in res.dimensions}, expected)
+
+    def test_qa_command_fixture_includes_j9(self):
+        art = make_command(name="sdlc-qa")
+        expected = {d.id for d in rubrics.applicable_dimensions("command", "sdlc-qa")}
+        self.assertIn("J9", expected)  # qa name pulls J9 in
+        with _StubClaude(self._scored_payload_for("command", "sdlc-qa")):
+            res = judge.judge_artifact(art, judge.JudgeOptions(use_cache=False))
+        self.assertEqual({d.id for d in res.dimensions}, expected)
+
+    def test_meta_guide_fixture_dims_match_applicable(self):
+        art = _model.Artifact(
+            path=pathlib.Path("/x/plugins/p/skills/guide.md"),
+            plugin_root=pathlib.Path("/x/plugins/p"),
+            kind="meta-guide", raw="# Guide\nbody", has_frontmatter=False,
+            frontmatter={}, frontmatter_error=None, body="# Guide\nbody",
+            h1="Guide", h2_sections=[],
+        )
+        expected = {d.id for d in rubrics.applicable_dimensions("meta-guide", "guide")}
+        with _StubClaude(self._scored_payload_for("meta-guide", "guide")):
+            res = judge.judge_artifact(art, judge.JudgeOptions(use_cache=False))
+        self.assertEqual({d.id for d in res.dimensions}, expected)
+
+
+# ---- F6d: extract_verdict on a truncated payload raises -------------------
+class TestF6DTruncatedPayload(unittest.TestCase):
+    def test_truncated_json_raises(self):
+        text = '{"dimensions": {"J1": {"score": 4, "evidence": "abc'
+        with self.assertRaises(judge.JudgeError):
+            judge.extract_verdict(text)
+
+    def test_truncated_after_dimensions_key_raises(self):
+        text = '{"dimensions": {"J1": {"score": 4,'
+        with self.assertRaises(judge.JudgeError):
+            judge.extract_verdict(text)
+
+
+# ---- F6e: aggregate-cache revalidation on shape drift ---------------------
+class TestF6EAggregateCacheRevalidation(unittest.TestCase):
+    def setUp(self):
+        self.dims = rubrics.applicable_dimensions("skill", "foo")
+        self._tmp = tempfile.TemporaryDirectory()
+        self._cache_patch = mock.patch.object(
+            cache, "CACHE_DIR", pathlib.Path(self._tmp.name)
+        )
+        self._cache_patch.start()
+
+    def tearDown(self):
+        self._cache_patch.stop()
+        self._tmp.cleanup()
+
+    def _seed(self, verdict):
+        art = make_skill()
+        ab = art.raw.encode("utf-8")
+        cm = f"sonnet|votes=3|rubric={rubrics.guidance_fingerprint()}"
+        dim_ids = [d.id for d in self.dims]
+        cache.put(ab, cm, dim_ids, verdict)
+        return art
+
+    def test_aggregate_cache_missing_dimension_rejudges(self):
+        # A cached votes=3 aggregate that DROPPED a dimension must be a MISS.
+        agg = {"dimensions": {d.id: {"score": 4, "evidence": "x"} for d in self.dims}, "votes": 3}
+        del agg["dimensions"][self.dims[0].id]
+        art = self._seed(agg)
+        with _StubClaude([json.dumps(verdict_for(self.dims, 4))] * 3) as m:
+            res = judge.judge_artifact(
+                art, judge.JudgeOptions(model="sonnet", use_cache=True, votes=3)
+            )
+        self.assertTrue(m.called, "missing-dim aggregate must trigger a re-judge")
+        self.assertFalse(res.cached)
+
+    def test_aggregate_cache_extra_dimension_rejudges(self):
+        # A cached aggregate with an EXTRA hallucinated id 'J999' must be a MISS.
+        agg = {"dimensions": {d.id: {"score": 4, "evidence": "x"} for d in self.dims}, "votes": 3}
+        agg["dimensions"]["J999"] = {"score": 5, "evidence": "ghost"}
+        art = self._seed(agg)
+        with _StubClaude([json.dumps(verdict_for(self.dims, 4))] * 3) as m:
+            res = judge.judge_artifact(
+                art, judge.JudgeOptions(model="sonnet", use_cache=True, votes=3)
+            )
+        self.assertTrue(m.called, "extra-id aggregate must trigger a re-judge")
+        self.assertFalse(res.cached)
+
+
 if __name__ == "__main__":
     unittest.main()

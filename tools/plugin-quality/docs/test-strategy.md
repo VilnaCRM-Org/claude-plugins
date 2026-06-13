@@ -143,8 +143,10 @@ Fix/Block order, highest preempts lower:
   no network. Tier 2 `claude plugin validate` and Tier 3 judge run only when
   the runner has `claude` + credentials; otherwise skip-with-message.
 - **Local**: full suite including Tier 3 against the developer's `claude`
-  login. `make` / a `run-all` entrypoint runs everything; a `--no-judge` flag
-  runs only the deterministic tiers.
+  login. The `./run.sh` entrypoint runs everything (lint + self-tests, plus the
+  judge if creds exist); `./run.sh --no-judge` runs only the deterministic
+  tiers, and `./run.sh --judge-only` runs only the LLM-judge. Passing both
+  flags is rejected (they are mutually exclusive).
 - **Self-test**: the validators' own stdlib `unittest` suite lives under
   `tools/plugin-quality/tests/` and builds synthetic good/bad plugin trees inline
   in `tempfile.mkdtemp()` (no `fixtures/` directory), never the real plugin, so

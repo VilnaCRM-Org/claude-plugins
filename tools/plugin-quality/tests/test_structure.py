@@ -175,6 +175,21 @@ class StructureCase(unittest.TestCase):
         self.assertEqual(fs[0].rule, "structure.skill.gate-skipped-token")
         self.assertEqual(fs[0].severity, "S2")
 
+    def test_st4_l18_message_describes_both_accepted_forms(self):
+        # Fix 4: the L18 message must describe BOTH accepted skip-path forms the
+        # check actually honours — the literal 'SKIPPED:' token AND an in-gate
+        # skip note tied to a capability predicate — not only the token.
+        body = "\n\nThis section gates on a capability and does other things.\n"
+        self._write_skill(
+            "s", _skill_md(("Profile keys consumed", "Capability gate"), body)
+        )
+        fs = self._findings("L18")
+        self.assertEqual(len(fs), 1)
+        msg = fs[0].message
+        self.assertIn("SKIPPED:", msg)
+        self.assertIn("predicate", msg)
+        self.assertIn("capabilities.", msg)
+
     def test_st4_non_gated_skill_not_checked(self):
         # No gate H2 -> L18 does not apply even without a SKIPPED token.
         self._write_skill("s", _skill_md(("Profile keys consumed", "Overview")))

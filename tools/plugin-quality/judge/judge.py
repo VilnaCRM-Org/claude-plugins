@@ -237,23 +237,42 @@ def _iter_top_level_objects(text: str):
 
 
 def extract_verdict(text: str) -> dict:
-    """Tolerantly pull the JSON verdict object out of the model's answer."""
+    """Tolerantly pull the JSON verdict object out of the model's answer.
+
+    Collects EVERY top-level object that parses to a dict containing
+    "dimensions", then:
+      * exactly one  -> return it;
+      * zero         -> JudgeError (nothing extractable);
+      * more than one-> JudgeError (ambiguous — a decoy object placed before the
+        real verdict must NOT be silently selected; force a reprompt instead).
+
+    Keeps the single-object fast path plus the fenced / trailing-comma tolerance.
+    """
     cleaned = _FENCE_RE.sub("", text).strip()
+    # Fast path: the whole answer is the single verdict object.
     try:
         obj = _loads_lenient(cleaned)
         if isinstance(obj, dict) and "dimensions" in obj:
             return obj
     except json.JSONDecodeError:
         pass
-    # Brace-balanced scan: return the first top-level object that parses to a
-    # dict containing "dimensions" (skips prose, stray braces, decoy objects).
+    # Brace-balanced scan: gather ALL top-level dimension-bearing objects so a
+    # decoy placed before the real one cannot be wrongly picked.
+    candidates: list[dict] = []
     for candidate in _iter_top_level_objects(cleaned):
         try:
             obj = _loads_lenient(candidate)
         except json.JSONDecodeError:
             continue
         if isinstance(obj, dict) and "dimensions" in obj:
-            return obj
+            candidates.append(obj)
+    if len(candidates) == 1:
+        return candidates[0]
+    if len(candidates) > 1:
+        raise JudgeError(
+            f"ambiguous verdict: found {len(candidates)} top-level objects with "
+            f"'dimensions' (possible decoy) in: {text[:300]}"
+        )
     raise JudgeError(f"could not extract JSON verdict from: {text[:300]}")
 
 
@@ -355,13 +374,28 @@ def _aggregate(verdicts: list[dict], dims: list["rubrics.Dimension"]) -> dict:
 
 @dataclasses.dataclass(frozen=True)
 class JudgeOptions:
-    """Knobs for :func:`judge_artifact`, bundled to keep its signature small."""
+    """Knobs for :func:`judge_artifact`, bundled to keep its signature small.
+
+    ``__post_init__`` rejects unsafe values up front so a bad config fails loudly
+    at construction rather than producing a flaky gate. ``votes`` must be >= 1 and
+    either exactly 1 or an odd number (an even count >1 makes the median_low
+    aggregate lean on a single low vote); ``timeout`` must be positive. The
+    run_judge even-votes CLI check stays as a friendly message, now backed here.
+    """
 
     model: str = DEFAULT_MODEL
     timeout: int = DEFAULT_TIMEOUT
     extra_context: str = ""
     use_cache: bool = True
     votes: int = 1
+
+    def __post_init__(self) -> None:
+        if self.votes < 1 or not (self.votes == 1 or self.votes % 2 == 1):
+            raise ValueError(
+                f"votes must be >= 1 and (1 or odd), got {self.votes!r}"
+            )
+        if self.timeout <= 0:
+            raise ValueError(f"timeout must be > 0, got {self.timeout!r}")
 
 
 @dataclasses.dataclass(frozen=True)

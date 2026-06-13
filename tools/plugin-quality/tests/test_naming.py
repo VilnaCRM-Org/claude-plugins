@@ -157,6 +157,31 @@ class TestNM4ArgumentHint(NamingTestBase):
         self.command("cmd", argument_hint='"[a] [b]"')
         self.assertEqual([], self.lint())
 
+    # --- regression: present-but-null argument-hint (Fix 3) ----------------
+    def test_edge_null_argument_hint_no_l9(self):  # E -> no L9
+        # Fix 3: `argument-hint:` (YAML null) is present-but-empty. L9 judges
+        # only string-shaped hints; emptiness/None is L1's concern. Without the
+        # guard, str(None) == "None" ran the bracket regex and yielded a
+        # spurious/garbled L9. The key is present (None) so L9 must be silent.
+        self.command("cmd", argument_hint="")  # `argument-hint:` -> None
+        f = self.lint()
+        self.assertNotIn("naming.argument-hint.shape", _rules(f))
+        self.assertNotIn("L9", _checks(f))
+
+    def test_null_argument_hint_still_flagged_by_l1(self):
+        # Fix 3 control: the null required key is still caught — but by L1
+        # (frontmatter), not L9 (naming). Confirms the concern wasn't dropped.
+        import check_frontmatter  # local import: lint/ already on sys.path
+
+        self.command("cmd", argument_hint="")  # `argument-hint:` -> None
+        fm_findings = check_frontmatter.check(self.root)
+        l1 = [
+            f
+            for f in fm_findings
+            if f.check == "L1" and "argument-hint" in f.message
+        ]
+        self.assertEqual(len(l1), 1)
+
 
 # NM-5 (L10) kebab-case names
 class TestNM5KebabCase(NamingTestBase):

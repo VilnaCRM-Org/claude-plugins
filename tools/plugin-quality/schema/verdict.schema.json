@@ -1,15 +1,19 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Plugin-quality LLM-judge verdict",
-  "description": "The JSON contract the judged model must emit. The harness — not the model — decides pass/fail by comparing each score against the dimension floor in rubrics.py.",
+  "description": "The JSON contract the judged model must emit. The harness — not the model — decides pass/fail by comparing each score against the dimension floor in rubrics.py. This schema is the human-readable contract; it is NOT loaded at runtime. The runtime validator (judge.py validate_verdict) is STRICTER: beyond the constraints here it enforces the EXACT set of dimension ids applicable to the specific artifact kind (which varies by kind, so this schema stays permissive on WHICH J-ids appear and only constrains their NAME shape and value type), rejecting both missing and extra/hallucinated dimensions.",
   "type": "object",
   "required": ["dimensions"],
   "additionalProperties": true,
   "properties": {
     "dimensions": {
       "type": "object",
-      "description": "Map of dimension id (J1..J11) to its score.",
+      "description": "Map of dimension id (J1..J11) to its score. The exact applicable subset is artifact-kind-dependent and enforced by the runtime validator, not here.",
       "minProperties": 1,
+      "propertyNames": {
+        "pattern": "^J[0-9]+$",
+        "description": "Dimension ids are J followed by one or more digits (J1..J11)."
+      },
       "additionalProperties": {
         "type": "object",
         "required": ["score", "evidence"],
@@ -19,7 +23,7 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 5,
-            "description": "1 = fails the dimension badly, 5 = exemplary."
+            "description": "Integer 1-5 (1 = fails the dimension badly, 5 = exemplary). The JSON-schema integer type rejects booleans (true/false), matching the runtime validator which also rejects bool scores."
           },
           "evidence": {
             "type": "string",

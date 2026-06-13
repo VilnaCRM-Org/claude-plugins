@@ -226,6 +226,47 @@ class EscalationCase(unittest.TestCase):
         self.assertEqual(len(fs), 1)
         self.assertIn("Iteration guard", fs[0].message)
 
+    # --- regression: setext-headed guard section located (Fix 1) ----------
+
+    def test_es1_setext_guard_section_with_wrong_cap_fails(self):
+        # Fix 1: the "Iteration guard" H2 is written SETEXT-style (title line
+        # then a '---' underline). Under the old ATX-only _section_text the
+        # section was never located, so the L26 bound check was silently skipped
+        # (a false negative). With setext-aware slicing the MAX_ITERATIONS=3
+        # wrong cap inside it is now seen and L26 fires.
+        fm = '---\ndescription: "x"\nargument-hint: "[a]"\n---\n'
+        text = (
+            f"{fm}\n# /cmd\n\n"
+            "Iteration guard\n"
+            "---------------\n\n"
+            "Keep a counter, `MAX_ITERATIONS=3`.\n\n"
+            "Failure escalation\n"
+            "------------------\n\n"
+            f"{FULL_BLOCK}\n"
+        )
+        self._write_command("c", text)
+        fs = self._findings("L26")
+        self.assertEqual(len(fs), 1)
+        self.assertEqual(fs[0].rule, "escalation.max-iterations")
+        self.assertEqual(fs[0].severity, "S2")
+        self.assertIn("Iteration guard", fs[0].message)
+
+    def test_es1_setext_guard_section_with_correct_cap_passes(self):
+        # Fix 1 control: the same setext-headed guard section carrying the
+        # correct MAX_ITERATIONS=5 cap is located and stays clean for L26.
+        fm = '---\ndescription: "x"\nargument-hint: "[a]"\n---\n'
+        text = (
+            f"{fm}\n# /cmd\n\n"
+            "Iteration guard\n"
+            "---------------\n\n"
+            "Keep a counter, `MAX_ITERATIONS=5`.\n\n"
+            "Failure escalation\n"
+            "------------------\n\n"
+            f"{FULL_BLOCK}\n"
+        )
+        self._write_command("c", text)
+        self.assertEqual(self._findings("L26"), [])
+
     # --- real shipped plugin is clean for L26-L27 -------------------------
 
     def test_real_plugin_clean_for_escalation(self):

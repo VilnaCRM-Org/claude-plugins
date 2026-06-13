@@ -34,9 +34,14 @@ def _nonempty_str(value) -> bool:
 
 
 def _present_tools(value) -> bool:
-    """Agent ``tools`` (L3) is present in either YAML-list or comma-string shape."""
+    """Agent ``tools`` (L3) is present in either YAML-list or comma-string shape.
+
+    A list satisfies the contract only when at least one element is a non-empty
+    string: a malformed list like ``[123]`` or ``[null]`` (no usable tool name)
+    must NOT count as a present ``tools`` list, so L3 still flags it.
+    """
     if isinstance(value, list):
-        return any(_nonempty_str(item) or item not in (None, "") for item in value)
+        return any(_nonempty_str(item) for item in value)
     return _nonempty_str(value)
 
 
