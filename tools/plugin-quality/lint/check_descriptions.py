@@ -22,12 +22,23 @@ from __future__ import annotations
 
 import pathlib
 import re
+import typing
 
 from _common import Finding
 import _model
 
 CAP = 1536
 MIN_LEN = 20
+
+
+class _TriggerSpec(typing.NamedTuple):
+    """The per-kind differences for the shared L12/L13 trigger check."""
+
+    kind: str
+    trigger_re: "re.Pattern[str]"
+    check: str
+    rule: str
+    message: str
 
 # L12: skill trigger clause.
 SKILL_TRIGGER_RE = re.compile(r"use when|when to use", re.IGNORECASE)
@@ -89,59 +100,55 @@ def _check_cap(art, description: str) -> list[Finding]:
     ]
 
 
-def _check_trigger(
-    art, description: str, *, kind: str, trigger_re, check: str, rule: str, message: str
-) -> list[Finding]:
+def _check_trigger(art, description: str, spec: _TriggerSpec) -> list[Finding]:
     """Shared L12/L13 trigger-clause check.
 
-    Returns a single finding when ``art`` is of ``kind``, has a non-empty
-    description, and that description lacks the ``trigger_re`` clause; otherwise
-    no finding. The differing bits (kind, regex, check id, rule, message) are the
-    only parameters — behaviour is identical to the two former copies.
+    Returns a single finding when ``art`` is of ``spec.kind``, has a non-empty
+    description, and that description lacks the ``spec.trigger_re`` clause;
+    otherwise no finding. Behaviour is identical to the two former copies.
     """
-    if art.kind != kind or not description or trigger_re.search(description):
+    if art.kind != spec.kind or not description or spec.trigger_re.search(description):
         return []
     return [
         Finding(
-            check=check,
-            rule=rule,
+            check=spec.check,
+            rule=spec.rule,
             severity="S2",
             path=art.rel,
-            message=message,
+            message=spec.message,
         )
     ]
 
 
+_SKILL_TRIGGER_SPEC = _TriggerSpec(
+    kind="skill",
+    trigger_re=SKILL_TRIGGER_RE,
+    check="L12",
+    rule="descriptions.skill.no-trigger",
+    message='skill description must contain a trigger clause ("Use when" or "When to use")',
+)
+
+
 def _check_skill_trigger(art, description: str) -> list[Finding]:
     """L12: skill trigger clause."""
-    return _check_trigger(
-        art,
-        description,
-        kind="skill",
-        trigger_re=SKILL_TRIGGER_RE,
-        check="L12",
-        rule="descriptions.skill.no-trigger",
-        message=(
-            'skill description must contain a trigger clause '
-            '("Use when" or "When to use")'
-        ),
-    )
+    return _check_trigger(art, description, _SKILL_TRIGGER_SPEC)
+
+
+_AGENT_TRIGGER_SPEC = _TriggerSpec(
+    kind="agent",
+    trigger_re=AGENT_TRIGGER_RE,
+    check="L13",
+    rule="descriptions.agent.no-trigger",
+    message=(
+        'agent description must contain a delegation trigger '
+        '("Delegate", "Use when", "Use this agent", or "Proactively")'
+    ),
+)
 
 
 def _check_agent_trigger(art, description: str) -> list[Finding]:
     """L13: agent delegation trigger."""
-    return _check_trigger(
-        art,
-        description,
-        kind="agent",
-        trigger_re=AGENT_TRIGGER_RE,
-        check="L13",
-        rule="descriptions.agent.no-trigger",
-        message=(
-            'agent description must contain a delegation trigger '
-            '("Delegate", "Use when", "Use this agent", or "Proactively")'
-        ),
-    )
+    return _check_trigger(art, description, _AGENT_TRIGGER_SPEC)
 
 
 # Per-artifact rule helpers (L14, L11, L12, L13), in original evaluation order.
