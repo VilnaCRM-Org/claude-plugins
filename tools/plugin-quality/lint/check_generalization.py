@@ -99,38 +99,53 @@ def _read_text(path: pathlib.Path) -> str | None:
     return data.decode("utf-8-sig", errors="replace")
 
 
-def _scan_denylist(plugin_root: pathlib.Path, rel) -> list[Finding]:
-    """L28: denylist scan over the scoped component dirs."""
-    findings: list[Finding] = []
+def _scoped_files(plugin_root: pathlib.Path):
+    """Yield every scanned file under the scoped component dirs, in CI order."""
     for sub in SCOPED_DIRS:
         base = plugin_root / sub
         if not base.is_dir():
             continue
         for path in sorted(base.rglob("*")):
-            if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
-                continue
-            text = _read_text(path)
-            if text is None:
-                continue
-            for lineno, line in enumerate(_strip_profile_examples(text), start=1):
-                if line is None:
-                    continue
-                m = DENY_RE.search(line)
-                if m:
-                    findings.append(
-                        Finding(
-                            check="L28",
-                            rule="generalization.denylist",
-                            severity="S1",
-                            path=rel(path),
-                            line=lineno,
-                            message=(
-                                "denylisted identifier "
-                                f"{m.group(0)!r} (NFR-2); generalize or fence the "
-                                "example with '# profile-example'"
-                            ),
-                        )
-                    )
+            if path.is_file() and path.suffix in SCANNED_SUFFIXES:
+                yield path
+
+
+def _denylist_finding(path: pathlib.Path, lineno: int, token: str, rel) -> Finding:
+    """Build the single L28 finding for a denylisted token hit on one line."""
+    return Finding(
+        check="L28",
+        rule="generalization.denylist",
+        severity="S1",
+        path=rel(path),
+        line=lineno,
+        message=(
+            "denylisted identifier "
+            f"{token!r} (NFR-2); generalize or fence the "
+            "example with '# profile-example'"
+        ),
+    )
+
+
+def _scan_file_denylist(path: pathlib.Path, rel) -> list[Finding]:
+    """L28 hits in one file: strip profile-example fences, then match each line."""
+    text = _read_text(path)
+    if text is None:
+        return []
+    findings: list[Finding] = []
+    for lineno, line in enumerate(_strip_profile_examples(text), start=1):
+        if line is None:
+            continue
+        m = DENY_RE.search(line)
+        if m:
+            findings.append(_denylist_finding(path, lineno, m.group(0), rel))
+    return findings
+
+
+def _scan_denylist(plugin_root: pathlib.Path, rel) -> list[Finding]:
+    """L28: denylist scan over the scoped component dirs."""
+    findings: list[Finding] = []
+    for path in _scoped_files(plugin_root):
+        findings.extend(_scan_file_denylist(path, rel))
     return findings
 
 

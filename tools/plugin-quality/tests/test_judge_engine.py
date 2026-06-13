@@ -103,27 +103,27 @@ class TestGate(unittest.TestCase):
 
     def test_all_pass(self):
         self._stub(5)
-        res = judge.judge_artifact(make_skill(), use_cache=False)
+        res = judge.judge_artifact(make_skill(), judge.JudgeOptions(use_cache=False))
         self.assertTrue(res.ok)
         self.assertEqual(res.blocking_failures, [])
 
     def test_score3_crit_is_advisory_not_blocking(self):
         # score 3 on a critical dim: below floor (advisory) but above block_floor.
         self._stub(3)
-        res = judge.judge_artifact(make_skill(), use_cache=False)
+        res = judge.judge_artifact(make_skill(), judge.JudgeOptions(use_cache=False))
         self.assertTrue(res.ok, "score 3 must not hard-block")
         self.assertTrue(res.advisory_failures, "score 3 must be advisory")
 
     def test_score2_crit_blocks(self):
         self._stub(2)
-        res = judge.judge_artifact(make_skill(), use_cache=False)
+        res = judge.judge_artifact(make_skill(), judge.JudgeOptions(use_cache=False))
         self.assertFalse(res.ok)
         crit_ids = {d.id for d in res.blocking_failures}
         self.assertTrue(crit_ids)  # at least one critical dim blocked
 
     def test_noncritical_never_blocks(self):
         self._stub(1)
-        res = judge.judge_artifact(make_skill(), use_cache=False)
+        res = judge.judge_artifact(make_skill(), judge.JudgeOptions(use_cache=False))
         # every blocking failure must be a critical dimension
         self.assertTrue(all(d.critical for d in res.blocking_failures))
 
@@ -144,7 +144,7 @@ class TestAggregate(unittest.TestCase):
         judge_orig = judge._run_claude
         try:
             judge._run_claude = lambda prompt, model, timeout: json.dumps(verdict_for(dims, next(scores)))
-            res = judge.judge_artifact(make_skill(), use_cache=False, votes=3)
+            res = judge.judge_artifact(make_skill(), judge.JudgeOptions(use_cache=False, votes=3))
         finally:
             judge._run_claude = judge_orig
         self.assertFalse(res.ok)  # median_low([2,2,4]) = 2 -> blocks on crit dims
@@ -227,7 +227,7 @@ class TestS1ACacheHitRevalidated(unittest.TestCase):
         cache.put(ab, cm, dim_ids, poisoned)
         # On read, the poisoned hit must be a MISS -> a real (stubbed) judge call.
         with _StubClaude(json.dumps(verdict_for(self.dims, 4))) as m:
-            res = judge.judge_artifact(art, model="sonnet", use_cache=True)
+            res = judge.judge_artifact(art, judge.JudgeOptions(model="sonnet", use_cache=True))
         self.assertTrue(m.called, "poisoned cache must trigger a re-judge")
         self.assertFalse(res.cached)
         self.assertTrue(res.ok)
@@ -240,7 +240,7 @@ class TestS1ACacheHitRevalidated(unittest.TestCase):
         dim_ids = [d.id for d in self.dims]
         cache.put(ab, cm, dim_ids, verdict_for(self.dims, 5))
         with _StubClaude("SHOULD NOT BE CALLED") as m:
-            res = judge.judge_artifact(art, model="sonnet", use_cache=True)
+            res = judge.judge_artifact(art, judge.JudgeOptions(model="sonnet", use_cache=True))
         self.assertFalse(m.called, "valid cache hit must not call claude")
         self.assertTrue(res.cached)
 
@@ -254,7 +254,9 @@ class TestS1ACacheHitRevalidated(unittest.TestCase):
         bad = {"dimensions": {d.id: {"score": 9, "evidence": "x"} for d in self.dims}, "votes": 3}
         cache.put(ab, cm, dim_ids, bad)
         with _StubClaude([json.dumps(verdict_for(self.dims, 4))] * 3) as m:
-            res = judge.judge_artifact(art, model="sonnet", use_cache=True, votes=3)
+            res = judge.judge_artifact(
+                art, judge.JudgeOptions(model="sonnet", use_cache=True, votes=3)
+            )
         self.assertTrue(m.called)
         self.assertFalse(res.cached)
 
@@ -276,7 +278,7 @@ class TestS1BErrorsBecomeEntries(unittest.TestCase):
         art = make_skill()
         run_judge._collect_artifacts = lambda paths: [art]
 
-        def boom(a, **kw):
+        def boom(a, options=None):
             raise KeyError("poisoned verdict")
 
         judge.judge_artifact = boom
@@ -292,7 +294,7 @@ class TestS1BErrorsBecomeEntries(unittest.TestCase):
         # in result-building by stubbing _single_verdict to return junk.
         with mock.patch.object(judge, "_single_verdict", return_value={"dimensions": "not-a-dict"}):
             with self.assertRaises(judge.JudgeError):
-                judge.judge_artifact(art, use_cache=False)
+                judge.judge_artifact(art, judge.JudgeOptions(use_cache=False))
 
 
 # ---- S2-A: bool scores rejected -------------------------------------------
@@ -438,7 +440,7 @@ class TestS3BGuidanceFingerprint(unittest.TestCase):
         cache.put(ab, f"sonnet|votes=1|rubric={real_fp}", dim_ids, verdict_for(self.dims, 5))
         with mock.patch.object(rubrics, "guidance_fingerprint", return_value="deadbeefdeadbeef"):
             with _StubClaude(json.dumps(verdict_for(self.dims, 4))) as m:
-                res = judge.judge_artifact(art, model="sonnet", use_cache=True)
+                res = judge.judge_artifact(art, judge.JudgeOptions(model="sonnet", use_cache=True))
         self.assertTrue(m.called, "changed fingerprint must invalidate the entry")
         self.assertFalse(res.cached)
 
@@ -554,7 +556,7 @@ class TestC1CriticalAdvisory(unittest.TestCase):
         dims = rubrics.applicable_dimensions("skill", "foo")
         self.assertTrue(any(d.critical for d in dims), "fixture needs a critical dim")
         judge._run_claude = lambda prompt, model, timeout: json.dumps(verdict_for(dims, 3))
-        res = judge.judge_artifact(make_skill(), use_cache=False)
+        res = judge.judge_artifact(make_skill(), judge.JudgeOptions(use_cache=False))
         self.assertEqual(res.blocking_failures, [], "score 3 must not hard-block")
         adv_ids = {d.id for d in res.advisory_failures}
         crit_in_adv = {d.id for d in res.advisory_failures if d.critical}
@@ -585,12 +587,16 @@ class TestC2ExtraContextCacheIdentity(unittest.TestCase):
                 cache.put(ab, cm, dim_ids, verdict_for(dims, 5), "v1")
                 # Same artifact/model/votes, DIFFERENT context -> must miss (re-judge).
                 with _StubClaude(json.dumps(verdict_for(dims, 4))) as m:
-                    res = judge.judge_artifact(art, model="sonnet", extra_context="v2", use_cache=True)
+                    res = judge.judge_artifact(
+                        art, judge.JudgeOptions(model="sonnet", extra_context="v2", use_cache=True)
+                    )
                 self.assertTrue(m.called, "changed extra_context must invalidate the entry")
                 self.assertFalse(res.cached)
                 # And the original context still hits without a call.
                 with _StubClaude("SHOULD NOT BE CALLED") as m2:
-                    res2 = judge.judge_artifact(art, model="sonnet", extra_context="v1", use_cache=True)
+                    res2 = judge.judge_artifact(
+                        art, judge.JudgeOptions(model="sonnet", extra_context="v1", use_cache=True)
+                    )
                 self.assertFalse(m2.called, "matching extra_context must still serve the cache")
                 self.assertTrue(res2.cached)
 
@@ -627,7 +633,7 @@ class TestC3ExplicitFileNoMatchWarns(unittest.TestCase):
             self.assertEqual([a.path for a in arts], [real.resolve()])
 
 
-# ---- C-refactor: JudgeOptions path is equivalent to keyword path -----------
+# ---- C-refactor: JudgeOptions is the sole knob bundle ----------------------
 class TestJudgeOptionsBundle(unittest.TestCase):
     def setUp(self):
         self._orig = judge._run_claude
@@ -642,12 +648,12 @@ class TestJudgeOptionsBundle(unittest.TestCase):
         res = judge.judge_artifact(make_skill(), opts)
         self.assertTrue(res.ok)
 
-    def test_keyword_overrides_win_over_options(self):
+    def test_options_use_cache_false_skips_cache(self):
         dims = rubrics.applicable_dimensions("skill", "foo")
         judge._run_claude = lambda prompt, model, timeout: json.dumps(verdict_for(dims, 5))
-        # options says use_cache=True, but the keyword override forces it off.
-        opts = judge.JudgeOptions(use_cache=True)
-        res = judge.judge_artifact(make_skill(), opts, use_cache=False)
+        # use_cache=False on the options bundle forces a fresh (uncached) verdict.
+        opts = judge.JudgeOptions(use_cache=False)
+        res = judge.judge_artifact(make_skill(), opts)
         self.assertFalse(res.cached)
 
 

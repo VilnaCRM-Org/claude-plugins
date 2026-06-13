@@ -364,6 +364,21 @@ class JudgeOptions:
     votes: int = 1
 
 
+@dataclasses.dataclass(frozen=True)
+class _JudgeContext:
+    """Per-call bundle: the artifact, its derived cache coordinates, and options.
+
+    Lets the cache/generate helpers take a single context object (plus ``cache``
+    and ``dims``) instead of a long scalar parameter list.
+    """
+
+    artifact: "_model.Artifact"
+    artifact_bytes: bytes
+    cache_model: str
+    dim_ids: list[str]
+    opts: JudgeOptions
+
+
 def _cache_identity(opts: JudgeOptions) -> str:
     # Fold the rubric guidance fingerprint into the cache identity so that
     # editing any dimension's guidance self-invalidates stale verdicts.
@@ -371,32 +386,37 @@ def _cache_identity(opts: JudgeOptions) -> str:
     return f"{opts.model}|votes={opts.votes}|rubric={fingerprint}"
 
 
-def _load_cached_verdict(cache, artifact_bytes, cache_model, dim_ids, dims, opts):
+def _load_cached_verdict(cache, dims, ctx):
     """Return a validated cached verdict, or None to force a (re-)judge.
 
     A cache hit must still pass validation: a poisoned/stale entry is treated as
     a MISS (re-judge) rather than trusted blindly.
     """
-    candidate = cache.get(artifact_bytes, cache_model, dim_ids, opts.extra_context)
+    candidate = cache.get(
+        ctx.artifact_bytes, ctx.cache_model, ctx.dim_ids, ctx.opts.extra_context
+    )
     if candidate is None:
         return None
     try:
-        _validate_cached(candidate, dims, opts.votes)
+        _validate_cached(candidate, dims, ctx.opts.votes)
     except JudgeError:
         return None
     return candidate
 
 
-def _generate_verdict(cache, artifact, dims, artifact_bytes, cache_model, dim_ids, opts):
+def _generate_verdict(cache, dims, ctx):
     """Run the model (with votes/aggregation) and persist the verdict."""
-    prompt = build_prompt(artifact, dims, opts.extra_context)
+    opts = ctx.opts
+    prompt = build_prompt(ctx.artifact, dims, opts.extra_context)
     collected = [
         _single_verdict(prompt, dims, opts.model, opts.timeout)
         for _ in range(max(1, opts.votes))
     ]
     verdict = _aggregate(collected, dims) if opts.votes > 1 else collected[0]
     if opts.use_cache:
-        cache.put(artifact_bytes, cache_model, dim_ids, verdict, opts.extra_context)
+        cache.put(
+            ctx.artifact_bytes, ctx.cache_model, ctx.dim_ids, verdict, opts.extra_context
+        )
     return verdict
 
 
@@ -436,26 +456,8 @@ def _build_results(verdict: dict, dims: list["rubrics.Dimension"], rel: str) -> 
 def judge_artifact(
     artifact: "_model.Artifact",
     options: JudgeOptions | None = None,
-    *,
-    model: str | None = None,
-    timeout: int | None = None,
-    extra_context: str | None = None,
-    use_cache: bool | None = None,
-    votes: int | None = None,
 ) -> JudgeResult:
-    # Backward-compatible: callers may pass an ``options`` object, or the legacy
-    # keyword knobs (which override the corresponding option fields).
     opts = options or JudgeOptions()
-    overrides = {
-        k: v
-        for k, v in (
-            ("model", model), ("timeout", timeout), ("extra_context", extra_context),
-            ("use_cache", use_cache), ("votes", votes),
-        )
-        if v is not None
-    }
-    if overrides:
-        opts = dataclasses.replace(opts, **overrides)
 
     import cache  # local import keeps cache optional/standalone
 
@@ -463,20 +465,22 @@ def judge_artifact(
     if not dims:
         return JudgeResult(artifact.rel, artifact.kind, artifact.name, opts.model, False, [], {})
 
-    dim_ids = [d.id for d in dims]
-    artifact_bytes = artifact.raw.encode("utf-8")
-    cache_model = _cache_identity(opts)
+    ctx = _JudgeContext(
+        artifact=artifact,
+        artifact_bytes=artifact.raw.encode("utf-8"),
+        cache_model=_cache_identity(opts),
+        dim_ids=[d.id for d in dims],
+        opts=opts,
+    )
 
     verdict = None
     cached = False
     if opts.use_cache:
-        verdict = _load_cached_verdict(cache, artifact_bytes, cache_model, dim_ids, dims, opts)
+        verdict = _load_cached_verdict(cache, dims, ctx)
         cached = verdict is not None
 
     if verdict is None:
-        verdict = _generate_verdict(
-            cache, artifact, dims, artifact_bytes, cache_model, dim_ids, opts
-        )
+        verdict = _generate_verdict(cache, dims, ctx)
 
     results = _build_results(verdict, dims, artifact.rel)
     return JudgeResult(

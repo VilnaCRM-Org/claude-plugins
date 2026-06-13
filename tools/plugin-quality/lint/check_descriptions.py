@@ -89,40 +89,59 @@ def _check_cap(art, description: str) -> list[Finding]:
     ]
 
 
-def _check_skill_trigger(art, description: str) -> list[Finding]:
-    """L12: skill trigger clause."""
-    if art.kind != "skill" or not description or SKILL_TRIGGER_RE.search(description):
+def _check_trigger(
+    art, description: str, *, kind: str, trigger_re, check: str, rule: str, message: str
+) -> list[Finding]:
+    """Shared L12/L13 trigger-clause check.
+
+    Returns a single finding when ``art`` is of ``kind``, has a non-empty
+    description, and that description lacks the ``trigger_re`` clause; otherwise
+    no finding. The differing bits (kind, regex, check id, rule, message) are the
+    only parameters — behaviour is identical to the two former copies.
+    """
+    if art.kind != kind or not description or trigger_re.search(description):
         return []
     return [
         Finding(
-            check="L12",
-            rule="descriptions.skill.no-trigger",
+            check=check,
+            rule=rule,
             severity="S2",
             path=art.rel,
-            message=(
-                'skill description must contain a trigger clause '
-                '("Use when" or "When to use")'
-            ),
+            message=message,
         )
     ]
+
+
+def _check_skill_trigger(art, description: str) -> list[Finding]:
+    """L12: skill trigger clause."""
+    return _check_trigger(
+        art,
+        description,
+        kind="skill",
+        trigger_re=SKILL_TRIGGER_RE,
+        check="L12",
+        rule="descriptions.skill.no-trigger",
+        message=(
+            'skill description must contain a trigger clause '
+            '("Use when" or "When to use")'
+        ),
+    )
 
 
 def _check_agent_trigger(art, description: str) -> list[Finding]:
     """L13: agent delegation trigger."""
-    if art.kind != "agent" or not description or AGENT_TRIGGER_RE.search(description):
-        return []
-    return [
-        Finding(
-            check="L13",
-            rule="descriptions.agent.no-trigger",
-            severity="S2",
-            path=art.rel,
-            message=(
-                'agent description must contain a delegation trigger '
-                '("Delegate", "Use when", "Use this agent", or "Proactively")'
-            ),
-        )
-    ]
+    return _check_trigger(
+        art,
+        description,
+        kind="agent",
+        trigger_re=AGENT_TRIGGER_RE,
+        check="L13",
+        rule="descriptions.agent.no-trigger",
+        message=(
+            'agent description must contain a delegation trigger '
+            '("Delegate", "Use when", "Use this agent", or "Proactively")'
+        ),
+    )
 
 
 # Per-artifact rule helpers (L14, L11, L12, L13), in original evaluation order.

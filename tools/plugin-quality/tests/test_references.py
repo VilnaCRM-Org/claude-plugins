@@ -169,6 +169,44 @@ class ReferenceCheckTests(unittest.TestCase):
         )
         self.assertEqual([], self.tree.run())
 
+    def test_rf3_link_dead_with_paren_title_is_flagged(self):
+        # Fix (cubic P2): the PARENTHESIZED title form `](path.md (Title))` used
+        # to truncate the captured target at the title's closing paren, fusing
+        # the title into the path and losing the `.md` tail — so a dead link
+        # silently bypassed the check. The space-separated ` (Title)` must be
+        # stripped before resolution so the dead link is still flagged.
+        self.tree.skill(
+            "testing-workflow",
+            "# testing-workflow\n\nSee [crud](../code-revew/SKILL.md (Some Title)).\n",
+        )
+        findings = self.tree.run()
+        self.assertEqual(1, len(findings))
+        self.assertEqual("references.link.dead", findings[0].rule)
+
+    def test_rf3_link_live_with_paren_title_not_flagged(self):
+        # Fix (cubic P2) control: a LIVE relative .md link with a paren title
+        # resolves cleanly once the ` (Title)` is stripped — no false positive.
+        self.tree.skill(
+            "testing-workflow",
+            "# testing-workflow\n\nSee [crud](../code-review/SKILL.md (Some Title)).\n",
+        )
+        self.assertEqual([], self.tree.run())
+
+    def test_rf3_link_path_with_inner_parens_not_mis_split(self):
+        # Fix (cubic P2) boundary: parens INSIDE the path with no preceding
+        # whitespace (`dir(x)/f.md`) must NOT be treated as a title — the path is
+        # captured intact and resolved as-is. Here the dead `dir(x)` path is
+        # flagged for its real (missing) target, proving it was not mis-split
+        # into `dir` + `(x)/f.md` title nor truncated.
+        self.tree.skill(
+            "testing-workflow",
+            "# testing-workflow\n\nSee [crud](../dir(x)/SKILL.md).\n",
+        )
+        findings = self.tree.run()
+        self.assertEqual(1, len(findings))
+        self.assertEqual("references.link.dead", findings[0].rule)
+        self.assertIn("dir(x)/SKILL.md", findings[0].message)
+
     # RF-4 (L22) command refs ------------------------------------------------
     def test_rf4_command_positive(self):
         self.tree.command(

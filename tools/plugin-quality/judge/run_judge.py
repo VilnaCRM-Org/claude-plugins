@@ -51,33 +51,43 @@ def _meta_guide_context(plugin_root: pathlib.Path) -> str:
     )
 
 
+def _collect_one_path(raw: str) -> list["_model.Artifact"]:
+    """Resolve a single CLI path argument to its judgeable artifacts.
+
+    A directory expands to everything discovered under it. A file is mapped to
+    the artifact the owning plugin discovers for it; if the file is inside a
+    plugin but matches no artifact (a typo or a non-artifact .md), or is outside
+    any plugin tree, that is warned about — never silently evaluated as nothing.
+    """
+    p = pathlib.Path(raw).resolve()
+    if p.is_dir():
+        return list(_model.discover(p))
+    if not p.is_file():
+        return []
+    plugin_root = _owning_plugin_root(p)
+    if plugin_root is None:
+        print(f"warning: {p} is not inside a known plugin tree — skipped", file=sys.stderr)
+        return []
+    matched = [a for a in _model.discover(plugin_root) if a.path == p]
+    if matched:
+        return matched
+    print(
+        f"warning: {p} is inside a plugin but is not a judgeable "
+        "artifact (command/agent/skill/meta-guide) — skipped",
+        file=sys.stderr,
+    )
+    return []
+
+
 def _collect_artifacts(paths: list[str]) -> list["_model.Artifact"]:
-    arts: list[_model.Artifact] = []
-    if paths:
-        for raw in paths:
-            p = pathlib.Path(raw).resolve()
-            if p.is_dir():
-                arts.extend(_model.discover(p))
-            elif p.is_file():
-                # Resolve which plugin owns this file so kind detection is right.
-                plugin_root = _owning_plugin_root(p)
-                if plugin_root:
-                    matched = [a for a in _model.discover(plugin_root) if a.path == p]
-                    if matched:
-                        arts.extend(matched)
-                    else:
-                        # Inside a plugin but not a discoverable artifact (a typo
-                        # or a non-artifact .md). Never silently evaluate nothing.
-                        print(
-                            f"warning: {p} is inside a plugin but is not a judgeable "
-                            "artifact (command/agent/skill/meta-guide) — skipped",
-                            file=sys.stderr,
-                        )
-                else:
-                    print(f"warning: {p} is not inside a known plugin tree — skipped", file=sys.stderr)
-    else:
+    if not paths:
+        arts: list[_model.Artifact] = []
         for root in _model.find_plugin_roots(REPO_ROOT):
             arts.extend(_model.discover(root))
+        return arts
+    arts = []
+    for raw in paths:
+        arts.extend(_collect_one_path(raw))
     return arts
 
 
@@ -150,10 +160,11 @@ def _select_artifacts(args) -> list["_model.Artifact"]:
 
 def _judge_one(a, args):
     extra = _meta_guide_context(a.plugin_root) if a.kind == "meta-guide" else ""
-    return a, judge.judge_artifact(
-        a, model=args.model, extra_context=extra,
+    options = judge.JudgeOptions(
+        model=args.model, extra_context=extra,
         use_cache=not args.no_cache, votes=args.votes,
     )
+    return a, judge.judge_artifact(a, options)
 
 
 _JUDGE_EXC = (judge.JudgeError, judge.JudgeUnavailable, KeyError, ValueError, TypeError)

@@ -31,11 +31,17 @@ CHECK = "L25"  # matrix band L19–L25; per-rule check id set on each Finding
 _SCRIPT_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/scripts/([A-Za-z0-9_./-]+\.sh)")
 # ${CLAUDE_PLUGIN_ROOT}/skills/<name>/SKILL.md ; literal-asterisk glob form is exempt.
 _SKILLPATH_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/skills/([A-Za-z0-9_*-]+)/SKILL\.md")
-# markdown link target: ](<path>)
-_LINK_RE = re.compile(r"\]\(([^)]+)\)")
+# markdown link target: ](<path>). The target body allows balanced single-level
+# paren groups so a parenthesized title — ``](path.md (Title))`` — is captured in
+# full (the old ``[^)]+`` stopped at the title's OPENING ``(``'s matching ``)``,
+# truncating the path and losing the ``.md`` tail). A path with inner parens and
+# NO preceding space (``dir(x)/f.md``) is captured intact too and is left alone by
+# the title-strip below, so it is never mis-split into path + title.
+_LINK_RE = re.compile(r"\]\(((?:[^()]|\([^()]*\))*)\)")
 # optional Markdown link title suffix: ` "Title"`, ` 'Title'`, or ` (Title)`.
 # Stripped before path resolution so a dead link carrying a title is still
 # caught (otherwise the title text fuses into the path and the .md tail is lost).
+# The required leading ``\s+`` is what keeps ``dir(x)/f.md`` (no space) intact.
 _LINK_TITLE_RE = re.compile(r"""\s+(?:"[^"]*"|'[^']*'|\([^)]*\))\s*$""")
 # /sdlc-style command token in prose.
 _COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_/])/(sdlc[a-z0-9-]*)")

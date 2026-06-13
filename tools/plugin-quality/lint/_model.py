@@ -154,45 +154,72 @@ def _setext_level(line: str) -> int | None:
     return None
 
 
-def extract_headings(body: str) -> tuple[str | None, list[str]]:
+@dataclasses.dataclass
+class _Headings:
+    """Accumulator for :func:`extract_headings` (first H1, all H2s)."""
+
     h1: str | None = None
-    h2: list[str] = []
+    h2: list[str] = dataclasses.field(default_factory=list)
+
+    def add_h1(self, title: str) -> None:
+        if self.h1 is None:  # only the FIRST H1 is ever captured
+            self.h1 = title
+
+    def add_h2(self, title: str) -> None:
+        self.h2.append(title)
+
+
+def _apply_atx(line: str, acc: _Headings) -> bool:
+    """Consume an ATX heading line into ``acc``; return True if it was a heading.
+
+    An H2 is always recorded. The first H1 is recorded; a *later* H1 is reported
+    as "not consumed" (returns False) so the caller keeps it as the preceding
+    text line for a following setext underline — preserving original behaviour.
+    """
+    atx = _atx_heading(line)
+    if atx is None:
+        return False
+    level, title = atx
+    if level == 2:
+        acc.add_h2(title)
+        return True
+    if acc.h1 is None:
+        acc.add_h1(title)
+        return True
+    return False  # a later H1: fall through to act as setext-prelude text
+
+
+def _apply_setext(line: str, prev_text: str | None, acc: _Headings) -> bool:
+    """Consume a setext underline against ``prev_text``; return True if consumed.
+
+    The underline counts only when ``prev_text`` is a non-blank paragraph line
+    (the heading text). ``---`` here is a real setext-H2/HR underline — never
+    frontmatter, which the body has already had split off.
+    """
+    if prev_text is None or not prev_text.strip():
+        return False
+    level = _setext_level(line)
+    if level == 1:
+        acc.add_h1(prev_text.strip())
+        return True
+    if level == 2:
+        acc.add_h2(prev_text.strip())
+        return True
+    return False
+
+
+def extract_headings(body: str) -> tuple[str | None, list[str]]:
+    acc = _Headings()
     prev_text: str | None = None  # last non-blank, non-fenced, non-ATX line
     for _lineno, line, in_fence in iter_body_lines(body):
         if in_fence:
             prev_text = None
             continue
-        atx = _atx_heading(line)
-        if atx is not None:
-            level, title = atx
-            if level == 2:
-                h2.append(title)
-                prev_text = None
-                continue
-            if h1 is None:  # only the FIRST ATX H1 is captured
-                h1 = title
-                prev_text = None
-                continue
-            # a later H1 is not re-captured; fall through so it can act as the
-            # preceding text line for a following setext underline (original
-            # behaviour preserved).
-        # Setext underline: this line is all '=' (H1) or all '-' (H2) and the
-        # previous line was a non-blank paragraph line (the heading text). The
-        # body has its frontmatter already split off, so a leading '---' here is
-        # a real horizontal-rule / setext-H2 underline, never frontmatter.
-        if prev_text is not None and prev_text.strip():
-            level = _setext_level(line)
-            if level == 1:
-                if h1 is None:
-                    h1 = prev_text.strip()
-                prev_text = None
-                continue
-            if level == 2:
-                h2.append(prev_text.strip())
-                prev_text = None
-                continue
+        if _apply_atx(line, acc) or _apply_setext(line, prev_text, acc):
+            prev_text = None
+            continue
         prev_text = line if line.strip() else None
-    return h1, h2
+    return acc.h1, acc.h2
 
 
 def _make(path: pathlib.Path, plugin_root: pathlib.Path, kind: str) -> Artifact:
