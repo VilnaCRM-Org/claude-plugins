@@ -19,6 +19,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Validate plugin.json and marketplace.json with jq
         run: |
           set -euo pipefail
@@ -78,6 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: markdownlint-cli2 over plugins/**/*.md
         run: |
           set -euo pipefail
@@ -92,6 +96,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: shellcheck plugin scripts
         run: |
           set -euo pipefail
@@ -107,6 +113,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Run bats suites
         run: |
           set -euo pipefail
@@ -121,17 +129,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Check component frontmatter (ADR-11 skill glob)
         run: |
           set -euo pipefail
           PLUGIN=plugins/php-backend-sdlc
           fail=0
 
+          # ADR-2 toolchain: at least one YAML backend must exist, else the
+          # python fallback's `import yaml` aborts with a raw ModuleNotFoundError
+          # instead of an actionable message (mirrors common.sh
+          # require_yaml_toolchain). yq and PyYAML both ship preinstalled on
+          # ubuntu-latest; this guards self-hosted/minimal runners.
+          if ! command -v yq >/dev/null 2>&1 && ! python3 -c 'import yaml' >/dev/null 2>&1; then
+            echo "FAIL: no YAML toolchain on runner — install yq, or python3 with PyYAML"
+            exit 1
+          fi
+
           extract_frontmatter() {
             awk 'NR==1 { if ($0 != "---") exit; next } /^---$/ { exit } { print }' "$1"
           }
 
-          # yq with python3+PyYAML fallback (ADR-2 toolchain convention).
+          # yq with python3+PyYAML fallback (ADR-2 toolchain convention). The
+          # PyYAML branch parses folded/block scalars (description: >-) correctly,
+          # which a same-line `key: value` regex could not.
           fm_get() {
             if command -v yq >/dev/null 2>&1; then
               yq ".\"$1\" | select(. != null)" -
@@ -190,6 +212,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Skill profile keys declared in docs/profile-schema.md (FR-17)
         run: |
           set -euo pipefail
@@ -226,6 +250,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: NFR-2 denylist grep + NFR-7 tree hygiene
         run: |
           set -euo pipefail

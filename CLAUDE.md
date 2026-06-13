@@ -1,7 +1,7 @@
 
 ## BMAD-METHOD Integration
 
-Use `/bmalph` to navigate phases. Use `/bmad-help` to discover all commands. Use `/bmalph-status` for a quick overview. See `_bmad/COMMANDS.md` for a full command reference.
+Use `/bmalph` to navigate phases, `/bmad-help` to discover all commands, and `/bmalph-status` for a quick overview. For a full command reference, see the generated `_bmad/COMMANDS.md` (created locally by `bmalph init`; it is git-ignored and absent in a clean checkout).
 
 ### Phases
 

@@ -403,9 +403,15 @@ final class CustomerRepositoryTtlTest extends KernelTestCase
 
     private function objectManager(): ObjectManager
     {
-        // doctrine-orm: 'doctrine.orm.entity_manager'
-        // doctrine-odm: 'doctrine_mongodb.odm.document_manager'
-        return self::getContainer()->get('doctrine.orm.entity_manager');
+        // Service id depends on the profile's persistence.mapper (see the table
+        // at the top of this guide). Resolve the ODM manager when present, else
+        // fall back to the ORM entity manager — so this base works unchanged for
+        // both doctrine-orm and doctrine-odm projects.
+        $container = self::getContainer();
+
+        return $container->has('doctrine_mongodb.odm.document_manager')
+            ? $container->get('doctrine_mongodb.odm.document_manager') // doctrine-odm
+            : $container->get('doctrine.orm.entity_manager');           // doctrine-orm
     }
 }
 ```
@@ -566,9 +572,15 @@ final class CustomerRepositoryTagInvalidationTest extends KernelTestCase
 
     private function objectManager(): ObjectManager
     {
-        // doctrine-orm: 'doctrine.orm.entity_manager'
-        // doctrine-odm: 'doctrine_mongodb.odm.document_manager'
-        return self::getContainer()->get('doctrine.orm.entity_manager');
+        // Service id depends on the profile's persistence.mapper (see the table
+        // at the top of this guide). Resolve the ODM manager when present, else
+        // fall back to the ORM entity manager — so this base works unchanged for
+        // both doctrine-orm and doctrine-odm projects.
+        $container = self::getContainer();
+
+        return $container->has('doctrine_mongodb.odm.document_manager')
+            ? $container->get('doctrine_mongodb.odm.document_manager') // doctrine-odm
+            : $container->get('doctrine.orm.entity_manager');           // doctrine-orm
     }
 }
 ```

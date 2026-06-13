@@ -223,8 +223,11 @@ function generateResourceData(data) {
     email: `${name.toLowerCase()}@${domains[Math.floor(Math.random() * domains.length)]}`,
     phone: `+1-555-${Math.floor(Math.random() * 9000) + 1000}`,
     category: categories[Math.floor(Math.random() * categories.length)],
-    type: data.type['@id'],
-    status: data.status['@id'],
+    // Guard against missing dependencies: if setup failed and returned a
+    // null type/status, optional chaining yields undefined instead of
+    // throwing a TypeError mid-iteration.
+    type: data?.type?.['@id'],
+    status: data?.status?.['@id'],
     active: Math.random() > 0.5,
     // Note: createdAt and updatedAt are set by the server
   };
