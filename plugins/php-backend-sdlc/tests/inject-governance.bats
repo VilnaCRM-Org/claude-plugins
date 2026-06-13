@@ -243,3 +243,98 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"unknown argument: --bogus"* ]]
 }
+
+# --- R2 regression: non-regular target, fenced markers, read-only file -----
+
+@test "R2 Bug 3: a directory named CLAUDE.md is refused, intact, no temp litter" {
+  # mv -f would otherwise drop the temp file INSIDE the directory, log
+  # 'managed block written', exit 0, and leave no governance file.
+  mkdir -p "$REPO/CLAUDE.md"
+  printf 'keep\n' > "$REPO/CLAUDE.md/keep.txt"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is not a regular file"* ]]
+  [ -d "$REPO/CLAUDE.md" ]
+  # only the user's file is inside; no .sdlc-governance temp litter
+  [ "$(ls -A "$REPO/CLAUDE.md")" = "keep.txt" ]
+}
+
+@test "R2 Bug 3: a directory CLAUDE.md is refused under --diff too (not 'would be created')" {
+  mkdir -p "$REPO/CLAUDE.md"
+  run "$INJECT" --diff "$REPO"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is not a regular file"* ]]
+  [[ "$output" != *"would be created"* ]]
+}
+
+@test "R2 Bug 3: a FIFO CLAUDE.md is refused and left a FIFO" {
+  mkfifo "$REPO/CLAUDE.md"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"is not a regular file"* ]]
+  [ -p "$REPO/CLAUDE.md" ]
+  rm -f "$REPO/CLAUDE.md"
+}
+
+@test "R2 Bug 4: governance markers documented inside a code fence are not clobbered (FR-2)" {
+  printf '# docs\n\n```\n%s\nEXAMPLE governance text the user is documenting\n%s\n```\n\ntail\n' \
+    "$BEGIN" "$END" > "$REPO/CLAUDE.md"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  # the fenced example survives verbatim ...
+  grep -qF 'EXAMPLE governance text the user is documenting' "$REPO/CLAUDE.md"
+  # ... the code fence stays intact (both fence lines preserved) ...
+  [ "$(grep -cxF '```' "$REPO/CLAUDE.md")" -eq 2 ]
+  # ... and exactly one REAL managed block is appended outside the fence
+  # (fixture has 1 fenced begin + 1 real begin = 2 total).
+  [ "$(marker_pairs "$REPO/CLAUDE.md")" = "2 2" ]
+  grep -q 'Skill-triage gate' "$REPO/CLAUDE.md"
+}
+
+@test "R2 Bug 4: fenced-marker file is idempotent on rerun (no duplicate real block)" {
+  printf '# docs\n\n```\n%s\nEXAMPLE text\n%s\n```\n' "$BEGIN" "$END" > "$REPO/CLAUDE.md"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  first="$(cat "$REPO/CLAUDE.md")"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unchanged"* ]]
+  [ "$(cat "$REPO/CLAUDE.md")" = "$first" ]
+  grep -qF 'EXAMPLE text' "$REPO/CLAUDE.md"
+}
+
+@test "R2 Bug 4: an UNCLOSED fence falls back to whole-line matching and stays idempotent" {
+  # Fence-aware suppression must NOT activate on an odd/unterminated fence
+  # count: a stateful toggle would stay 'inside the fence' through EOF and
+  # swallow the real block at the end, so the next run would append a
+  # duplicate (NFR-3 regression). With an unclosed fence we match markers
+  # by whole line, so a real stale block is replaced in place and the count
+  # is stable across runs.
+  printf '# proj\n\n```\nunclosed code fence\n\n%s\nSTALE\n%s\n' "$BEGIN" "$END" > "$REPO/CLAUDE.md"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(grep -cxF "$BEGIN" "$REPO/CLAUDE.md")" -eq 1 ]
+  ! grep -qx 'STALE' "$REPO/CLAUDE.md"
+  grep -q 'Skill-triage gate' "$REPO/CLAUDE.md"
+  # rerun is byte-stable: no second block appended
+  first="$(cat "$REPO/CLAUDE.md")"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unchanged"* ]]
+  [ "$(cat "$REPO/CLAUDE.md")" = "$first" ]
+  [ "$(grep -cxF "$BEGIN" "$REPO/CLAUDE.md")" -eq 1 ]
+}
+
+@test "R2 Bug 5: a read-only (0444) managed file needing a change is refused, unmodified" {
+  printf 'user content, no markers\n' > "$REPO/CLAUDE.md"
+  chmod 0444 "$REPO/CLAUDE.md"
+  before="$(cat "$REPO/CLAUDE.md")"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"read-only"* ]]
+  [ "$(cat "$REPO/CLAUDE.md")" = "$before" ]
+  ! grep -q 'php-backend-sdlc:begin' "$REPO/CLAUDE.md"
+  [ "$(stat -c '%a' "$REPO/CLAUDE.md")" = "444" ]
+  # no temp litter left behind by the refused write
+  [ -z "$(ls -A "$REPO" | grep sdlc-governance || true)" ]
+}

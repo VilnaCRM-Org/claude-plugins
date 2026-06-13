@@ -39,6 +39,19 @@ while [[ $# -gt 0 ]]; do
 done
 [[ "$MAX_ITERATIONS" =~ ^[1-9][0-9]*$ ]] \
   || die "--max-iterations must be a positive integer, got: $MAX_ITERATIONS"
+# Bound the value BEFORE it reaches the C-style loop. A 19+ digit input
+# (e.g. 9999999999999999999999) survives the regex above, then bash
+# arithmetic in `for (( ... <= MAX_ITERATIONS ))` wraps it modulo 2^64:
+# ~1.8 quintillion iterations (runaway), or a 2^63 value wraps negative
+# so the loop runs ZERO times and escalates without reviewing. Reject
+# anything above a sane ceiling using a wrap-safe digit-string compare
+# (length, then lexicographic) — never bash arithmetic, mirroring
+# validate-profile.sh's num_gt. The cap is far below the documented
+# default (5, NFR-6) yet generous for any real review loop.
+MAX_ITERATIONS_CEILING=1000
+if num_gt "$MAX_ITERATIONS" "$MAX_ITERATIONS_CEILING"; then
+  die "--max-iterations must not exceed $MAX_ITERATIONS_CEILING, got: $MAX_ITERATIONS"
+fi
 
 # --- agent list: --agents override, else profile, else claude ---------------
 agents=()
@@ -48,6 +61,16 @@ else
   # shellcheck disable=SC2119  # profile_path's TARGET_REPO_DIR arg is optional
   profile="$(profile_path)"
   if [[ -f "$profile" ]]; then
+    # Guard the read with yaml_parses so a malformed profile fails with one
+    # clean [php-sdlc] diagnostic naming the bad file, instead of letting
+    # yaml_get_list's backend dump a raw ~30-line PyYAML traceback (or a yq
+    # error) and then silently degrading to the default 'claude' agent
+    # (a hidden misconfiguration). This loop is reachable standalone via
+    # code-review/SKILL.md and `make ai-review-loop` without a preceding
+    # validate-profile step, so it must self-diagnose. Mirrors the guard
+    # validate-profile.sh and get-pr-comments.sh already carry.
+    yaml_parses "$profile" \
+      || die "profile is not valid YAML: $profile (fix the syntax or regenerate it with /sdlc-setup, or pass --agents to bypass the profile)"
     mapfile -t agents < <(yaml_get_list "$profile" review.ai_review_agents)
   fi
 fi

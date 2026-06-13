@@ -68,32 +68,9 @@ check_enum() {
 # Thresholds are scores/counts: non-negative integers only.
 is_int() { [[ "$1" =~ ^[0-9]+$ ]]; }
 
-# strip_zeros VALUE — drop leading zeros ('007' -> '7', '000' -> '0') so
-# magnitude comparison can go by digit-string length.
-strip_zeros() {
-  local v=$1
-  v="${v#"${v%%[!0]*}"}"
-  printf '%s' "${v:-0}"
-}
-
-# num_gt A B — true when A > B, comparing non-negative decimal integers as
-# digit strings (length, then lexicographic). NEVER use bash arithmetic
-# here: (( )) wraps values >= 2^63 to negative (e.g. 18446744073709551615
-# reads as -1), which would let a crafted huge ceiling value pass the
-# raise-only check and defeat a protected quality gate (ADR-7).
-num_gt() {
-  local a b
-  a="$(strip_zeros "$1")"
-  b="$(strip_zeros "$2")"
-  if (( ${#a} != ${#b} )); then
-    (( ${#a} > ${#b} ))
-  else
-    [[ "$a" > "$b" ]]
-  fi
-}
-
-# num_lt A B — true when A < B (same wrap-safe digit-string comparison).
-num_lt() { num_gt "$2" "$1"; }
+# strip_zeros, num_gt, num_lt — wrap-safe non-negative integer comparison
+# helpers are shared via lib/common.sh (sourced above) so this script and
+# ai-review-loop.sh use one implementation.
 
 # Score thresholds: raise-only vs shipped default (ADR-7).
 check_floor() {

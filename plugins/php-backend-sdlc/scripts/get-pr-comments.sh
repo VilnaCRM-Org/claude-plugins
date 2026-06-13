@@ -44,6 +44,16 @@ if [[ -z "$PR" ]]; then
     || die "no PR found for the current branch (pass --pr <n>)"
 fi
 
+# Validate the PR number whatever its source. The --pr guard above runs
+# only on the flag path; a gh-resolved value (above) skipped it, so a
+# non-numeric or empty `gh pr view` result (e.g. a misconfigured wrapper
+# or detached HEAD) would otherwise reach `jq --argjson pr` and surface as
+# a raw 'jq: invalid JSON text passed to --argjson' (exit 2) instead of a
+# clean script-level diagnosis.
+if [[ ! "$PR" =~ ^[0-9]+$ ]]; then
+  die "resolved PR number is not numeric: '$PR' (gh pr view returned an unexpected value; pass --pr <n>)"
+fi
+
 # owner/name from the origin remote; gh repo view as fallback.
 origin="$(git remote get-url origin 2>/dev/null || true)"
 repo_slug=""
@@ -88,6 +98,14 @@ QUERY='query($owner: String!, $name: String!, $pr: Int!) {
 raw="$(gh api graphql -f query="$QUERY" -f owner="$OWNER" -f name="$NAME" -F pr="$PR")" \
   || die "gh api graphql failed for PR #$PR in $OWNER/$NAME"
 
+# Strip a leading UTF-8 BOM (EF BB BF) once, before any backend consumes
+# $raw. jq 1.7+ silently tolerates a leading BOM while python's json.load
+# rejects it ("Unexpected UTF-8 BOM"), so a BOM-prefixed payload would make
+# the jq and python paths diverge — one rendering the data, the other dying
+# 'non-JSON output'. gh never emits a BOM in practice, so removing it is
+# behaviour-preserving for real responses and keeps both backends identical.
+raw="${raw#$'\xef\xbb\xbf'}"
+
 # raw_is_json — exit 0 when $raw parses as JSON. gh can exit 0 yet emit
 # non-JSON (proxy HTML error pages, prompts); without this guard that
 # output reaches the normalize step and surfaces as a raw jq parse error
@@ -101,8 +119,58 @@ json.load(sys.stdin)' >/dev/null 2>&1
   fi
 }
 
+# An empty body is not "JSON" for our purposes even though `jq empty`
+# accepts empty input (the python backend rejects it): treat it as the
+# non-JSON case so both backends diverge no further (an empty fetch carries
+# no PR data and must not be reported as "0 unresolved").
+[[ -n "$raw" ]] \
+  || die "gh api graphql returned an empty response for PR #$PR in $OWNER/$NAME (check 'gh auth status' and network/proxy, then retry)"
+
 raw_is_json \
   || die "gh api graphql returned non-JSON output for PR #$PR in $OWNER/$NAME (check 'gh auth status' and network/proxy, then retry)"
+
+# pr_data_present — the payload must actually carry pull-request data before
+# any "0 unresolved" conclusion is drawn (FR-8). gh can exit 0 with a body
+# that parses as JSON yet has NO usable PR: a GraphQL error envelope
+# ({"data":null,"errors":[...]}), a wrong-shape object ({"ok":true}), or an
+# explicit null pullRequest ({"data":{"repository":{"pullRequest":null}}}).
+# All three previously normalized to an empty listing and "unresolved
+# threads: 0" with exit 0 — a false "nothing to resolve" that lets
+# /sdlc-finish-pr exit the FR-8 loop early on a fetch that returned no PR.
+# Surface the GraphQL error message when present; otherwise diagnose the
+# missing pullRequest. Both backends apply the identical check.
+pr_data_check() {
+  if command -v jq >/dev/null 2>&1; then
+    # Plain `jq -r` (no -e): -e sets exit 4 when the result is empty, which
+    # is exactly the healthy "no problem" case, and that nonzero status
+    # would propagate through the command substitution. Emit the diagnostic
+    # string on a problem, nothing otherwise.
+    printf '%s' "$raw" | jq -r '
+      if (.errors | type == "array" and length > 0)
+      then "ERRORS: " + ([.errors[].message] | join("; "))
+      elif (.data.repository.pullRequest == null)
+      then "NOPR"
+      else empty end' 2>/dev/null
+  else
+    printf '%s' "$raw" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+errs = d.get("errors")
+if isinstance(errs, list) and errs:
+    print("ERRORS: " + "; ".join(str(e.get("message", e)) for e in errs))
+elif (((d.get("data") or {}).get("repository") or {}).get("pullRequest")) is None:
+    print("NOPR")
+' 2>/dev/null
+  fi
+}
+
+pr_data_problem="$(pr_data_check)"
+if [[ -n "$pr_data_problem" ]]; then
+  if [[ "$pr_data_problem" == ERRORS:* ]]; then
+    die "gh api graphql reported an error for PR #$PR in $OWNER/$NAME: ${pr_data_problem#ERRORS: }"
+  fi
+  die "gh api graphql returned no pull-request data for PR #$PR in $OWNER/$NAME (the PR may not exist, or the response shape is unexpected; the unresolved count is unknowable)"
+fi
 
 # Refuse truncated data: if any connection reports hasNextPage, the single
 # 100-item page is incomplete and the unresolved count would be unreliable.

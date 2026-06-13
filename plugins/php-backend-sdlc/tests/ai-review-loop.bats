@@ -208,3 +208,68 @@ FAIL_JSON='{"result":"found issues\nAI_REVIEW_VERDICT: FAIL"}'
   [ "$status" -eq 1 ]
   [[ "$output" == *"--max-iterations must be a positive integer"* ]]
 }
+
+# --- R2 regression: max-iterations wrap, malformed-profile diagnostic ------
+
+@test "R2 Bug 2: a 19+ digit --max-iterations is rejected (no uint64 loop wrap)" {
+  # The ^[1-9][0-9]*$ regex accepts this 22-digit string; the C-style loop
+  # would then wrap it modulo 2^64 to ~1.8 quintillion iterations.
+  run "$LOOP" --agents claude --max-iterations 9999999999999999999999
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"must not exceed 1000"* ]]
+}
+
+@test "R2 Bug 2: a 2^63 --max-iterations is rejected (would wrap negative, 0 iterations)" {
+  run "$LOOP" --agents claude --max-iterations 9223372036854775808
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"must not exceed 1000"* ]]
+}
+
+@test "R2 Bug 2 control: --max-iterations at the ceiling (1000) is accepted" {
+  STUB_CLAUDE_OUTPUT="$PASS_JSON" STUB_CLAUDE_LOG="$CALLS" \
+    run "$LOOP" --agents claude --max-iterations 1000
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"iteration 1/1000"* ]]
+  [[ "$output" == *"PASS on iteration 1"* ]]
+}
+
+@test "R2 Bug 2 control: --max-iterations just over the ceiling (1001) is rejected" {
+  run "$LOOP" --agents claude --max-iterations 1001
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"must not exceed 1000"* ]]
+}
+
+@test "R2 Bug 10: a malformed profile yields one clean diagnostic, no raw traceback" {
+  # The profile read must be guarded by yaml_parses so a broken
+  # .claude/php-sdlc.yml fails with a [php-sdlc] message naming the file
+  # instead of dumping a PyYAML/yq traceback then silently degrading to
+  # the default 'claude' agent.
+  mkdir -p .claude
+  printf 'review:\n  ai_review_agents: [unclosed\n  broken: : :\n' > .claude/php-sdlc.yml
+  STUB_CLAUDE_LOG="$CALLS" run "$LOOP"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"profile is not valid YAML"* ]]
+  [[ "$output" == *".claude/php-sdlc.yml"* ]]
+  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" != *"yaml.parser"* ]]
+  [ "$(calls_made)" -eq 0 ]
+}
+
+@test "R2 Bug 10: forced python YAML backend also gives the clean diagnostic" {
+  mkdir -p .claude
+  printf 'review:\n  ai_review_agents: [unclosed\n  broken: : :\n' > .claude/php-sdlc.yml
+  SDLC_FORCE_PYTHON_YAML=1 STUB_CLAUDE_LOG="$CALLS" run "$LOOP"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"profile is not valid YAML"* ]]
+  [[ "$output" != *"Traceback"* ]]
+  [ "$(calls_made)" -eq 0 ]
+}
+
+@test "R2 Bug 10 control: --agents bypasses a broken profile (no profile read)" {
+  mkdir -p .claude
+  printf 'review:\n  ai_review_agents: [unclosed\n  broken: : :\n' > .claude/php-sdlc.yml
+  STUB_CLAUDE_OUTPUT="$PASS_JSON" STUB_CLAUDE_LOG="$CALLS" \
+    run "$LOOP" --agents claude
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS on iteration 1"* ]]
+}

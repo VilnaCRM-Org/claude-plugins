@@ -347,3 +347,133 @@ Conventions:
   30 MB file.
 - AR-E5: `--agents ","` falls back to the default `claude` agent, matching
   the in-code comment.
+
+## Round 2 — fix verification + new edges
+
+Re-ran every round-1 FAIL case against the post-fix scripts and added new
+edges targeting the fixes (work-tree preflight shapes, ceiling/floor type
+checks, `:=` make parsing, CRLF marker repair, transport-retry counters,
+lockfile/atomic-write contention, LC_ALL=C vs UTF-8 locale). Sandboxes
+under `/tmp/sdlc-test2-scripts-cli/`, real `yq v4.44.3` downloaded for the
+yq backend. The bundled `tests/*.bats` suite (164 cases) passes clean.
+
+### R2 — round-1 FAIL cases re-run (must now PASS)
+
+| ID | Re-run case | Round-2 result |
+| --- | --- | --- |
+| SP-E1 | bare repo, default + `--report` mode | PASS (git-repo now FAILs correctly, exit 1; later checks still run in `--report`) |
+| SP-E6 | inside a normal repo's `.git/` | PASS (git-repo FAILs, exit 1) |
+| VP-E7 | `psalm_errors: 18446744073709551615` (yq + python) | PASS (VIOLATION "relaxed above 0", exit 1) |
+| VP-E7b | `deptrac_violations: 2^64` ceiling | PASS (VIOLATION, exit 1) |
+| VP-E7c | `infection_msi: 2^64-1` floor (a raise) | PASS (exit 0, no misleading "lowered below") |
+| IG-E5 | CRLF file carrying a CRLF managed block | PASS (1 begin/1 end/1 banner, block rewritten LF, user CRLF lines kept, run 2 "unchanged") |
+
+All six round-1 FAIL cases now PASS on both backends. Bugs 1, 2, 3 are
+confirmed fixed at the root cause.
+
+### R2 — work-tree / preflight shapes (new)
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R2-WT1 | setup-preflight inside a linked `git worktree add` work tree | git-repo PASS (real work tree), exit 0 | PASS |
+| R2-WT2 | setup-preflight inside `.git/worktrees/` admin dir | git-repo FAIL, exit 1 | PASS |
+| R2-WT3 | fr-nfr-gate (FG-N5) in a non-git dir | `die` "not inside a git work tree" before gh/claude | PASS |
+| R2-WT4 | fr-nfr-gate (FG-E7) in a bare repo | `die` (no work tree; `--show-toplevel` exits 128) | PASS |
+| R2-WT5 | fr-nfr-gate inside `.git/` with spec under `.git/specs` | `die` (no work tree) — not a containment bypass | PASS |
+| R2-WT6 | fr-nfr-gate in a linked worktree, spec inside | runs, containment correct, PASS verdict, exit 0 | PASS |
+| R2-WT7 | generate-profile (GP-E2) into a bare repo | profile written, no crash, exit 0 | PASS |
+| R2-WT8 | generate-profile in a linked worktree | origin remote resolved (`acme/myrepo`), exit 0 | PASS |
+
+### R2 — validate-profile ceiling/floor type checks (new)
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R2-VP1 | `psalm_errors: -1` | VIOLATION "is not an integer" (both backends) | PASS |
+| R2-VP2 | `psalm_errors: 0.5` | VIOLATION "is not an integer" | PASS |
+| R2-VP3 | `psalm_errors: "5"` (quoted) | VIOLATION "relaxed above 0" | PASS |
+| R2-VP4 | `psalm_errors: 000` | strip_zeros → 0, PASS | PASS |
+| R2-VP5 | `psalm_errors: 007` | → 7 > 0, VIOLATION | PASS |
+| R2-VP6 | `complexity: 094` (VP-E5) | → 94 ≥ 94, PASS | PASS |
+| R2-VP7 | `psalm_errors: 0x10` | rejected on both backends; yq → "not an integer", python YAML-1.1 → 16 → "relaxed above 0" (both exit 1; backend-message divergence noted) | PASS |
+| R2-VP8 | unicode + CJK `bounded_contexts: [Café, Ordén, 注文]` under UTF-8 and LC_ALL=C, yq + python | valid, exit 0, no "must be a list" | PASS |
+
+### R2 — generate-profile make-map `:=` parsing (new)
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R2-GP1 | Makefile mixing `tests := …`, `psalm ::= …`, `deptrac :::= …` with real `ci:`/`start:` targets | assignments → null; `ci`/`start` detected | PASS |
+| R2-GP2 | `ci:= notatarget`, `psalm: vendor/bin/psalm:latest` (value-side colon), `infection?=`, `deptrac+=` | `ci` null (assignment), `psalm` detected (real target), `?=`/`+=` not matched | PASS |
+| R2-GP3 | GP-E5 engine: commented `# mysql://` + active `postgresql://` DSN | engine postgresql (comment loses) | PASS |
+| R2-GP4 | engine: commented pgsql + active `mysql://` | engine mysql | PASS |
+| R2-GP5 | engine: `serverVersion=mariadb` on a mysql DSN | engine mariadb (global win) | PASS |
+| R2-GP6 | GP-E10 unicode `src/Café`, `src/Ordén` under UTF-8 vs LC_ALL=C | bounded_contexts byte-identical across locales | PASS |
+
+### R2 — inject-governance contention + CRLF repair (new)
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R2-IG1 | 20 parallel runs into a dir with pre-seeded user content | serializes via atomic `mv`; 1 block, user content kept, no stray `.sdlc-governance.*` temp | PASS |
+| R2-IG2 | 30 runs, 15 SIGKILLed mid-flight, then one clean run | recovers to 1 well-formed block; no orphan temp left (kill window not hit) | PASS |
+| R2-IG3 | CRLF + unicode user content, run under LC_ALL=C | 1 block/banner, unicode CRLF user lines kept, idempotent on re-run | PASS |
+| R2-IG4 | IG-E1/E2/E3 marker-corruption repair (LF) | each repairs to exactly one block, user content preserved | PASS |
+| R2-IG5 | CRLF orphan BEGIN marker | repaired to one block, orphan content kept, run 2 "unchanged" | PASS |
+| R2-IG6 | CRLF duplicate balanced blocks | collapse to one block at first position, user content kept | PASS |
+
+### R2 — ai-review-loop transport / arg edges (new)
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R2-AR1 | AR-P1/P2/E1/E2/E3/E4 + non-zero-exit retry, counted via a call-counting stub | exact call counts: PASS=1, FAIL→PASS=2, 5×FAIL=5 (escalate), malformed=10 (1 retry/iter), is_error→PASS=2, missing-verdict=5 (NO retry), non-zero→PASS=2 | PASS |
+| R2-AR2 | AR-N1/N2/N3/N4/N5/E5 argument and matrix validation | `0`/`-1`/`abc`/`05`/`3.5`/`''` rejected; `--agents` end-of-argv error; unknown arg; claude-absent die; codex-only die; `,` falls back to claude | PASS |
+| R2-AR3 | `--max-iterations 9999999999999999999999` (22-digit) | regex `^[1-9][0-9]*$` accepts the string, then `(( iteration <= MAX ))` wraps it (→ `1864712049423024127`, or negative at exactly 2^63) | FAIL → Bug 4 |
+
+### R2 — fr-nfr-gate findings counter (new)
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R2-FG1 | findings boundary sweep `0,00,1,999,2^63` | correct: 0/00 → success; 1/999/2^63 → failure | PASS |
+| R2-FG2 | `FR_NFR_NEW_FINDINGS: 18446744073709551616` (2^64) | should report FAIL (findings > 0) | FAIL → Bug 5 |
+
+### R2 — get-pr-comments locale / parity (new)
+
+| ID | Case | Expected | Result |
+| --- | --- | --- | --- |
+| R2-PC1 | PC-P1 human listing with unicode + emoji bodies under UTF-8 | renders, `unresolved threads: 1` | PASS |
+| R2-PC2 | same under LC_ALL=C | unicode/emoji body survives | PASS |
+| R2-PC3 | PC-E2 jq vs python `--json` | canonically equal JSON | PASS |
+| R2-PC4 | PC-E1 pagination guard `hasNextPage: true` (human + json) | `die` pagination, exit 1 | PASS |
+| R2-PC5 | PC-N5 gh returns non-JSON (`<html>` proxy page) | `die` non-JSON with remediation, exit 1 | PASS |
+
+## Round-2 execution summary
+
+- Cases executed: 41 round-2 IDs (6 re-run FAILs + 35 new edges), plus the
+  164-case bundled bats suite run clean.
+- Every round-1 FAIL re-run now PASSES (Bugs 1, 2, 3 fixed at root cause);
+  no regressions found in the re-sampled round-1 PASS cases.
+- Two NEW bugs found, both the same uint64 bash-arithmetic-wrap class that
+  round-1 fixed in `validate-profile.sh` but left in two sibling scripts:
+  - Bug 4 (R2-AR3): `ai-review-loop.sh` `--max-iterations` accepts a 19+
+    digit value, then the `(( ))` loop bound wraps — a runaway loop for
+    most huge values, or 0 iterations (immediate escalate) at exactly
+    2^63. Adversarial operator input only; severity minor.
+  - Bug 5 (R2-FG2): `fr-nfr-gate.sh` `(( findings == 0 ))` wraps a findings
+    count that is a multiple of 2^64 to 0, reporting "PASS — zero new
+    findings" and posting a `success` commit status. Requires an
+    implausible reviewer output, but is a silent gate escape; severity
+    minor.
+- Sandboxes under `/tmp/sdlc-test2-scripts-cli/` removed after the run.
+
+## Round-2 notes (observations, not defects)
+
+- The round-1 commit message says inject-governance "takes a lockfile
+  against concurrent runs," but the shipped implementation uses an atomic
+  in-dir `mktemp` + `mv` (last-writer-wins), not a lockfile. The atomic-mv
+  approach is sound and verified under 20-way contention (R2-IG1); the
+  "lockfile" wording is a commit-message/reality mismatch only, not a code
+  defect.
+- R2-VP7: `0x10` diverges by backend (yq treats it as a string → "not an
+  integer"; python `yaml.safe_load` parses YAML 1.1 hex → 16). Both reject
+  with exit 1, so it is not an escape — only the violation message differs.
+- Orphan `.sdlc-governance.*` temp files from a SIGKILLed run are not
+  swept by later runs (each run's `trap` only removes its own temp). The
+  kill window was not hittable in this round; design observation only.

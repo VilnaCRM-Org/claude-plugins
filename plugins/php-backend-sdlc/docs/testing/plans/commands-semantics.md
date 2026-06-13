@@ -107,3 +107,82 @@ P=/home/kravtsov/Projects/claude-plugins/plugins/php-backend-sdlc/scripts
 Run twice on 2026-06-11; identical output both iterations (deviation
 reproduced twice per the strategy's judge step). Sandbox deleted after the
 round.
+
+## Round 2
+
+Date: 2026-06-11. Sandbox: `/tmp/sdlc-test2-commands-semantics/` (deleted
+after the round). No git mutations; the only repo write is this section.
+
+Scope: verify the round-1 doc fixes that touched this surface
+(`/sdlc-qa` + `qa-manual-tester` counter transport, `/sdlc-finish-pr`
+step-4 input passing to `pr-comment-resolver`) are coherent end-to-end;
+re-cross-check every referenced file/flag after all 11 fixes; re-run the
+five round-1 FAIL cases; hunt for contradictions introduced by the
+round-1 edits (the regression-risk areas named for the campaign:
+inject-governance lockfile/atomic-write, validate-profile ceiling type
+checks, setup-preflight work-tree check, `:=` make parsing, counter
+transports in the qa/finish-pr dispatch).
+
+### Round 2 — fix-coherence cases (the two fixes that touched this surface)
+
+| ID | Case | Check / desk-execution | Expected | Result |
+| --- | --- | --- | --- | --- |
+| R2-CS-01 | QA counter transport coherent end-to-end | `sdlc-qa.md:42-47` now dispatches "the current QA iteration number … on a re-dispatch also attach the prior iteration ledger" ≡ `qa-manual-tester.md:65-71` Inputs item 1 ("the current QA iteration number … resumes from that dispatched value; if the dispatch omits it, assume 1/5 and say so") ≡ both report headers `iteration <n>/5` | the cross-dispatch counter has a declared transport on BOTH sides with a graceful omit-fallback | PASS — AG-E08/BUG-1 fixed, symmetric |
+| R2-CS-02 | finish-pr step-4 supplies every `pr-comment-resolver` Input | `sdlc-finish-pr.md:71-77` dispatch carries PR number + default-branch name + counter-B iteration `<b>` + step-3 comment source ≡ `pr-comment-resolver.md:79-81` Inputs item 1 (PR number, default branch, counter-B iteration) | the agent's required inputs are all supplied by the command | PASS — AG-E08/BUG-2 fixed on the command side |
+| R2-CS-03 | finish-pr default-branch provenance | command passes "the default branch name" but its Inputs section (`sdlc-finish-pr.md:14-27`) never resolves it; agent allowed-actions include `gh repo view --json defaultBranchRef` (`pr-comment-resolver.md:124`) | the agent can self-resolve, so no agent is stranded; latent under-specification only | PASS-with-note (command never states where it reads the default branch) |
+| R2-CS-04 | finish-pr "prior iteration ledger"/`<b>` durability on cross-session resume | `sdlc-qa` and `sdlc-finish-pr` have no Write tool; the ledger/`<b>` lives only in the in-session orchestrator context; the agent fallback ("assume 1/5 if omitted") covers the cross-session case | bounded — defensively handled by the omit-fallback, consistent with CS-E02 in-session-only resume model | PASS |
+| R2-CS-05 | get-pr-comments `--json` shape still matches the resolver contract after the `raw_is_json` fix | `get-pr-comments.sh:16-17` emits `{pr, review_threads:[{is_resolved, comments:[…]}], issue_comments}` ≡ `pr-comment-resolver.md:53-55`; `raw_is_json` dies cleanly on non-JSON without altering the shape | CS-E08 holds | PASS |
+
+### Round 2 — re-run of the five round-1 FAIL cases
+
+| ID | Case | Re-execution | Round-1 | Round-2 |
+| --- | --- | --- | --- | --- |
+| R2-CS-N05 | `/sdlc-setup` generate→validate loop convergence (BUG-1) | sandbox: invalid 2-line profile + user fixes a repo signal (adds `Makefile`); run `generate-profile.sh` (no `--refresh`, per step 3) then `validate-profile.sh` | FAIL | FAIL — UNFIXED. `sdlc-setup.md` was not touched in round 1; generate without `--refresh` keeps the existing invalid file (`kept existing; use --refresh`), validate stays at 28 violations / exit 1; the step-4 "regenerate (step 3) and re-validate" loop body is still a no-op on the in-place-fix path |
+| R2-CS-N06 | `/sdlc-finish-pr` blocking-finding escalation (BUG-2) | desk-execute merged/closed PR + `gh pr create` failure against `sdlc-finish-pr.md` | FAIL | FAIL — UNFIXED. Round-1 edit touched only step 4 (counter-B inputs); step 1 still has no PR-state check and escalation (lines 124-138) still fires only "On either counter breaching" |
+| R2-CS-N07 | `/sdlc-finish-pr` step 2 omits ci-fixer `BLOCKED`/`SKIPPED-NO-CI` (BUG-3) | `sdlc-finish-pr.md:48` vs `ci-fixer.md:123` (4 statuses `ALL-GREEN \| FIXES-READY \| SKIPPED-NO-CI \| BLOCKED`) | FAIL | FAIL — UNFIXED. Step 2 still names only `ALL-GREEN`/`FIXES-READY`; a `BLOCKED` return (ci-fixer.md:169-170) consumes no counter-A iteration and triggers no escalation per literal text |
+| R2-CS-N08 | `/sdlc-qa` `make.start: null` degrade unrepresentable in `PASS \| FAIL` template (BUG-4) | `sdlc-qa.md:38` (SUCCESS-WITH-REPORT) vs template enum `sdlc-qa.md:85` vs `sdlc.md:34` gate "QA verdict PASS" | FAIL | FAIL — UNFIXED. Round-1 edit added counter transport to step 3 but left the verdict template `PASS \| FAIL`; the degrade still has no first-class verdict slot (agent papers over it via `Verdict: PASS` qualified, qa-manual-tester.md:140) |
+| R2-CS-E01 | `/sdlc` stage-1 resume creates duplicate issue (BUG-5) | `sdlc.md:46` ("no `ISSUE_URL` artifact → stage 1") + `sdlc-issue.md:32-52` create mode | FAIL | FAIL — UNFIXED. `sdlc.md`/`sdlc-issue.md` untouched in round 1; create mode still `gh issue create`s with no pre-create label search, so cross-session resume duplicates the issue |
+
+### Round 2 — reference-integrity re-checks (after all 11 fixes)
+
+| ID | Case | Check | Result |
+| --- | --- | --- | --- |
+| R2-CS-P01 | 7 scripts referenced by commands exist | `validate-profile`, `setup-preflight`, `generate-profile`, `inject-governance`, `get-pr-comments`, `ai-review-loop`, `fr-nfr-gate` all present | PASS |
+| R2-CS-P02 | every documented flag still parses (no `unknown argument`) | sandbox smoke: `setup-preflight --report`, `generate-profile --refresh`, `inject-governance --diff`, `get-pr-comments --pr/--unresolved-only/--json`, `ai-review-loop --diff-base/--max-iterations` | PASS |
+| R2-CS-P05 | profile keys consumed are declared after the validate-profile type-check fix | freshly generated valid profile validates exit 0; ceiling/floor `is_int` checks raise no false positive on the happy path | PASS |
+| R2-CS-P09 | inject-governance output tokens unchanged by the snapshot/atomic-write fix | apply emits `managed block written`; re-run emits `unchanged`; `--diff` previews without writing; no leftover temp/lock file on clean exit | PASS |
+| R2-CS-P10 | validate-profile clean-diagnostic abort path (malformed YAML) | malformed profile → `[php-sdlc][ERROR] profile is not valid YAML … /sdlc-setup`, exit 1, zero traceback lines | PASS |
+| R2-CS-P12 | setup-preflight work-tree check matches the Inputs claim | `git rev-parse --is-inside-work-tree == "true"` compared by printed value (setup-preflight.sh:99); bare repo / `.git/` interior FAIL the `git-repo` row | PASS |
+| R2-CS-P02b | `:=` make-parse fix holds | `tests := unit` is NOT emitted as a runnable target (`make.tests: null`) | PASS |
+| R2-CS-E12 | argument-hints ≡ documented inputs after r1 frontmatter edits | all 8 hints intact; `sdlc-qa` `allowed-tools` frontmatter valid after the step-3 edit | PASS |
+
+### Round 2 — NEW bug
+
+| ID | Case | Desk-execution | Expected | Result |
+| --- | --- | --- | --- | --- |
+| R2-CS-NEW1 | Counter-transport fix applied asymmetrically: `pr-comment-resolver` agent still claims to OWN counter B | round 1 fixed the qa side on BOTH files (`sdlc-qa.md:42-47` AND `qa-manual-tester.md:159-162`: "owned by the `/sdlc-qa` stage guard … this agent is stateless across dispatches, so it resumes from the dispatched iteration number"); the finish-pr side got the command (`sdlc-finish-pr.md:71-77`: "the agent cannot derive `<b>` itself … resumes rather than resets") but `pr-comment-resolver.md:175` still reads "Own iteration counter, `MAX_ITERATIONS=5`, never reset" with NO stateless/resume clarification and never "resumes from the dispatched value" | both sides of the fix should match the qa pattern so a literal stateless subagent resumes `<b>` from the dispatch instead of restarting at 1 | FAIL → BUG-6 |
+
+### Confirmed bugs (round 2)
+
+| Bug | Severity | Case | Summary |
+| --- | --- | --- | --- |
+| BUG-6 | S4 minor | R2-CS-NEW1 | The round-1 counter-transport fix is asymmetric: `/sdlc-finish-pr` (command) now declares it owns counter B and "the agent cannot derive `<b>` itself", but `pr-comment-resolver.md:175` still tells the agent it has an "Own iteration counter … never reset" with none of the "stateless / resumes from the dispatched value" clarification that the symmetric `qa-manual-tester` fix received. A stateless subagent following its own file restarts counter B at 1 on every re-dispatch, so its `comment_resolution iteration <b>/5` header and exhaustion escalation under-count — the exact AG-E08/BUG-1 failure that round 1 fixed for qa-manual-tester but left standing for pr-comment-resolver. Stage-level re-dispatch still bounds the loop, hence minor. |
+
+### Round 2 verdict summary
+
+- Both fixes that touched this surface are coherent and hold: the QA
+  counter transport is symmetric across command + agent (R2-CS-01), and
+  finish-pr step 4 supplies every `pr-comment-resolver` input
+  (R2-CS-02). All reference-integrity and regression-area re-checks
+  pass (R2-CS-P01/P02/P02b/P05/P09/P10/P12/E12).
+- `r1FailsNowPass = false`: none of this surface's five round-1 FAILs
+  (CS-N05/N06/N07/N08/E01, BUG-1..5) was in the round-1 fix scope —
+  `sdlc.md`, `sdlc-setup.md`, `sdlc-issue.md` were untouched and the
+  finish-pr/qa edits addressed only the input/counter transport, not the
+  loop-convergence, escalation-coverage, status-coverage, degrade-verdict,
+  or duplicate-issue defects. All five re-run to FAIL.
+- One NEW bug from the round-1 edits: BUG-6 (R2-CS-NEW1), the asymmetric
+  counter-transport fix leaving `pr-comment-resolver` claiming to own a
+  counter it is structurally told it receives.
+
+Sandbox `/tmp/sdlc-test2-commands-semantics/` deleted after the round.

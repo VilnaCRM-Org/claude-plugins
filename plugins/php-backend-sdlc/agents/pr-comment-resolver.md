@@ -78,7 +78,9 @@ re-measured by script output, never by memory of what was handled.
 
 1. The dispatch prompt from `/sdlc-finish-pr` (Task tool): the PR
    number, the default branch name, and the iteration number of
-   counter B it is consuming.
+   counter B it is consuming. The counter resumes from that dispatched
+   value; if the dispatch omits it, assume iteration 1/5 and say so in
+   the report header.
 2. The project profile at `.claude/php-sdlc.yml` (read it first; the
    dispatching command has already validated it).
 3. The unresolved-thread JSON from the comment-listing command above —
@@ -172,11 +174,14 @@ Degrades report and continue; they never loop and never hard-fail
 
 ## Iteration discipline
 
-- Own iteration counter, `MAX_ITERATIONS=5`, never reset — it is
-  counter B of `/sdlc-finish-pr` and is independent of the CI-fix
-  counter. One iteration = one full fetch → disposition-every-thread →
-  re-fetch cycle. Restate the counter at the start of every pass
-  (`comment_resolution iteration <b>/5`).
+- Iteration counter, `MAX_ITERATIONS=5`, never reset — it is counter B
+  of `/sdlc-finish-pr` and is independent of the CI-fix counter. The
+  counter is owned by the `/sdlc-finish-pr` stage guard and arrives in
+  the dispatch prompt (Inputs item 1) — this agent is stateless across
+  dispatches, so it resumes from the dispatched `<b>` instead of
+  restarting at 1 on a re-dispatch. One iteration = one full fetch →
+  disposition-every-thread → re-fetch cycle. Restate the counter at the
+  start of every pass (`comment_resolution iteration <b>/5`).
 - Done when the post-pass re-fetch reports zero unresolved threads
   (degraded mode: the AI review loop verdict is PASS) — return the
   report immediately; do not spend remaining budget re-confirming.

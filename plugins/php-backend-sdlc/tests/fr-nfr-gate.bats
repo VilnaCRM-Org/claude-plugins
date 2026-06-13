@@ -194,3 +194,34 @@ FINDINGS_JSON='{"result":"- FR-3 issue creation not covered by the change set\n-
   [ "$status" -eq 1 ]
   [[ "$output" == *"unknown argument: --bogus"* ]]
 }
+
+# --- R2 regression: 64-bit arithmetic wrap on the findings count -----------
+
+@test "R2 Bug 8: a findings count of exactly 2^64 fails the gate (no uint64 wrap)" {
+  # (( findings == 0 )) reads 18446744073709551616 (2^64) as 0 under bash
+  # 64-bit arithmetic, which would post a SUCCESS status for a nonzero
+  # count. The digit-string zero-test must drive the failure path instead.
+  route_gh
+  STUB_CLAUDE_OUTPUT='{"result":"- huge\nFR_NFR_NEW_FINDINGS: 18446744073709551616"}' \
+    run "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL — 18446744073709551616 new finding"* ]]
+  grep -q -- '-f state=failure' "$GH_LOG"
+  ! grep -q -- '-f state=success' "$GH_LOG"
+}
+
+@test "R2 Bug 8: a multiple of 2^64 (2*2^64) also fails the gate" {
+  route_gh
+  STUB_CLAUDE_OUTPUT='{"result":"- huge\nFR_NFR_NEW_FINDINGS: 36893488147419103232"}' \
+    run "$GATE"
+  [ "$status" -eq 1 ]
+  grep -q -- '-f state=failure' "$GH_LOG"
+  ! grep -q -- '-f state=success' "$GH_LOG"
+}
+
+@test "R2 Bug 8 control: zero-padded zero still passes the gate" {
+  STUB_CLAUDE_OUTPUT='{"result":"clean\nFR_NFR_NEW_FINDINGS: 0000"}' run "$GATE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS — zero new findings"* ]]
+  grep -q -- '-f state=success' "$GH_LOG"
+}

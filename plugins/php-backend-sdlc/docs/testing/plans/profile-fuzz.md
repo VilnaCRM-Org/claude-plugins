@@ -209,3 +209,101 @@ Baseline: freshly generated valid QA-template profile, mutated per case.
 30 case items executed (11 re-runs + 9 GEN + 10 VAL). 30 PASS, 0 FAIL.
 Both round-1 bugs verified fixed; no new bugs confirmed. Sandboxes under
 `/tmp/sdlc-test-profile-fuzz/` removed.
+
+## Round 2 (verification campaign — independent re-execution)
+
+Tree under test: the round-1-fixed working tree (commit `ad6497e`,
+branch `feature/php-backend-sdlc-plugin`). This section is an independent
+second-campaign verification: every result below was executed for real on
+this host (no `yq`; python3 + PyYAML 6.0.3; GNU make 4.4.1), not copied
+from the round-1 author's "Round 2" notes above. Focus per the campaign
+charter: confirm the round-1 fixes hold and hunt regressions introduced
+*by* those fixes — wrap-safe `num_gt`/`num_lt`, the `is_int` ceiling/floor
+type guards, the `:=` Makefile-assignment exclusion regex, the
+`yaml_parses` up-front guard, the symlink write-target rejection, and the
+workflow-filename `sanitize_inline` routing.
+
+Sandboxes: `/tmp/sdlc-test2-profile-fuzz/`, removed after the round.
+Truthfulness of every non-null `make.*` cross-checked with real
+`make -n <target>` and `make -p` (a `make -n` failure on a *dangling
+prerequisite* is not treated as "target absent": `make -p` confirms the
+target is declared, which is what the scan reports).
+
+### R2v re-runs — round-1 FAILs and highest-risk cases
+
+| ID | Re-run of | Expected | Result |
+| --- | --- | --- | --- |
+| R2V-RERUN-01 | GEN-14 / BUG-1: `tests:=unit src`, no `tests` rule | `make.tests: null`; `make -n tests` fails (consistent) | PASS |
+| R2V-RERUN-02 | VAL-13 / BUG-2 shape A: tab-indented profile | exit 1, `[php-sdlc][ERROR] profile is not valid YAML … /sdlc-setup`, 0 `Traceback` lines | PASS |
+| R2V-RERUN-03 | VAL-13 / BUG-2 shape B: unclosed double quote | same clean diagnostic, 0 `Traceback` lines | PASS |
+| R2V-RERUN-04 | GEN-21 baseline generation (synthetic symfony+orm+mysql repo) | exit 0; emitted defaults `complexity:94`, quality/arch/style/msi `100`, ceilings `0`; validator exit 0 | PASS |
+| R2V-RERUN-05 | VAL-05 lowered floors (0/50/99 vs 94/100) | ADR-7 raise-only violation each, exit 1 | PASS |
+| R2V-RERUN-06 | VAL-07 ceiling relaxed (`deptrac_violations:1`, `psalm_errors:1`) | ceiling violation each, exit 1 | PASS |
+
+### R2v generation — Makefile assignment-operator matrix (`:=` focus)
+
+Each candidate cross-checked against `make -n` / `make -p`.
+
+| ID | Target-repo shape | Expected | Result |
+| --- | --- | --- | --- |
+| R2V-GEN-01 | Every GNU make assignment op on candidate names: `tests = unit`, `ci := build`, `psalm ::= run`, `deptrac :::= x`, `infection ?= y`, `phpinsights += z`, `e2e!=echo hi`, plus real `start:` / `load-tests:` | all six assignments → null; `start`/`load-tests` detected and runnable | PASS |
+| R2V-GEN-02 | No-space colon assignments: `tests:=unit`, `ci::=build`, `deptrac:::=x`, `psalm:= run` | all four → null (none is a target per `make -p`) | PASS |
+| R2V-GEN-03 | Colon-prereq target forms: `infection: prereq`, `start:\| order-only`, `phpinsights:: deps`, `e2e: # …`, `pr-comments:`, `load-tests:; @true` | all detected as declared targets (confirmed via `make -p`); the three with dangling prereqs fail `make -n` only on the missing prereq, not on target absence | PASS |
+| R2V-GEN-04 | Assignment + real target collision: `tests:=val` then real `tests:` rule | `make.tests: tests` (real target wins; `make -n tests` runnable) | PASS |
+| R2V-GEN-05 | Triple-colon-no-equals `ci::: x` (a make syntax error) + a `tests:` line with trailing whitespace + `psalm:  build` + `%.o: %.c` + `e2e-tests:` | `ci` null (invalid line), `tests`/`psalm` detected, pattern rule excluded, `e2e` ← `e2e-tests` | PASS |
+| R2V-GEN-06 | `find_target` substring safety: only `tests:` present, candidates `tests test` | `make.tests: tests` (exact `grep -qxF`, not the shorter `test`) | PASS |
+| R2V-GEN-07 | Workflow FILENAME embeds control char `ci\x01x.yml`, no `name:` field | basename `sanitize_inline`'d to `"cix"`; profile single-line, parses; emitted `ci.workflows: ["cix"]` | PASS |
+| R2V-GEN-08 | `.claude` is a symlink to an outside dir | `die` "(.claude) is a symlink"; outside dir stays empty | PASS |
+| R2V-GEN-09 | existing `.claude/php-sdlc.yml` is a symlink to an outside file | `die` "profile path is a symlink"; outside file byte-identical | PASS |
+| R2V-GEN-10 | TARGET_DIR is itself a symlink to a real repo | exit 0; profile written inside the real repo | PASS |
+| R2V-GEN-11 | Malformed *existing* profile (tab + `: : :`), default run | exit 0, byte-diff path keeps the file, `--refresh` hint, no traceback | PASS |
+| R2V-GEN-12 | `schema_version: 2` drift: default vs `--refresh` | default keeps + mentions `--refresh`; `--refresh` restores `schema_version: 1` | PASS |
+
+### R2v validation — extreme numerics on every threshold key
+
+Floors checked: `quality.phpinsights.{quality,architecture,style}` (100),
+`quality.phpinsights.complexity` (94), `quality.infection_msi` (100).
+Ceilings checked: `quality.deptrac_violations`, `quality.psalm_errors` (0).
+Each value below was run against every applicable key (174 mutate-and-run
+rows logged); table groups by behavior class.
+
+| ID | Mutation class (applied to each threshold key) | Expected | Result |
+| --- | --- | --- | --- |
+| R2V-VAL-01 | uint64 wrap `18446744073709551615` (2⁶⁴−1) | floor → pass (raise); ceiling → VIOLATION (no wrap to −1) | PASS |
+| R2V-VAL-02 | 26-digit `99999999999999999999999999` | floor → pass; ceiling → VIOLATION; no crash/wrap | PASS |
+| R2V-VAL-03 | negative `-1` / `-100` / `-.inf` | non-integer VIOLATION (`-` fails `^[0-9]+$`) | PASS |
+| R2V-VAL-04 | float `99.5` / `0.0` / `94.5` | non-integer VIOLATION | PASS |
+| R2V-VAL-05 | `1e3` / `1e0` / `1e999` (YAML 1.1 strings) | non-integer VIOLATION | PASS |
+| R2V-VAL-06 | `.inf` / `-.inf` / `.nan` (parse to float) | non-integer VIOLATION | PASS |
+| R2V-VAL-07 | hex `0x64` (=100) / `0x0` (=0) | judged on resolved int (pass/fail per floor/ceiling rule) | PASS |
+| R2V-VAL-08 | `0o144` / `0o0` (NOT YAML 1.1 octal → string) | non-integer VIOLATION | PASS |
+| R2V-VAL-09 | underscore `100_000` / `9_4` (YAML 1.1 int) | judged on resolved int | PASS |
+| R2V-VAL-10 | leading zeros `094`/`093`/`0000…094`/`0000…093`/`00`/`000` | `strip_zeros` → 94 passes, 93 violates, all-zero → 0 | PASS |
+| R2V-VAL-11 | `+100` / `+0` (signed) | resolve to int, judged normally | PASS |
+| R2V-VAL-12 | bool words `yes`/`no`/`on`/`off`/`true`/`false` (→ `true`/`false`) | non-integer VIOLATION | PASS |
+| R2V-VAL-13 | `null` / `~` / `""` / empty | required-key-missing-or-null VIOLATION | PASS |
+| R2V-VAL-14 | boundary equality: floor==default, ceiling==0 | exit 0 | PASS |
+
+### R2v validation — enums, types, structure, YAML edge scalars
+
+| ID | Mutation | Expected | Result |
+| --- | --- | --- | --- |
+| R2V-VAL-15 | `persistence.engine`: `mysql`/`"mysql"` ok; `MySQL`/`sqlite`/`yes`/`on` enum VIOLATION; `null` missing | as expected, exit 1 on each bad | PASS |
+| R2V-VAL-16 | `persistence.mapper`: `doctrine-orm`/quoted ok; `eloquent` enum VIOLATION | as expected | PASS |
+| R2V-VAL-17 | `schema_version`: `1`/`"1"`/`01`/`+1` ok; `1.0`/`on`(→true) unsupported VIOLATION | as expected | PASS |
+| R2V-VAL-18 | `architecture.bounded_contexts`: `[Core]`/`[123]` valid; `[]` "at least one"; `core`/`{a:1}`/`null`/`yes` "must be a list" | distinct, correct messages; exit 1 on each bad | PASS |
+| R2V-VAL-19 | `ci.provider`: explicit `null` legal (exit 0); key deleted → "not declared" VIOLATION | as expected | PASS |
+| R2V-VAL-20 | `num_gt`/`num_lt`/`strip_zeros` unit suite (21 asserts incl. same-length lexicographic, 19-vs-20-digit length, all-zero) under `LC_ALL=C/POSIX/en_US.UTF-8/C.UTF-8` | all pass; comparison locale-insensitive for digit strings | PASS |
+
+### Round-2 (verification campaign) verdict
+
+Cases executed this campaign: 6 re-runs + 12 generation + 20 validation
+groups, backed by 174 logged numerics mutate-and-run rows and a 21-assert
+`num_gt`/`num_lt` unit suite — 250+ individual assertions. All PASS, 0
+FAIL. Every round-1 FAIL re-run (BUG-1 GEN-14, BUG-2 VAL-13 both shapes)
+now passes. No new bugs found; no regression from the five hardening
+changes. The wrap-safe digit-string threshold comparison, the `is_int`
+type guards, the `:=`/`::=`/`:::=` assignment-exclusion regex, the
+`yaml_parses` guard, the symlink rejection, and the workflow-filename
+sanitize all behave to contract. Sandboxes under
+`/tmp/sdlc-test2-profile-fuzz/` removed.

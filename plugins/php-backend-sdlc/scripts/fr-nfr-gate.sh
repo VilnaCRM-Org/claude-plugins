@@ -122,7 +122,15 @@ findings="${BASH_REMATCH[1]}"
 
 printf '%s\n' "$result"
 
-if (( findings == 0 )); then
+# Zero-test the findings count as a DIGIT STRING, never via bash arithmetic.
+# (( findings == 0 )) wraps any exact multiple of 2^64 to 0 (e.g.
+# 18446744073709551616 reads as 0), which would post a SUCCESS status for a
+# nonzero count — a silent gate escape. Strip leading zeros and compare to
+# the literal "0": the only value that means "no findings" (same wrap-safe
+# rule validate-profile.sh's num_gt enforces).
+findings_norm="${findings#"${findings%%[!0]*}"}"
+findings_norm="${findings_norm:-0}"
+if [[ "$findings_norm" == "0" ]]; then
   post_status success "zero new FR/NFR findings"
   log_info "FR/NFR gate: PASS — zero new findings"
   exit 0

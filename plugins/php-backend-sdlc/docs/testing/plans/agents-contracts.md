@@ -133,3 +133,44 @@ grep -n "prior iteration ledger" commands/sdlc-review.md  # the pattern the disp
 ```
 
 Sandbox `/tmp/sdlc-test-agents-contracts/` deleted after the round.
+
+## Round 2 — fix verification + regression hunt (2026-06-11)
+
+Goal: confirm the round-1 fixes hold (especially the BUG-1/BUG-2
+cross-dispatch counter transport) and hunt NEW defects introduced BY the
+fixes. No git mutations; the only repo write is this appended section.
+Sandbox: `/tmp/sdlc-test2-agents-contracts/` (deleted after the round).
+Each harness was run twice with identical output. markdownlint-cli2
+v0.22.1 with the repo `.markdownlint.yaml` (MD013 off).
+
+### Re-run of the round-1 FAIL (was AG-E08 → BUG-1 + BUG-2)
+
+| ID | Case | Check | Expected | Result |
+| --- | --- | --- | --- | --- |
+| AG2-R01 | BUG-1 fix: qa counter transport on BOTH ends | `qa-manual-tester.md` Inputs item 1 + Iteration discipline vs `sdlc-qa.md` step 3 dispatch contract | counter carried by agent Inputs AND supplied by dispatcher prompt | PASS — agent Inputs item 1 now carries "the current QA iteration number from the stage iteration guard … plus … the prior iteration ledger" with an explicit "assume 1/5 if omitted, say so" fallback; Iteration discipline declares statelessness ("owned by the `/sdlc-qa` stage guard … resumes from the dispatched iteration number"); `sdlc-qa.md:42-48` step 3 supplies "the current QA iteration number from this command's iteration guard" + prior ledger on re-dispatch. Transport is symmetric. |
+| AG2-R02 | BUG-2 fix: pr-comment-resolver counter-B supplied by dispatcher | `pr-comment-resolver.md` Inputs item 1 vs `sdlc-finish-pr.md` step 4 | dispatcher prompt carries PR number, default branch, counter-B number, comment source | PASS — `sdlc-finish-pr.md:69-78` step 4 now mandates the Task prompt carry "the PR number, the default branch name, the current counter-B iteration number (`comment_resolution iteration <b>/5`) … and the comment source selected in step 3", plus "Increment `<b>` … on every re-dispatch so the agent's counter resumes rather than resets". Agent Input 1's three required elements are now all supplied. |
+
+`r1FailsNowPass`: every round-1 FAIL re-run now passes.
+
+### Regression sweep — defects possibly introduced by the fixes
+
+| ID | Case | Check | Expected | Result |
+| --- | --- | --- | --- | --- |
+| AG2-R03 | Counter-transport off-by-one / double-count | trace QA + counter-B accounting: command owns counter, increments per re-dispatch, agent resumes from dispatched value and restates `<n>/5` | one dispatch = one tick, no double-increment, escalation fires at 5/5 truthfully | PASS — both models are one-pass-per-dispatch with the command owning the loop; the agent restates the dispatched number rather than maintaining its own across dispatches, so no off-by-one. sdlc-qa "Iteration guard" still scopes the QA counter to QA passes only (implement fix rounds carry their own guard) — no double-count. |
+| AG2-R04 | Lint regression on round-1-touched docs | markdownlint-cli2 over `qa-manual-tester.md`, `sdlc-qa.md`, `sdlc-finish-pr.md`, this plan, repo config | 0 errors | PASS — Summary: 0 error(s) across 4 files. |
+| AG2-R05 | AG-P03 profile-keys-in-schema after qa edit | re-extract `## Profile keys consumed` from all 6 agents, check each against `docs/profile-schema.md` | 0 undeclared | PASS — ci-fixer 12, code-quality-reviewer 11, fr-nfr-reviewer 3, php-implementer 19, pr-comment-resolver 5, qa-manual-tester 3; 0 missing (fr-nfr `make.fr_nfr_gate`/`make.tests`/`make.e2e` all present). |
+| AG2-R06 | AG-P08 script flag parsing after diagnostic-cleanup edits | stub-PATH smoke: `get-pr-comments.sh`, `ai-review-loop.sh`, `fr-nfr-gate.sh` canonical/bogus flags | documented flags reach parser; bogus flags die with a clean `[php-sdlc][ERROR] unknown argument … (usage: …)` and NO raw traceback | PASS — get-pr-comments reproduced the canonical `{pr, review_threads:[{is_resolved, comments:[{author,body,path,line,url}]}], issue_comments}` shape byte-for-key (every comment carries `url`, AG-E04 correlation intact); all three scripts reject bogus flags with the clean diagnostic, no traceback. |
+| AG2-R07 | AG-P10/N01/N02 RALPH_STATUS parsing intact | re-run `extract_ralph_status_block_json` on COMPLETE/BLOCKED-after-escalation/NOT_RUN templates | parses; escalation `status: NOT MET` text does not bleed into the BLOCKED block | PASS — COMPLETE→`exit_signal:true`; BLOCKED block after an escalation preamble→`status:"BLOCKED",exit_signal:false`; NOT_RUN+EXIT_SIGNAL true→`status:"COMPLETE",tests_status:"NOT_RUN"`. |
+| AG2-R08 | AG-P12 escalation-block consistency after edits | all 6 agents: one `=== SDLC ESCALATION ===` … `=== END ===` block, 7 fields, stage name = dispatcher stage name | 6/6 complete and consistent | PASS — 1 block each, all 7 fields (stage/iteration/exit_condition/status/blocking_finding/iteration_log/recommended_action) present; `<stage> (<agent>)` matches implement/review/qa/finish-pr dispatchers. |
+| AG2-R09 | pr-comment-resolver Iteration discipline prose vs command loop model | agent "spend remaining budget" / "NEXT pass" wording (untouched in round 1) vs `sdlc-finish-pr` "one command-owned cycle = one iteration" | adjudicate: malfunction or cosmetic | PASS-with-note — the multi-pass wording is pre-existing (the agent file was NOT modified in round 1) and the "NEXT pass" = the next dispatch, consistent with resuming from the dispatched `<b>`; boundedness and truthful 5/5 escalation are preserved now that the command supplies and increments `<b>`. No malfunction. Cosmetic parity gap: unlike the qa fix, this agent's Iteration discipline does not restate statelessness — consider mirroring the qa wording. |
+
+### Round-2 verdict
+
+All 6 agent contracts remain executable as written; the BUG-1/BUG-2
+counter transport is now declared symmetrically (agent Inputs + dispatch
+prompt) and is internally consistent (no off-by-one). No new defects
+were introduced by the round-1 fixes: lint clean, profile-key schema
+coverage intact, script flag parsing and clean diagnostics intact,
+RALPH_STATUS parsing intact, escalation blocks consistent. One cosmetic
+parity note recorded (AG2-R09), not a bug. Sandbox
+`/tmp/sdlc-test2-agents-contracts/` deleted after the round.

@@ -125,3 +125,111 @@ plugin `README.md` (Install section, 21-skill library + 8 commands +
 - Environment notes: host has bmalph 2.11.0, gh 2.92.0 (authed),
   jq, python3+PyYAML; `yq` absent (python fallback path is the one
   exercised).
+
+## Round 2 (verification + regression hunt)
+
+Independent re-run against the committed tree at HEAD `ad6497e` (the
+round-1 fix commit). Purpose: (1) confirm the cache actually refreshes
+to the NEW source tree on reinstall — the pre-test cache was the stale
+`c157eea` snapshot, seven-plus commits behind HEAD and lacking every
+round-1 fix; (2) re-run all round-1 cases from the refreshed cache; (3)
+hunt regressions in the five round-1 fix areas (validate-profile
+digit-string ceiling/floor, generate-profile `:=` make-target parsing,
+setup-preflight work-tree check, inject-governance atomic write, the
+qa/finish-pr counter-transport doc contract). Scripts executed FROM THE
+CACHE with `CLAUDE_PLUGIN_ROOT` set to the cache, cwd
+`/home/kravtsov/Projects/tmp/php-sdlc-qa/php-service-template`.
+Sandboxes under `/tmp/sdlc-test2-install-lifecycle/`, removed after the
+run. No git mutations. Host: claude 2.1.173, gh 2.92.0 (authed), bmalph
+2.11.0, jq, python3+PyYAML (`yq` absent), bats 1.11.1,
+markdownlint-cli2 0.22.1.
+
+### Lifecycle re-runs (real `claude` CLI)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R2-IL-P1 | `plugin details` inventory | Skills(29)=21 lib+8 `sdlc*`, Agents(6), Hooks/MCP/LSP 0 | PASS |
+| R2-IL-P2 | `plugin list` state | present, 0.1.0, user, enabled | PASS |
+| R2-IL-P3 | `plugin uninstall …@vilnacrm-plugins` | exit 0; gone from list; registry entry removed; stale cache dir retained but inert | PASS |
+| R2-IL-P4 | reinstall after uninstall (stale cache present) | exit 0; re-enabled at 0.1.0; registry `gitCommitSha` = HEAD `ad6497e` (was `c157eea`) | PASS |
+| R2-IL-P5 | `plugin update` on fresh install | exit 0; `already at the latest version (0.1.0)` | PASS |
+| R2-IL-P6 | cache vs tracked source byte-identity | 106 tracked files: 0 missing, 0 differ vs HEAD-committed; the only working-tree drift (plan `.md` files) is uncommitted edits from parallel round-2 agents — cache == HEAD-committed for every one | PASS |
+| R2-IL-P7 | exec bits in refreshed cache | 7 `scripts/*.sh` = 775 (u+x); `lib/common.sh` = 664 (sourced, self-guards exec); `tests/fixtures/bin/{bmalph,claude,gh}` = 775; all match source | PASS |
+| R2-IL-P8 | relative md links inside cache | 232 links checked, 0 broken | PASS |
+| R2-IL-P9 | `setup-preflight.sh --report` from cache, env=cache, cwd=QA template | sources `lib/common.sh` from cache; all 8 checks PASS; exit 0 | PASS |
+| R2-IL-P9b | `generate-profile.sh` then `validate-profile.sh` from cache against QA template | profile created (engine `postgresql` from active `pdo_pgsql`, commented `mysql://` DSN excluded; make targets resolved); validate exit 0 | PASS |
+| R2-IL-P10 | `plugin validate` on plugin dir + marketplace root | both exit 0, `Validation passed` | PASS |
+| R2-IL-N1 | `plugin details no-such-plugin-xyz` | exit 1; clean not-found, no stack trace | PASS |
+| R2-IL-N2 | second uninstall while not installed | exit 1; clean error naming the plugin | PASS |
+| R2-IL-N3 | install bogus plugin from marketplace | exit 1; clean error; no cache dir created | PASS |
+| R2-IL-N4 | (a) `resolve_plugin_root` with bogus `CLAUDE_PLUGIN_ROOT`; (b) preflight with same bogus env | (a) die exit 1 `CLAUDE_PLUGIN_ROOT points to a missing directory`; (b) exit 0, env harmless (self-locates) | PASS |
+| R2-IL-E3 | install while already installed | exit 0; idempotent `already installed`; still enabled | PASS |
+| R2-IL-E4 | disable then enable round trip | status toggles; cache byte-unchanged after | PASS |
+| R2-IL-E5 | grep cache scripts for `/home/kravtsov/Projects` | none in `scripts/` | PASS |
+| R2-IL-E6 | preflight from cache WITHOUT `CLAUDE_PLUGIN_ROOT` | self-locates via `BASH_SOURCE`; all checks PASS, exit 0 | PASS |
+
+### Cache-refresh verification (the headline case)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R2-IL-CR1 | pre-reinstall cache content signature | stale `c157eea`: `num_gt`=0, `write_managed`=0, work-tree fix absent — lacks every round-1 fix | CONFIRMED stale |
+| R2-IL-CR2 | post-reinstall cache content | refreshed to HEAD: `num_gt`=4 in `validate-profile.sh`, `write_managed`=3 in `inject-governance.sh`, work-tree `== "true"` guard + `[^=:]` make guard present; full `diff -rq` of scripts/commands/agents vs source = empty | PASS — reinstall re-snapshots the cache to the NEW tree |
+
+### Round-1 regression re-verification (from cache)
+
+| ID | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| R2-IL-WT1 | preflight in a bare repo | git-repo FAIL (round-1 fix; was a false PASS) | PASS |
+| R2-IL-WT2 | preflight inside a `.git/` dir | git-repo FAIL | PASS |
+| R2-IL-WT3 | preflight in a non-repo dir | git-repo FAIL with remediation | PASS |
+| R2-IL-WT4 | preflight in a normal work tree | git-repo PASS | PASS |
+| R2-IL-VP1 | `deptrac_violations: 18446744073709551615` (2^64-1 ceiling) | VIOLATION, never wrapped to negative (ADR-7) | PASS |
+| R2-IL-VP2 | leading-zero ceiling `00` / `"007"` | `00`→0 valid; `007`→magnitude 7 > 0 VIOLATION | PASS |
+| R2-IL-VP3 | floor at/below default (94 / 93) and huge raise (`99999999999999999999`) | 94 valid, 93 VIOLATION, huge raise valid | PASS |
+| R2-IL-VP4 | malformed YAML profile | clean `[php-sdlc]` diagnostic, no backend traceback | PASS |
+| R2-IL-MK1 | Makefile with `tests := v`, `psalm:=v` (assignments) vs real `ci`/`start`/`deptrac` targets, plus a name appearing as both `::=` and a real target | assignments → null; real targets (incl. the dual `ci`) detected; bare `tests:`, `ci::`, comment-only prereq all resolve correctly | PASS |
+| R2-IL-GV1 | inject-governance from cache: fresh create, idempotency, CRLF tolerance | one block; second run unchanged; CRLF file not duplicated, user content kept | PASS |
+| R2-IL-GV2 | inject-governance symlink rejection | `CLAUDE.md -> outside` refused; outside file intact; link not followed | PASS |
+| R2-IL-GV3 | inject-governance write_managed on read-only TARGET | clean die `cannot create temp file`; existing `CLAUDE.md` NOT truncated; no leftover `.sdlc-governance.*` temp | PASS |
+| R2-IL-GV4 | inject-governance `--diff` preview | no write to `CLAUDE.md` | PASS |
+| R2-IL-CT1 | counter-transport docs in cache (`sdlc-qa.md`, `qa-manual-tester.md`, `sdlc-finish-pr.md`) | command commits to passing the iteration number; agent expects + resumes from it; `/sdlc-qa` defines the `MAX_ITERATIONS=5` guard; finish-pr owns counter B — internally consistent, no doc-reality gap | PASS |
+| R2-IL-BATS | full bats suite from cache (164 tests) | every round-1 fix test passes (bare repo, `.git/` dir, uint64-wrap ceiling, huge raise, malformed YAML); 162 pass; the 2 non-passes (#56 plugin.json-name == dir, #58 marketplace.json) are test-harness layout assumptions that only hold in the SOURCE tree — both PASS when the suite runs from source (exit 0, 164/164) | PASS (no plugin defect) |
+
+### Notes (Round 2)
+
+- Headline result (R2-IL-CR1/CR2): reinstall DOES refresh the cache to
+  the current source tree. The pre-test cache was genuinely stale
+  (`c157eea`, lacking all round-1 fixes); after `uninstall` +
+  `install` the cache is byte-identical to HEAD `ad6497e` and the
+  registry `gitCommitSha` advanced to HEAD. The version-gated `update`
+  no-resync from round-1 IL-E1 still stands (update on an unchanged
+  0.1.0 reports already-latest and syncs nothing) — uninstall +
+  reinstall is the dev-loop refresh path, and it works.
+- R2-IL-BATS: running the cached bats suite surfaced two failures
+  (#56, #58) that are NOT plugin defects. They assert repo-layout
+  invariants — `basename(PLUGIN_ROOT) == plugin.json .name` and the
+  existence of `REPO_ROOT/.claude-plugin/marketplace.json` — that by
+  design only hold in the source tree. In the per-version install
+  cache `PLUGIN_ROOT` is `…/php-backend-sdlc/0.1.0` (basename `0.1.0`)
+  and the repo-level `marketplace.json` is not snapshotted (the cache
+  holds only the plugin subtree). Both tests PASS from source. The
+  cache content is correct; the tests are source-tree-relative.
+- "lockfile in inject-governance" from the regression brief: the
+  shipped fix uses an atomic in-dir `mktemp` + `mv` (no lockfile).
+  Verified the claimed last-writer-wins/no-torn-read behavior plus the
+  hardening it carries (symlink rejection, mode preservation,
+  truncation safety on a read-only dir, temp-file cleanup on failure)
+  — all hold.
+- Every round-1 FAIL re-run in Round 2 now passes; no regressions found
+  in any of the five fix areas. Confirmed NEW defects: 0.
+
+### Verdict summary (Round 2)
+
+- Cases run: 36 (19 lifecycle re-runs + 2 cache-refresh + 15
+  regression re-verifications; sub-case repetitions and
+  reproduced-twice confirmations not counted separately).
+- r1FailsNowPass: true — every round-1 FAIL that was fixed and re-run
+  (work-tree preflight, uint64-wrap ceiling, `:=` make parsing,
+  inject-governance atomic write / CRLF, malformed-YAML diagnostic,
+  counter transport) now passes from the refreshed cache.
+- Confirmed defects: 0.

@@ -75,26 +75,75 @@ BLOCK
 # append a fresh duplicate while keeping the stale CRLF copy forever
 # (NFR-3 violation). The replacement block is always written with LF;
 # user content outside the markers keeps its original line endings.
+#
+# Marker matching is also fence-aware: a marker line that sits INSIDE a
+# fenced code block (``` or ~~~) is documentation, not a real marker, so it
+# is treated as ordinary user content — the same way E08 treats indented
+# (non-whole-line) markers. Without this, a CLAUDE.md that DOCUMENTS the
+# governance markers inside a code fence would have its example clobbered
+# and the real block spliced into the fence (FR-2 user-content loss). The
+# shared awk prelude below (norm + fence tracking) is reused verbatim by
+# every pass so counting, pairing, and the two rewrites agree on exactly
+# which lines are real markers.
+#
+# Fence suppression is gated on FENCE_AWARE, set by fence_balance() below to
+# 1 only when the file's fence lines are BALANCED (an even count, every
+# opener closed). An UNCLOSED fence must not enable suppression: a stateful
+# toggle would stay "inside the fence" through EOF and swallow the real
+# managed block we append at the end, so the next run would no longer see
+# that block and would append ANOTHER — a duplicate-block / non-idempotent
+# regression (NFR-3). With an odd fence count we fall back to plain
+# whole-line marker matching (the pre-fence behaviour), which is safe and
+# idempotent; the documented-example case (Bug 4) always has a balanced
+# ``` pair, so it still gets the protection.
+AWK_FENCE_PRELUDE='
+  function norm(l) { sub(/\r$/, "", l); return l }
+  # A fence opener/closer is a line whose only content (after CR strip and
+  # leading-space trim) is 3+ backticks or tildes, optionally followed by an
+  # info string (for an opener). Toggling on every such line treats marker
+  # lines between an open and close fence as plain content. When
+  # fence_aware is 0 the toggle is a no-op so every pass matches markers
+  # by whole line regardless of fences.
+  function fence_toggle(l,   t) {
+    if (!fence_aware) return 0
+    t = norm(l); sub(/^[ \t]+/, "", t)
+    if (t ~ /^(```+|~~~+)/) { infence = !infence; return 1 }
+    return 0
+  }
+'
 
-# count_marker_lines FILE MARKER — number of lines equal to MARKER,
-# ignoring a trailing CR.
+# fence_balance FILE — print 1 when the file has an even number of fenced
+# code-block delimiter lines (``` or ~~~ at column 0 after trim), else 0.
+# Only a balanced count is safe for fence-aware marker suppression.
+fence_balance() {
+  awk '
+    { t = $0; sub(/\r$/, "", t); sub(/^[ \t]+/, "", t)
+      if (t ~ /^(```+|~~~+)/) n++ }
+    END { print (n % 2 == 0) ? 1 : 0 }
+  ' "$1"
+}
+
+# count_marker_lines FILE MARKER FENCE_AWARE — number of WHOLE-LINE markers
+# equal to MARKER outside any code fence (CR-tolerant). Fenced marker
+# examples are documentation and are not counted when FENCE_AWARE is 1.
 count_marker_lines() {
-  awk -v m="$2" '
-    { s = $0; sub(/\r$/, "", s); if (s == m) n++ }
+  awk -v m="$2" -v fence_aware="${3:-0}" "$AWK_FENCE_PRELUDE"'
+    { if (fence_toggle($0)) next; if (!infence && norm($0) == m) n++ }
     END { print n + 0 }
   ' "$1"
 }
 
-# markers_paired FILE — success only when every BEGIN is closed by an END
-# before the next BEGIN or EOF. Counts alone cannot catch an END that
-# precedes its BEGIN: that state is count-balanced, but the replacement
+# markers_paired FILE FENCE_AWARE — success only when every BEGIN is closed
+# by an END before the next BEGIN or EOF. Counts alone cannot catch an END
+# that precedes its BEGIN: that state is count-balanced, but the replacement
 # awk below would treat BEGIN..EOF as the managed region and swallow all
-# user content after it.
+# user content after it. Markers inside a fence are ignored (documentation)
+# when FENCE_AWARE is 1.
 markers_paired() {
-  awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
-    function norm(l) { sub(/\r$/, "", l); return l }
-    norm($0) == begin { if (inblock) bad = 1; inblock = 1; next }
-    norm($0) == end   { if (!inblock) bad = 1; inblock = 0; next }
+  awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" -v fence_aware="${2:-0}" "$AWK_FENCE_PRELUDE"'
+    { if (fence_toggle($0)) next }
+    !infence && norm($0) == begin { if (inblock) bad = 1; inblock = 1; next }
+    !infence && norm($0) == end   { if (!inblock) bad = 1; inblock = 0; next }
     END { exit (bad || inblock) ? 1 : 0 }
   ' "$1"
 }
@@ -112,6 +161,22 @@ reject_symlink() {
   fi
 }
 
+# reject_irregular FILE — refuse a path that exists but is NOT a regular
+# file (a directory, FIFO, socket, device node). render_managed below
+# decides "create vs update" on `[[ ! -f ]]`, which is also false for
+# every non-regular type, so without this guard such a path is treated as
+# "missing": write_managed's `mv -f "$temp" "$file"` then either drops the
+# temp file INSIDE a directory CLAUDE.md (no governance written, random
+# temp litter accumulates each run) or clobbers a FIFO into a regular file
+# — all with exit 0 on a broken state. The managed file must be a regular
+# file (round-1 N07: writing over a directory must fail non-zero).
+reject_irregular() {
+  local file=$1
+  if [[ -e "$file" && ! -f "$file" ]]; then
+    die "refusing to write managed governance: $file exists but is not a regular file (expected a regular CLAUDE.md/AGENTS.md inside the target repo)"
+  fi
+}
+
 # render_managed FILE -> writes the post-injection content to $new_file
 # and sets file_exists=0/1. FILE is read exactly ONCE, into $snap_file;
 # marker counts, pairing, the rewrite, and the caller's diff all work on
@@ -122,6 +187,7 @@ file_exists=0
 render_managed() {
   local file=$1
   reject_symlink "$file"
+  reject_irregular "$file"
   if [[ ! -f "$file" ]]; then
     file_exists=0
     cat "$block_file" >"$new_file"
@@ -129,16 +195,23 @@ render_managed() {
   fi
   file_exists=1
   cat "$file" >"$snap_file"
-  local begins ends
-  begins="$(count_marker_lines "$snap_file" "$BEGIN_MARKER")"
-  ends="$(count_marker_lines "$snap_file" "$END_MARKER")"
-  if [[ "$begins" == "$ends" && "$begins" -gt 0 ]] && markers_paired "$snap_file"; then
+  # Compute fence balance ONCE from the snapshot and thread the same value
+  # through every pass, so counting, pairing, and the rewrites all agree on
+  # whether fence suppression is active (an odd/unclosed-fence file disables
+  # it and falls back to whole-line matching — see fence_balance()).
+  local fence_aware begins ends
+  fence_aware="$(fence_balance "$snap_file")"
+  begins="$(count_marker_lines "$snap_file" "$BEGIN_MARKER" "$fence_aware")"
+  ends="$(count_marker_lines "$snap_file" "$END_MARKER" "$fence_aware")"
+  if [[ "$begins" == "$ends" && "$begins" -gt 0 ]] && markers_paired "$snap_file" "$fence_aware"; then
     # Balanced markers: drop every managed region, leave a placeholder at
     # the first region's position, then splice the fresh block there.
-    awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
-      function norm(l) { sub(/\r$/, "", l); return l }
-      norm($0) == begin && !inblock { inblock = 1; if (!placed) { print "\x01MANAGED-BLOCK\x01"; placed = 1 }; next }
-      inblock { if (norm($0) == end) inblock = 0; next }
+    # Fence-aware so a documented marker inside a code fence is left as
+    # content and never opens a managed region (FR-2).
+    awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" -v fence_aware="$fence_aware" "$AWK_FENCE_PRELUDE"'
+      fence_toggle($0) { print; next }
+      !infence && norm($0) == begin && !inblock { inblock = 1; if (!placed) { print "\x01MANAGED-BLOCK\x01"; placed = 1 }; next }
+      inblock { if (!infence && norm($0) == end) inblock = 0; next }
       { print }
     ' "$snap_file" | awk -v blockfile="$block_file" '
       $0 == "\x01MANAGED-BLOCK\x01" {
@@ -159,10 +232,11 @@ render_managed() {
   else
     # Unbalanced/orphaned/out-of-order markers: removing a begin..EOF
     # span could swallow user content, so drop ONLY the marker lines and
-    # append one fresh block at the end.
-    awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
-      function norm(l) { sub(/\r$/, "", l); return l }
-      norm($0) == begin || norm($0) == end { next }
+    # append one fresh block at the end. Fence-aware: a documented marker
+    # inside a code fence is content, not an orphan marker to strip (FR-2).
+    awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" -v fence_aware="$fence_aware" "$AWK_FENCE_PRELUDE"'
+      fence_toggle($0) { print; next }
+      !infence && (norm($0) == begin || norm($0) == end) { next }
       { print }
     ' "$snap_file" >"$new_file"
     printf '\n' >>"$new_file"
@@ -182,6 +256,15 @@ render_managed() {
 # both).
 write_managed() {
   local file=$1 mode
+  # Refuse to rewrite a managed file the user marked read-only (round-1
+  # N04). mv -f replaces by rename, which needs write permission on the
+  # DIRECTORY only — not the file — so a 0444 CLAUDE.md would otherwise be
+  # silently overwritten with the governance block and exit 0, changing the
+  # contract from "refuse" to "silent overwrite of a file the user locked".
+  # Check before creating the temp file so a refusal leaves no litter.
+  if [[ -e "$file" && ! -w "$file" ]]; then
+    die "refusing to overwrite read-only file: $file (it needs a managed-block update but is not writable; chmod +w it or remove it to regenerate)"
+  fi
   out_file="$(mktemp "$TARGET/.sdlc-governance.XXXXXX")" \
     || die "cannot create temp file in $TARGET"
   cat "$new_file" >"$out_file"

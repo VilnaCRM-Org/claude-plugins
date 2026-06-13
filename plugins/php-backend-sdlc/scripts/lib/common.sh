@@ -27,6 +27,36 @@ die() {
   exit 1
 }
 
+# --- wrap-safe non-negative integer comparison --------------------------
+# NEVER compare these magnitudes with bash arithmetic: (( )) wraps values
+# >= 2^63 to negative (18446744073709551615 reads as -1) and exact
+# multiples of 2^64 to 0, which would let a crafted huge value pass a
+# raise-only quality ceiling (ADR-7), a findings count, or a loop bound.
+# Compare as digit strings instead — by length, then lexicographically.
+
+# strip_zeros VALUE — drop leading zeros ('007' -> '7', '000' -> '0') so
+# magnitude comparison can go by digit-string length.
+strip_zeros() {
+  local v=$1
+  v="${v#"${v%%[!0]*}"}"
+  printf '%s' "${v:-0}"
+}
+
+# num_gt A B — true when A > B for non-negative decimal integer strings.
+num_gt() {
+  local a b
+  a="$(strip_zeros "$1")"
+  b="$(strip_zeros "$2")"
+  if (( ${#a} != ${#b} )); then
+    (( ${#a} > ${#b} ))
+  else
+    [[ "$a" > "$b" ]]
+  fi
+}
+
+# num_lt A B — true when A < B (same wrap-safe digit-string comparison).
+num_lt() { num_gt "$2" "$1"; }
+
 # --- plugin root resolution (ADR-4) -------------------------------------
 
 # Claude Code sets ${CLAUDE_PLUGIN_ROOT} when invoking plugin scripts from
