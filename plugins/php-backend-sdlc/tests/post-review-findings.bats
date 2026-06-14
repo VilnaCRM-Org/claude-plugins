@@ -144,6 +144,10 @@ route_gh() {
   [ "$status" -eq 0 ]
   [ "$(grep -c 'api -X POST repos/acme/sample-api/issues/7/comments' "$GH_LOG")" -eq 1 ]
   [ "$(grep -c 'api -X PATCH' "$GH_LOG")" -eq 0 ]
+  # Regression: the body MUST be sent via -F (reads stdin). gh's -f posts the
+  # literal string "@-" instead of the rendered comment (caught in real-PR QA).
+  grep -q 'api -X POST .* -F body=@-' "$GH_LOG"
+  ! grep -q -- '-f body=@-' "$GH_LOG"
 }
 
 @test "idempotent UPDATE (second run): exactly one PATCH on the matched id, zero POST" {
