@@ -1,0 +1,4 @@
+{"lens":"fr-nfr","pr":7,"findings":[
+ {"id":"F1","severity":"high","location":"src/SameLocationModule/Handler.php:10","summary":"has a | pipe char","status":"open"},
+ {"id":"F2","severity":"high","location":"src/SameLocationModule/Handler.php:10","summary":"distinct cwe-less finding, same location","status":"open"}
+]}

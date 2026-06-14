@@ -498,3 +498,32 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"a lens"* || "$output" == *"--conclusion is required"* ]]
 }
+
+# --- Regression tests for the adversarial-critic findings (round 1) ---------
+
+@test "regression: a pipe in a finding field is escaped, not table-breaking (FR-4)" {
+  run "$SCRIPT" fr-nfr --file "$LEDGERS/pipe-and-distinct.json" --pr 7 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'has a \| pipe char'* ]]
+  [[ "$output" != *'has a | pipe char'* ]]
+}
+
+@test "regression: distinct cwe-less findings at one location are NOT deduped away (FR-4)" {
+  run "$SCRIPT" fr-nfr --file "$LEDGERS/pipe-and-distinct.json" --pr 7 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"| F1 |"* ]]
+  [[ "$output" == *"| F2 |"* ]]
+}
+
+@test "regression: a long digit-less identifier is not over-redacted (FR-7)" {
+  run "$SCRIPT" fr-nfr --file "$LEDGERS/pipe-and-distinct.json" --pr 7 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"src/SameLocationModule/Handler.php:10"* ]]
+}
+
+@test "regression: conclusion duration falls back to ledger started_at/ended_at (FR-5/OQ-7)" {
+  run "$SCRIPT" --conclusion --file "$LEDGERS/with-times.json" --pr 7 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"### Duration"* ]]
+  [[ "$output" == *"5m 30s"* ]]
+}
