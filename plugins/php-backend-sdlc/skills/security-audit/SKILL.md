@@ -140,6 +140,17 @@ in-scope base URL (loopback/private/container host per boundary rule 1). If the
 capability is false or `make.start` is null, dynamic probing degrades to
 skip-with-note and only the static lanes run — no base URL is passed.
 
+**Capture and report the booted runtime env** (e.g. `APP_ENV`) alongside the
+base URL. A fuzz/test/CI env (one that disables security middleware such as the
+rate limiter, or enables debug/verbose errors and GraphQL introspection) will
+**mask or inflate** env-sensitive families: rate / resource exhaustion
+(API4:2023) can read falsely CLEAN, while error-disclosure (CWE-209) and
+introspection can read falsely as findings. So: pass the env in every dispatch;
+a family whose verdict depends on a control toggled by that env must
+cross-check the prod/dev config source (raise-only thresholds, listener wiring)
+before reporting CLEAN or promoting a finding, and state the env in its verdict.
+Prefer booting a prod/dev-like profile for the dynamic pass when one exists.
+
 Then dispatch **one `security-auditor` subagent per PROBE family, in
 parallel** — the proven parallel-`php-implementer` idiom (no new
 infrastructure). The orchestrator issues N `Task`-tool dispatches in one turn.
