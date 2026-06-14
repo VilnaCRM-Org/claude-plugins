@@ -1,0 +1,6 @@
+schema_version: 1
+project:
+  name: sample-api
+  repo: acme/sample-api
+capabilities:
+  publish_pr_comments: false

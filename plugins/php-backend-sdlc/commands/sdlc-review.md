@@ -21,9 +21,12 @@ subagent, and this command commits that remediation between iterations
 
   ```bash
   "${CLAUDE_PLUGIN_ROOT}/scripts/validate-profile.sh"
+  REVIEW_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   ```
 
-  On exit 1, ABORT and instruct the user to run `/sdlc-setup`.
+  On exit 1, ABORT and instruct the user to run `/sdlc-setup`. Capturing
+  `REVIEW_STARTED_AT` here records the loop start for the conclusion comment's
+  duration (FR-10); it has no effect on the stage exit condition.
 - The change set: the working branch's diff against the default branch.
 - The planning chain: `specs/<slug>/` from the argument or the
   `SPECS_DIR:` line emitted by `/sdlc-plan` — requirement traceability
@@ -176,6 +179,44 @@ then a commit of that remediation, then a fresh parallel invocation of
 quality threshold table in the report. Exit condition (FR-1 stage
 table): **zero new findings in last gate iteration AND every
 non-SKIPPED quality threshold row PASS** — both lenses clean.
+
+### Conclusion comment (post-exit side effect, gated)
+
+This does NOT change the single exit condition above — it is a side effect that
+runs ONCE after the loop has already exited. After the loop closes (the exit
+condition met, or escalation), capture `REVIEW_ENDED_AT="$(date -u
++%Y-%m-%dT%H:%M:%SZ)"`. Then, gated on `capabilities.publish_pr_comments` being
+`true` (skip-with-note when false/absent), post the aggregate conclusion comment
+EXACTLY ONCE for the whole loop (never per iteration, NFR-2) via the
+`--conclusion` mode of the target mapped by `make.post_review_findings` (null →
+`"${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh"`), passing the three
+lens ledgers, the captured timing, and the existing `iteration <n>/5` counter:
+
+```bash
+# Resolve the poster from make.post_review_findings, the SAME null-substitution
+# the per-lens Publish steps use: read the profile value (common.sh profile_get),
+# falling back to the bundled script when the key is null (its shipped default).
+profile="$(profile_path)"
+POSTER="$(profile_get "$profile" make.post_review_findings "")"
+POSTER="${POSTER:-${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh}"
+"$POSTER" --conclusion \
+  --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/security.json" \
+  --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/fr-nfr.json" \
+  --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/code-review.json" \
+  --pr "${PR:?PR number required}" --started-at "$REVIEW_STARTED_AT" \
+  --ended-at "$REVIEW_ENDED_AT" --iterations "$ITERATION"
+```
+
+(`profile_path` / `profile_get` are the `lib/common.sh` helpers the plugin
+scripts already source; a non-null `make.post_review_findings` maps to a custom
+publisher, otherwise the bundled `scripts/post-review-findings.sh` is used.)
+
+The poster is idempotent (hidden `<!-- sdlc-review:conclusion -->` marker) and
+DEGRADES (FR-9, NFR-3): the flag false/absent, `gh` absent, no PR, empty/missing
+ledgers, a mismatched base repo, or a `gh` write failure all skip-with-note and
+exit 0 — this post NEVER fails or re-enters the review loop. Ownership is
+`/sdlc-review` only: a `/sdlc-finish-pr` hand-off does NOT post a second
+conclusion (FR-10).
 
 ## Iteration guard
 

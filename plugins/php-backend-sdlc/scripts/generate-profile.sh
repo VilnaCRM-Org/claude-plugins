@@ -342,6 +342,7 @@ make:
   pr_comments: $(scalar "$make_pr_comments")
   fr_nfr_gate: $(scalar "$make_fr_nfr_gate")
   load_tests: $(scalar "$make_load_tests")
+  post_review_findings: null
 quality:
   phpinsights:
     quality: 100
@@ -363,6 +364,7 @@ capabilities:
   structurizr: $structurizr
   observability_emf: false
   load_testing: $load_testing
+  publish_pr_comments: false
 PROFILE
 }
 

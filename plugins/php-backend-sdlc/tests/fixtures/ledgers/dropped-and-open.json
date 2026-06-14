@@ -1,0 +1,23 @@
+{
+  "lens": "security",
+  "findings": [
+    {
+      "id": "OPEN-1",
+      "severity": "Medium",
+      "cwe": "CWE-79",
+      "location": "src/Web/Render.php:30",
+      "endpoint": "GET /page",
+      "summary": "Reflected XSS in the render path",
+      "status": "open"
+    },
+    {
+      "id": "DROP-X",
+      "severity": "High",
+      "cwe": "CWE-89",
+      "location": "src/Web/Legacy.php:7",
+      "endpoint": "GET /legacy",
+      "summary": "NOT-REPRODUCED-DROPPED candidate",
+      "status": "dropped"
+    }
+  ]
+}

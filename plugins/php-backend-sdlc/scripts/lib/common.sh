@@ -57,6 +57,37 @@ num_gt() {
 # num_lt A B — true when A < B (same wrap-safe digit-string comparison).
 num_lt() { num_gt "$2" "$1"; }
 
+# num_add A B — sum of two non-negative decimal integer strings, wrap-safe.
+# Column addition with carry over the digit strings, so an arbitrarily long
+# count (e.g. a crafted 20-digit findings total) never wraps modulo 2^64 the
+# way bash (( )) would. The only (( )) here is on single-digit sums (max 19)
+# and on string index/length counters (bounded by the input length, not its
+# magnitude) — never on the full value. Non-digit input yields '0' + return 1.
+num_add() {
+  local a b out="" carry=0 ia ib da db sum
+  a="$(strip_zeros "$1")"
+  b="$(strip_zeros "$2")"
+  if [[ ! "$a" =~ ^[0-9]+$ || ! "$b" =~ ^[0-9]+$ ]]; then
+    printf '0'
+    return 1
+  fi
+  ia=$(( ${#a} - 1 ))
+  ib=$(( ${#b} - 1 ))
+  while (( ia >= 0 || ib >= 0 || carry > 0 )); do
+    da=0; db=0
+    (( ia >= 0 )) && da=${a:ia:1}
+    (( ib >= 0 )) && db=${b:ib:1}
+    sum=$(( da + db + carry ))
+    out="$(( sum % 10 ))$out"
+    carry=$(( sum / 10 ))
+    ia=$(( ia - 1 )); ib=$(( ib - 1 ))
+  done
+  printf '%s' "${out:-0}"
+}
+
+# lower STRING — lowercase, for case-insensitive login / repo-slug compares.
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+
 # --- plugin root resolution (ADR-4) -------------------------------------
 
 # Claude Code sets ${CLAUDE_PLUGIN_ROOT} when invoking plugin scripts from

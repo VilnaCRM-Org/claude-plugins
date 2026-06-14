@@ -1,0 +1,48 @@
+{
+  "lens": "security",
+  "pr": 7,
+  "iterations": 3,
+  "started_at": "2026-06-14T10:00:00Z",
+  "ended_at": "2026-06-14T10:12:04Z",
+  "findings": [
+    {
+      "id": "A03-1",
+      "severity": "Critical",
+      "cwe": "CWE-89",
+      "owasp": "A03:2021",
+      "location": "src/Auth/Login.php:42",
+      "endpoint": "POST /api/login",
+      "summary": "SQL injection in the login query",
+      "status": "open",
+      "auto_fixed": true,
+      "regression_test": "tests/Security/SqlInjectionTest.php"
+    },
+    {
+      "id": "A01-1",
+      "severity": "High",
+      "cwe": "CWE-862",
+      "owasp": "A01:2021",
+      "location": "src/Order/OrderController.php:10",
+      "endpoint": "GET /api/order/{id}",
+      "summary": "Broken object-level authorization (BOLA)",
+      "status": "open"
+    },
+    {
+      "id": "A05-1",
+      "severity": "Medium",
+      "cwe": "CWE-16",
+      "owasp": "A05:2021",
+      "location": "config/packages/security.yaml:3",
+      "endpoint": "",
+      "summary": "Debug toolbar reachable in prod profile",
+      "status": "open"
+    },
+    {
+      "id": "DROP-1",
+      "severity": "Low",
+      "location": "src/Misc/Legacy.php:1",
+      "summary": "Reported by a scanner but not reproduced",
+      "status": "dropped"
+    }
+  ]
+}
