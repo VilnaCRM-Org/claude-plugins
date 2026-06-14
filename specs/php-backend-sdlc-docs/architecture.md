@@ -33,7 +33,7 @@ Slugs are exact filenames under `plugins/php-backend-sdlc/wiki/`.
 | `The-SDLC-Loop.md` | The SDLC Loop | 7 stages, gates, loop-backs, exit conditions, resume | docs/sdlc-loop.md, commands/sdlc.md |
 | `Commands.md` | Commands | All 8 commands in detail | commands/*.md |
 | `Agents.md` | Agents | All 7 subagents + contracts | agents/*.md |
-| `Skills.md` | Skills | All 23 skills + 2 meta-guides, grouped; triage model | skills/*, SKILL-DECISION-GUIDE.md, AI-AGENT-GUIDE.md |
+| `Skills.md` | Skills | All 22 skills + 2 meta-guides, grouped; triage model | skills/*, SKILL-DECISION-GUIDE.md, AI-AGENT-GUIDE.md |
 | `Project-Profile.md` | Project Profile | `.claude/php-sdlc.yml` schema overview + link to full ref | docs/profile-schema.md, commands/sdlc-setup.md |
 | `Security-Audit.md` | Security Audit | OWASP red-team loop, boundaries, dynamic testing | skills/security-audit/*, agents/security-auditor.md, docs/testing/security-audit-* |
 | `Review-and-Quality-Gates.md` | Review & Quality Gates | code-review + FR/NFR gate + thresholds | skills/code-review, skills/bmad-fr-nfr-review-gate, skills/quality-standards, agents/code-quality-reviewer.md, agents/fr-nfr-reviewer.md |

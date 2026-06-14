@@ -8,7 +8,7 @@
 ## Epic B — Reference pages
 - B1: `Commands.md` — 8 commands.
 - B2: `Agents.md` — 7 agents.
-- B3: `Skills.md` — 23 skills + 2 meta-guides + triage.
+- B3: `Skills.md` — 22 skills + 2 meta-guides + triage.
 - B4: `Project-Profile.md` — profile schema overview.
 
 ## Epic C — Concept & deep-dive pages

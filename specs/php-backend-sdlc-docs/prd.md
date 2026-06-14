@@ -19,7 +19,7 @@
 - **FR-5 — Agents reference.** Every one of the 7 agents documented:
   role, when dispatched (by which command/stage), tools, inputs, output
   contract, and its hard constraints (no-suppression, container-only…).
-- **FR-6 — Skills reference.** All 23 skills + the 2 meta-guides
+- **FR-6 — Skills reference.** All 22 skills + the 2 meta-guides
   (`AI-AGENT-GUIDE`, `SKILL-DECISION-GUIDE`) documented, grouped by
   theme, each with purpose, trigger, and profile keys consumed; includes
   the applicability-triage model.

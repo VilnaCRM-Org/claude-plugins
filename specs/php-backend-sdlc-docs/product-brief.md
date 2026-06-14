@@ -2,7 +2,7 @@
 
 ## Problem
 
-The `php-backend-sdlc` plugin is large (8 commands, 7 agents, 23 skills +
+The `php-backend-sdlc` plugin is large (8 commands, 7 agents, 22 skills +
 2 meta-guides, a profile schema, a 7-stage loop, a PR-comment publisher).
 Today its only narrative is a 3 KB README plus six reference docs under
 `docs/`. A new engineer cannot answer, quickly: *what does it do, how do
