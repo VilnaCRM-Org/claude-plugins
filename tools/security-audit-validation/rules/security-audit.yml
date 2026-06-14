@@ -31,6 +31,7 @@ rules:
       - pattern: $_POST
       - pattern: $_REQUEST
       - pattern: $_COOKIE
+      - pattern: $_SERVER
     pattern-sanitizers:
       - pattern: (int)$X
       - pattern: (integer)$X
@@ -41,10 +42,16 @@ rules:
               - pattern: $OBJ->query($Q)
               - pattern: $OBJ->exec($Q)
               - pattern: $OBJ->createQuery($Q)
+              # Doctrine DBAL aliases — same SQL-string sink under another name.
+              - pattern: $OBJ->executeQuery($Q)
+              - pattern: $OBJ->executeStatement($Q)
+              - pattern: $OBJ->executeUpdate($Q)
               - pattern: mysqli_query(...)
               - pattern: pg_query(...)
           - pattern-not: $OBJ->query("...")
           - pattern-not: $OBJ->exec("...")
+          - pattern-not: $OBJ->executeQuery("...")
+          - pattern-not: $OBJ->executeStatement("...")
 
   # --- OS command injection (CWE-78/77) ----------------------------------
   - id: sa-command-injection-taint
@@ -61,10 +68,16 @@ rules:
       - pattern: $_POST
       - pattern: $_REQUEST
       - pattern: $_COOKIE
+      - pattern: $_SERVER
     pattern-sanitizers:
       # Only escapeshellarg fully neutralizes an argument; escapeshellcmd is
       # intentionally NOT a sanitizer (it leaves argument injection open).
+      # Integer coercion also clears the value (no shell metacharacters can
+      # survive), consistent with the SQLi/XSS sanitizer lists.
       - pattern: escapeshellarg(...)
+      - pattern: (int)$X
+      - pattern: (integer)$X
+      - pattern: intval(...)
     pattern-sinks:
       - pattern-either:
           - pattern: shell_exec(...)
@@ -73,6 +86,23 @@ rules:
           - pattern: passthru(...)
           - pattern: proc_open(...)
           - pattern: popen(...)
+
+  # --- OS command injection via the backtick operator (CWE-78) -----------
+  # The backtick operator `...` is sugar for shell_exec() but is a distinct
+  # AST node that the structural patterns above do not model. A backtick string
+  # containing an interpolated variable is a command sink with dynamic content.
+  - id: sa-command-backtick
+    languages: [generic]
+    severity: ERROR
+    message: Backtick operator executes a shell command with interpolated data (CWE-78).
+    metadata:
+      family: command
+      cwe: CWE-78
+      owasp: A03:2021
+    paths:
+      include:
+        - "*.php"
+    pattern-regex: '`[^`]*\$[^`]*`'
 
   # --- Code injection / SSTI (CWE-94/1336) -------------------------------
   - id: sa-code-injection-taint
@@ -89,6 +119,7 @@ rules:
       - pattern: $_POST
       - pattern: $_REQUEST
       - pattern: $_COOKIE
+      - pattern: $_SERVER
     pattern-sinks:
       - pattern-either:
           - pattern: eval(...)
@@ -97,22 +128,30 @@ rules:
           - pattern: $T->createTemplate(...)
 
   # --- Insecure deserialization (CWE-502) --------------------------------
-  - id: sa-insecure-deserialization-taint
-    mode: taint
+  # Pattern mode (not taint): unserialize() of anything other than a constant
+  # literal is dangerous regardless of whether the source is visible in the same
+  # function — a value arriving as a parameter is just as attacker-reachable.
+  # Only a string-literal argument (a fixed, developer-controlled payload) is
+  # treated as safe.
+  - id: sa-insecure-deserialization
     languages: [php]
     severity: ERROR
-    message: User input reaches unserialize() (CWE-502, A08:2021).
+    message: unserialize() of a non-constant value (CWE-502, A08:2021).
     metadata:
       family: deserialization
       cwe: CWE-502
       owasp: A08:2021
-    pattern-sources:
-      - pattern: $_GET
-      - pattern: $_POST
-      - pattern: $_REQUEST
-      - pattern: $_COOKIE
-    pattern-sinks:
-      - pattern: unserialize(...)
+    patterns:
+      - pattern-either:
+          - pattern: unserialize($X)
+          - pattern: unserialize($X, ...)
+          # Indirect invocation of unserialize through call_user_func.
+          - pattern: call_user_func("unserialize", $X)
+          - pattern: call_user_func('unserialize', $X)
+          - pattern: call_user_func("unserialize", $X, ...)
+          - pattern: call_user_func('unserialize', $X, ...)
+      - pattern-not: unserialize("...")
+      - pattern-not: unserialize("...", ...)
 
   # --- SSRF (CWE-918) ----------------------------------------------------
   - id: sa-ssrf-taint
@@ -129,6 +168,7 @@ rules:
       - pattern: $_POST
       - pattern: $_REQUEST
       - pattern: $_COOKIE
+      - pattern: $_SERVER
     pattern-sanitizers:
       # A realpath()'d value is a contained local filesystem path, not an
       # attacker-chosen URL, so it cannot drive an outbound request.
@@ -156,6 +196,7 @@ rules:
       - pattern: $_POST
       - pattern: $_REQUEST
       - pattern: $_COOKIE
+      - pattern: $_SERVER
     pattern-sanitizers:
       # realpath() + a prefix check is the proper containment primitive;
       # basename() alone is NOT sufficient and is intentionally not listed.
@@ -165,6 +206,13 @@ rules:
           - pattern: file_get_contents($P)
           - pattern: fopen($P, ...)
           - pattern: readfile($P)
+          # Additional file-read sinks / aliases.
+          - pattern: file($P)
+          - pattern: file($P, ...)
+          - pattern: new SplFileObject($P, ...)
+          - pattern: new SplFileObject($P)
+          - pattern: new \SplFileObject($P, ...)
+          - pattern: new \SplFileObject($P)
           - pattern: include($P)
           - pattern: include_once($P)
           - pattern: require($P)
@@ -185,6 +233,7 @@ rules:
       - pattern: $_POST
       - pattern: $_REQUEST
       - pattern: $_COOKIE
+      - pattern: $_SERVER
     pattern-sanitizers:
       - pattern: htmlspecialchars(...)
       - pattern: htmlentities(...)
@@ -194,6 +243,9 @@ rules:
       - pattern-either:
           - pattern: echo $X;
           - pattern: print $X;
+          # printf-family writes user data straight to output.
+          - pattern: printf(...)
+          - pattern: vprintf(...)
 
   # --- XSS via Twig raw filter (CWE-79) ----------------------------------
   - id: sa-xss-twig-raw
@@ -223,6 +275,11 @@ rules:
       - pattern-either:
           - pattern: md5($P)
           - pattern: sha1($P)
+          # hash() alias forms of the same weak primitives.
+          - pattern: hash("md5", $P)
+          - pattern: hash('md5', $P)
+          - pattern: hash("sha1", $P)
+          - pattern: hash('sha1', $P)
       - metavariable-regex:
           metavariable: $P
           regex: (?i).*(pass|pwd|secret|token|credential|api_?key).*
@@ -237,7 +294,12 @@ rules:
       cwe: CWE-798
       owasp: A02:2021
     patterns:
-      - pattern: $K = "...";
+      - pattern-either:
+          - pattern: $K = "...";
+          # A hardcoded credential as the default of a null-coalesce — a
+          # backdoor default that ships in the artifact when config is absent.
+          - pattern: $K = $V ?? "...";
+          - pattern: '$K = $V ?: "...";'
       - metavariable-regex:
           metavariable: $K
           regex: (?i)^\$(api_?key|secret|password|passwd|pwd|private_?key|access_?key|auth_?token|client_?secret)$
@@ -257,6 +319,10 @@ rules:
       - pattern: $D->load(..., LIBXML_NOENT, ...)
       - pattern: simplexml_load_string(..., LIBXML_NOENT, ...)
       - pattern: simplexml_load_file(..., LIBXML_NOENT, ...)
+      # XMLReader is a separate streaming parser; enabling SUBST_ENTITIES turns
+      # on the same external-entity expansion as LIBXML_NOENT.
+      - pattern: $R->setParserProperty(XMLReader::SUBST_ENTITIES, true)
+      - pattern: $R->setParserProperty(\XMLReader::SUBST_ENTITIES, true)
     # NOTE: the explicit LIBXML_NOENT constant is the reliable signal; a
     # variable flags-arg is intentionally not asserted by the corpus.
 
@@ -275,7 +341,16 @@ rules:
       - pattern: $_POST
       - pattern: $_REQUEST
       - pattern: $_COOKIE
+      - pattern: $_SERVER
+    pattern-sanitizers:
+      # An integer-coerced value cannot carry a URL/host, so it cannot drive an
+      # open redirect (consistent with the SQLi/XSS/command sanitizer lists).
+      - pattern: (int)$X
+      - pattern: (integer)$X
+      - pattern: intval(...)
     pattern-sinks:
       - pattern-either:
           - pattern: header($H)
+          - pattern: header($H, ...)
           - pattern: 'header("Location: " . $H)'
+          - pattern: 'header("Location: " . $H, ...)'

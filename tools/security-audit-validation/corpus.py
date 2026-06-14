@@ -237,6 +237,91 @@ _STATIC_FIXTURES: tuple[Fixture, ...] = (
     Fixture(
         "SC-XXE-E2", "xxe", "xxe/edge_default_flags.php", "CWE-611", CLEAN, J_CLEAN
     ),
+    # --- Round-1 regression fixtures: each locks in a rule improvement the
+    # adversarial campaign forced (a new sink / source / sanitizer). Direct
+    # (intraprocedural) so the static lane deterministically asserts them.
+    Fixture(
+        "SC-SQLI-E4",
+        "sqli",
+        "sqli/edge_dbal_executequery.php",
+        "CWE-89",
+        FINDING,
+        J_FINDING,
+    ),
+    Fixture(
+        "SC-CMD-E3",
+        "command",
+        "command/edge_backtick.php",
+        "CWE-78",
+        FINDING,
+        J_FINDING,
+    ),
+    Fixture(
+        "SC-CMD-E4",
+        "command",
+        "command/edge_server_source.php",
+        "CWE-78",
+        FINDING,
+        J_FINDING,
+    ),
+    Fixture(
+        "SC-CMD-E5", "command", "command/edge_intcast.php", "CWE-78", CLEAN, J_CLEAN
+    ),
+    Fixture(
+        "SC-DESER-E3",
+        "deserialization",
+        "deserialization/edge_call_user_func.php",
+        "CWE-502",
+        FINDING,
+        J_FINDING,
+    ),
+    Fixture(
+        "SC-DESER-E4",
+        "deserialization",
+        "deserialization/edge_param_source.php",
+        "CWE-502",
+        FINDING,
+        J_FINDING,
+    ),
+    Fixture(
+        "SC-PATH-E3", "path", "path/edge_file_alias.php", "CWE-22", FINDING, J_FINDING
+    ),
+    Fixture("SC-XSS-E3", "xss", "xss/edge_printf.php", "CWE-79", FINDING, J_FINDING),
+    Fixture(
+        "SC-CRYPTO-E3",
+        "crypto",
+        "crypto/edge_hash_alias.php",
+        "CWE-327",
+        FINDING,
+        J_FINDING,
+    ),
+    Fixture(
+        "SC-SECRET-E3",
+        "secret",
+        "secret/edge_coalesce_default.php",
+        "CWE-798",
+        FINDING,
+        J_FINDING,
+    ),
+    Fixture(
+        "SC-XXE-E3", "xxe", "xxe/edge_xmlreader.php", "CWE-611", FINDING, J_FINDING
+    ),
+    Fixture(
+        "SC-REDIR-E3",
+        "redirect",
+        "redirect/edge_multiarg_header.php",
+        "CWE-601",
+        FINDING,
+        J_FINDING,
+    ),
+    Fixture(
+        "SC-REDIR-E4",
+        "redirect",
+        "redirect/edge_int_pagination.php",
+        "CWE-601",
+        CLEAN,
+        J_CLEAN,
+    ),
 )
 
 
@@ -265,7 +350,135 @@ _LOGIC_FIXTURES: tuple[Fixture, ...] = (
 )
 
 
-FIXTURES: tuple[Fixture, ...] = _STATIC_FIXTURES + _LOGIC_FIXTURES
+# --- Judge-lane blind spots (round 1) --------------------------------------
+# Adversarial fixtures the campaign generated that an OSS *static* engine cannot
+# soundly decide — interprocedural data flow (parameter sources, cross-method
+# sinks via a property bag), dynamic dispatch (variable function/method names,
+# string-built sink names), context-sensitivity (HTML-escaped value re-used in a
+# JS context), value-semantics name heuristics (is this md5'd / array-keyed
+# value actually a secret?), and non-constant flags (an OR-folded LIBXML_NOENT
+# bit, a concat-built `/e` modifier). They carry ``static_expect=None`` (the
+# static lane does not assert them) and stay in the corpus so the JUDGE lane —
+# and any future interprocedural engine — must reach the right verdict. See
+# docs/testing/security-audit-test-strategy.md "Static-lane blind spots".
+_JUDGE_LANE_FIXTURES: tuple[Fixture, ...] = (
+    Fixture(
+        "JL-CRYPTO-ALIAS",
+        "crypto",
+        "crypto/jl_hash_alias_laundered.php",
+        "CWE-327",
+        None,
+        J_FINDING,
+    ),
+    Fixture(
+        "JL-CRYPTO-CACHEKEY",
+        "crypto",
+        "crypto/jl_cachekey_public_id_clean.php",
+        "CWE-327",
+        None,
+        J_CLEAN,
+    ),
+    Fixture(
+        "JL-PATH-ALIAS",
+        "path",
+        "path/jl_alias_sink_interproc.php",
+        "CWE-22",
+        None,
+        J_FINDING,
+    ),
+    Fixture(
+        "JL-PATH-REALPATH",
+        "path",
+        "path/jl_realpath_discarded.php",
+        "CWE-22",
+        None,
+        J_FINDING,
+    ),
+    Fixture(
+        "JL-CODE-PREGE", "code", "code/jl_preg_replace_e.php", "CWE-94", None, J_FINDING
+    ),
+    Fixture(
+        "JL-CODE-TWIG", "code", "code/jl_twig_wrapper.php", "CWE-1336", None, J_FINDING
+    ),
+    Fixture(
+        "JL-CODE-ASSERT",
+        "code",
+        "code/jl_variable_assert.php",
+        "CWE-94",
+        None,
+        J_FINDING,
+    ),
+    Fixture(
+        "JL-DESER-DISPATCH",
+        "deserialization",
+        "deserialization/jl_dynamic_dispatch.php",
+        "CWE-502",
+        None,
+        J_FINDING,
+    ),
+    Fixture(
+        "JL-REDIR-PREFIX",
+        "redirect",
+        "redirect/jl_host_prefix_bypass.php",
+        "CWE-601",
+        None,
+        J_FINDING,
+    ),
+    Fixture(
+        "JL-SECRET-ARRAYKEY",
+        "secret",
+        "secret/jl_array_key.php",
+        "CWE-798",
+        None,
+        J_FINDING,
+    ),
+    Fixture(
+        "JL-SQLI-INTCAST",
+        "sqli",
+        "sqli/jl_intcast_helper_clean.php",
+        "CWE-89",
+        None,
+        J_CLEAN,
+    ),
+    Fixture(
+        "JL-SSRF-REALPATH",
+        "ssrf",
+        "ssrf/jl_realpath_offpath.php",
+        "CWE-918",
+        None,
+        J_FINDING,
+    ),
+    Fixture(
+        "JL-SSRF-DYNMETHOD",
+        "ssrf",
+        "ssrf/jl_guzzle_dynamic_method.php",
+        "CWE-918",
+        None,
+        J_FINDING,
+    ),
+    Fixture(
+        "JL-XSS-PRINTF",
+        "xss",
+        "xss/jl_printf_interproc.php",
+        "CWE-79",
+        None,
+        J_FINDING,
+    ),
+    Fixture("JL-XSS-JSCTX", "xss", "xss/jl_js_context.php", "CWE-79", None, J_FINDING),
+    Fixture(
+        "JL-XXE-NUMFLAG",
+        "xxe",
+        "xxe/jl_numeric_flag.php",
+        "CWE-611",
+        None,
+        J_FINDING,
+    ),
+)
+
+
+FIXTURES: tuple[Fixture, ...] = (
+    _STATIC_FIXTURES + _LOGIC_FIXTURES + _JUDGE_LANE_FIXTURES
+)
 
 DEP_CASES: tuple[DepCase, ...] = (
     DepCase("SC-DEP-P", "deps/vulnerable.composer.json", "guzzlehttp/guzzle", True),

@@ -146,6 +146,31 @@ All S1/S2 block exit; S3 fixed when confirmed; S4 corrected opportunistically.
   families yields zero new detection gaps** (the convergence condition).
 - The new CI job (`security-audit-validation`) is green; existing CI stays green.
 
+## Static-lane blind spots (judge-lane territory)
+
+The deterministic static lane is **intraprocedural** (semgrep OSS taint) plus
+**structural patterns**. The adversarial campaign (round 1) confirmed five
+classes it cannot soundly decide — these are routed to the **judge lane** (and,
+in the live skill, to dynamic reproduction), and are kept in the corpus as
+`JL-*` fixtures with `static_expect=None`:
+
+| Class | Example fixture | Why static cannot decide it |
+| --- | --- | --- |
+| **Interprocedural flow** | `path/jl_alias_sink_interproc.php`, `ssrf/jl_realpath_offpath.php`, `xss/jl_printf_interproc.php`, `redirect/jl_host_prefix_bypass.php` | the user source arrives as a parameter, or the sink is reached through a property bag / helper method — OSS taint does not cross function boundaries |
+| **Dynamic dispatch** | `ssrf/jl_guzzle_dynamic_method.php`, `deserialization/jl_dynamic_dispatch.php`, `code/jl_variable_assert.php` | the sink is a variable function/method name or a string-built identifier (`$client->$verb()`, `'un'.'serialize'`) — no fixed call site to match |
+| **Context-sensitivity** | `xss/jl_js_context.php` | `htmlspecialchars` is a valid HTML-context sanitizer but is insufficient when the value lands in a `<script>` JS context — deciding this needs output-context tracking |
+| **Value-semantics name heuristics** | `crypto/jl_hash_alias_laundered.php`, `crypto/jl_cachekey_public_id_clean.php`, `secret/jl_array_key.php` | whether an `md5`'d / array-keyed value is *actually* a secret is a semantic judgement; the name regex both misses laundered names (FN) and over-fires on public ids (FP) |
+| **Non-constant flags** | `xxe/jl_numeric_flag.php`, `code/jl_preg_replace_e.php` | the dangerous flag/modifier is an OR-folded integer or a concat-built `/e` — never the literal constant the pattern keys on |
+
+This is a deliberate, documented division of labour, not a coverage gap: the
+static lane gives a fast, deterministic, CI-gating backbone; the judge lane and
+live dynamic probing cover the cases that require reasoning or runtime context.
+Round 1 of the campaign also **closed nine** soundly-fixable gaps the same
+fixtures exposed (Doctrine DBAL `executeQuery`, the backtick operator, `$_SERVER`
+sources, `printf`/`file`/`SplFileObject`/`hash`/`call_user_func` sinks, the
+null-coalesce credential default, `XMLReader` entity substitution, and missing
+integer-coercion sanitizers) — each locked in by an `SC-*-E*` regression fixture.
+
 ## Loop protocol (subagent campaign)
 
 Repeat per round until the convergence condition holds:
