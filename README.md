@@ -13,7 +13,7 @@ claude plugin install php-backend-sdlc@vilnacrm-plugins
 
 | Plugin | Description |
 | --- | --- |
-| [php-backend-sdlc](plugins/php-backend-sdlc/) | Full-SDLC automation for PHP backend engineering: GitHub issue → BMAD planning → bmalph/Ralph implementation → multi-skill review + BMAD FR/NFR gate → QA → CI auto-fix → finished PR. |
+| [php-backend-sdlc](plugins/php-backend-sdlc/) | Full-SDLC automation for PHP backend engineering: GitHub issue → BMAD planning → bmalph/Ralph implementation → multi-skill review + BMAD FR/NFR gate → QA → CI auto-fix → finished PR. [Wiki](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Home) |
 
 ## Repository layout
 
