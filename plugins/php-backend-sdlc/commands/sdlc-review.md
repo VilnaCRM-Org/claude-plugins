@@ -193,9 +193,11 @@ EXACTLY ONCE for the whole loop (never per iteration, NFR-2) via the
 lens ledgers, the captured timing, and the existing `iteration <n>/5` counter:
 
 ```bash
-# Resolve the poster from make.post_review_findings (null → the bundled script),
-# the SAME null-substitution the per-lens Publish steps use — not a hardcoded path.
-POSTER="$(profile_make_target post_review_findings)"   # empty when the key is null
+# Resolve the poster from make.post_review_findings, the SAME null-substitution
+# the per-lens Publish steps use: read the profile value (common.sh profile_get),
+# falling back to the bundled script when the key is null (its shipped default).
+profile="$(profile_path)"
+POSTER="$(profile_get "$profile" make.post_review_findings "")"
 POSTER="${POSTER:-${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh}"
 "$POSTER" --conclusion \
   --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/security.json" \
@@ -204,6 +206,10 @@ POSTER="${POSTER:-${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh}"
   --pr "${PR:?PR number required}" --started-at "$REVIEW_STARTED_AT" \
   --ended-at "$REVIEW_ENDED_AT" --iterations "$ITERATION"
 ```
+
+(`profile_path` / `profile_get` are the `lib/common.sh` helpers the plugin
+scripts already source; a non-null `make.post_review_findings` maps to a custom
+publisher, otherwise the bundled `scripts/post-review-findings.sh` is used.)
 
 The poster is idempotent (hidden `<!-- sdlc-review:conclusion -->` marker) and
 DEGRADES (FR-9, NFR-3): the flag false/absent, `gh` absent, no PR, empty/missing
