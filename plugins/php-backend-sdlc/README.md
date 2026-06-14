@@ -43,6 +43,20 @@ that generalizes every command, agent, and skill to your codebase. All
 quality thresholds it carries are raise-only; see the
 [schema reference](docs/profile-schema.md) for every key.
 
+## How it works
+
+The plugin is built from four cooperating layers. **Commands**
+(`/sdlc`, `/sdlc-plan`, `/sdlc-review`, …) orchestrate: they sequence
+stages, enforce gates, and decide what runs next. **Agents** (the seven
+subagents) execute the work — implementing stories, reviewing diffs,
+probing the running service, fixing CI, resolving comments. **Skills**
+are the knowledge library: 22 PHP/DDD/architecture/security playbooks
+the agents apply on demand through applicability triage. The **project
+profile** (`.claude/php-sdlc.yml`) generalizes all three to your
+specific repository — make targets, framework facts, persistence
+mapper, quality floors — so the same commands, agents, and skills run
+unchanged across different PHP backends.
+
 ## Commands
 
 | Command | Stage | Purpose |
@@ -62,6 +76,36 @@ pr-comment-resolver, security-auditor) and a 22-skill library with
 applicability triage.
 
 ## Documentation
+
+The wiki is the browsable narrative guide; the `docs/` tree holds the
+terse in-repo reference that backs it (read the wiki first, drop into
+`docs/` for exact keys and tables).
+
+### Wiki
+
+Start with the [Wiki](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Home)
+for the full, browsable guide (the in-repo source lives under
+`plugins/php-backend-sdlc/wiki/`).
+Key pages:
+
+- [Getting-Started](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Getting-Started)
+  — install, first run, the loop end to end
+- [Commands](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Commands)
+  — every command, its stage, flags, and contract
+- [Agents](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Agents)
+  — the seven subagents and what each one executes
+- [Skills](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Skills)
+  — the 22-skill knowledge library and applicability triage
+- [Architecture](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Architecture)
+  — how commands, agents, skills, and the profile fit together
+- [Security-Audit](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Security-Audit)
+  — the authorized red-team / penetration-testing loop
+- [Troubleshooting](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Troubleshooting)
+  — common failures and their fixes
+- [FAQ](https://github.com/VilnaCRM-Org/claude-plugins/wiki/FAQ)
+  — frequently asked questions
+
+### Reference docs
 
 - [`/sdlc-setup` walkthrough](docs/setup-walkthrough.md) — the six setup
   steps, what each produces, `--refresh` semantics, and what a failing
