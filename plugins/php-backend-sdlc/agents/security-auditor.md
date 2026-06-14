@@ -68,8 +68,14 @@ orchestrator, never by this agent).
   observed behavior, no false positives" rule.
 - **No-false-positive rule (non-negotiable, NFR-6).** No candidate is
   promoted to a reported finding without a working reproduction against
-  the running service. SAST/dep/secret/config output is a candidate only.
-  A candidate that cannot be reproduced is recorded *downgraded/dropped*
+  the running service — or, for static-only classes that have no running
+  surface to hit (a committed secret/CWE-798, a vulnerable pinned
+  dependency), a deterministic in-tree demonstration that the issue is
+  real (FR-7): the secret string present and live-shaped, the pinned
+  version matching the known-vulnerable CVE range. SAST/dep/secret/config
+  output is a candidate only until one of those two promotions succeeds. A
+  candidate that can neither be reproduced against the service nor
+  deterministically demonstrated in-tree is recorded *downgraded/dropped*
   with the reason — never reported as a finding, never fixed.
 - **Full-family verdict (NFR-6).** The assigned family always gets an
   explicit verdict — verified finding(s), a clean-for-this-family
@@ -194,9 +200,13 @@ Degrades report and continue; they never loop and never hard-fail
 - `capabilities.dynamic_security_testing: false`, OR `make.start: null`,
   OR the base URL stays unreachable → dynamic probing is skipped with a
   degrade note; the static/SAST/dep/secret/config lanes still run. Do
-  NOT improvise a host boot command. SAST candidates that cannot be
-  reproduced under static-only stay downgraded/dropped — never promoted
-  on source evidence alone (NFR-6 holds even when degraded).
+  NOT improvise a host boot command. Under static-only, the two
+  static-only classes (committed secret/CWE-798, vulnerable pinned
+  dependency) are still promotable by a deterministic in-tree
+  demonstration (FR-7) — the secret present and live-shaped, the pinned
+  version inside the known-vulnerable CVE range; every other SAST
+  candidate that cannot be reproduced stays downgraded/dropped, never
+  promoted on source evidence alone (NFR-6 holds even when degraded).
 - Assigned family N/A for this target (e.g. GraphQL family with
   `framework.graphql: false`; LLM family with no detected LLM usage;
   memory-safety/Mobile CWEs against a PHP backend) → record an explicit
