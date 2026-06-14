@@ -282,14 +282,15 @@ SECURITY-AUDIT RUN REPORT
 parent §2 format):
 
 ```text
----SECURITY-AUDIT ESCALATION---
+=== SDLC ESCALATION ===
 stage: security-audit
-open families: <list>
-per-iteration finding counts: <list>
-last blocking finding: FINDING <family-id>-<n> (<cwe> / <owasp> / <severity>)
-recommended action: <next step for the owner>
-status: ESCALATED
----END---
+iteration: <n>/5
+exit_condition: zero new verified findings (all dispatched families CLEAN)
+status: NOT MET
+blocking_finding: FINDING <family-id>-<n> (<cwe> / <owasp> / <severity>)
+iteration_log: <one line per iteration: open families + candidates/reproduced/re-verified counts>
+recommended_action: <next step for the owner, e.g. route FINDING <id> to php-implementer>
+=== END ===
 ```
 
 ## Verification

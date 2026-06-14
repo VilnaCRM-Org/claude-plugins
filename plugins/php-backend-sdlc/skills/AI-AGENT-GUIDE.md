@@ -394,7 +394,7 @@ skills/
 
 If you encounter issues:
 
-1. **Read troubleshooting**: only `load-testing/` ships a `reference/` directory (including troubleshooting docs); `implementing-ddd-architecture/REFERENCE.md` and `code-organization/DIRECTORY-STRUCTURE.md` carry the detailed patterns for those skills
+1. **Read troubleshooting**: `load-testing/` and `security-audit/` each ship a `reference/` directory (load-testing's includes troubleshooting docs; security-audit's holds `owasp-catalog.md`, `attack-playbooks.md`, and `remediation-patterns.md`); `implementing-ddd-architecture/REFERENCE.md` and `code-organization/DIRECTORY-STRUCTURE.md` carry the detailed patterns for those skills
 2. **Check examples**: only `cache-management/` ships an `examples/` directory (complete working cache patterns); other skills inline their examples in `SKILL.md`
 3. **Review the host repository's agent guidelines** (its `AGENTS.md`/`CLAUDE.md`) for repo-specific conventions
 4. **Check the profile**: `.claude/php-sdlc.yml` resolves every logical target and capability flag

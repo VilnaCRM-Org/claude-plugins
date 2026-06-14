@@ -246,10 +246,15 @@ malicious files where the payload arrives as a file).
   client / URL-fetch sink under `<source_root>` (webhook callbacks,
   avatar/URL imports, link unfurling, PDF/HTML fetchers). Candidate = a
   user-controllable URL reaching an HTTP client without an allow-list.
-- **Dynamic probe:** Point the URL parameter at an internal-only target
-  the public client cannot reach (a container-internal service name or the
-  cloud metadata address), using only the profile-resolved local
-  environment:
+- **Dynamic probe:** Point the URL parameter at an internal-only target the
+  public client cannot reach — a container-internal service name or a benign
+  in-container listener you stood up — using only the profile-resolved local
+  environment. Do NOT target the live host/cloud instance-metadata endpoint
+  (e.g. the link-local `169.254.169.254` IMDS): it belongs to the real host,
+  not the disposable target, and reaching it would exfiltrate live credentials
+  — out of scope under boundary rules 1 (in-scope only) and 2 (no
+  exfiltration). Mimic IMDS with a local in-container stub if you must
+  illustrate it:
 
   ```bash
   curl -s -X POST -H 'Content-Type: application/json' \
