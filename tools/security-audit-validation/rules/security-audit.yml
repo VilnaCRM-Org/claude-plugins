@@ -32,10 +32,18 @@ rules:
       - pattern: $_REQUEST
       - pattern: $_COOKIE
       - pattern: $_SERVER
+      - pattern: filter_input(...)
+      - pattern: filter_input_array(...)
+      - pattern: getallheaders()
+      - pattern: apache_request_headers()
     pattern-sanitizers:
       - pattern: (int)$X
       - pattern: (integer)$X
       - pattern: intval(...)
+      # Driver-correct escaping/quoting neutralizes the value for SQL.
+      - pattern: $DB->quote(...)
+      - pattern: mysqli_real_escape_string(...)
+      - pattern: $DB->real_escape_string(...)
     pattern-sinks:
       - patterns:
           - pattern-either:
@@ -46,12 +54,17 @@ rules:
               - pattern: $OBJ->executeQuery($Q)
               - pattern: $OBJ->executeStatement($Q)
               - pattern: $OBJ->executeUpdate($Q)
+              # A prepared statement whose SQL is itself tainted prepares
+              # nothing — the injection is live before execute() is reached.
+              - pattern: $OBJ->prepare($Q)
               - pattern: mysqli_query(...)
+              - pattern: mysqli_prepare(...)
               - pattern: pg_query(...)
           - pattern-not: $OBJ->query("...")
           - pattern-not: $OBJ->exec("...")
           - pattern-not: $OBJ->executeQuery("...")
           - pattern-not: $OBJ->executeStatement("...")
+          - pattern-not: $OBJ->prepare("...")
 
   # --- OS command injection (CWE-78/77) ----------------------------------
   - id: sa-command-injection-taint
@@ -69,6 +82,10 @@ rules:
       - pattern: $_REQUEST
       - pattern: $_COOKIE
       - pattern: $_SERVER
+      - pattern: filter_input(...)
+      - pattern: filter_input_array(...)
+      - pattern: getallheaders()
+      - pattern: apache_request_headers()
     pattern-sanitizers:
       # Only escapeshellarg fully neutralizes an argument; escapeshellcmd is
       # intentionally NOT a sanitizer (it leaves argument injection open).
@@ -79,13 +96,20 @@ rules:
       - pattern: (integer)$X
       - pattern: intval(...)
     pattern-sinks:
-      - pattern-either:
-          - pattern: shell_exec(...)
-          - pattern: exec(...)
-          - pattern: system(...)
-          - pattern: passthru(...)
-          - pattern: proc_open(...)
-          - pattern: popen(...)
+      - patterns:
+          - pattern-either:
+              - pattern: shell_exec(...)
+              - pattern: exec(...)
+              - pattern: system(...)
+              - pattern: passthru(...)
+              - pattern: proc_open(...)
+              - pattern: popen(...)
+              # pcntl_exec replaces the process image with a named program —
+              # a command-execution sink that bypasses the shell entirely.
+              - pattern: pcntl_exec(...)
+          # proc_open with an ARRAY command argument does not invoke a shell,
+          # so shell-metacharacter injection does not apply.
+          - pattern-not: proc_open([...], ...)
 
   # --- OS command injection via the backtick operator (CWE-78) -----------
   # The backtick operator `...` is sugar for shell_exec() but is a distinct
@@ -120,6 +144,10 @@ rules:
       - pattern: $_REQUEST
       - pattern: $_COOKIE
       - pattern: $_SERVER
+      - pattern: filter_input(...)
+      - pattern: filter_input_array(...)
+      - pattern: getallheaders()
+      - pattern: apache_request_headers()
     pattern-sinks:
       - pattern-either:
           - pattern: eval(...)
@@ -150,8 +178,13 @@ rules:
           - pattern: call_user_func('unserialize', $X)
           - pattern: call_user_func("unserialize", $X, ...)
           - pattern: call_user_func('unserialize', $X, ...)
+          # yaml_parse with PHP-object support deserializes arbitrary objects.
+          - pattern: yaml_parse($X)
+          - pattern: yaml_parse($X, ...)
       - pattern-not: unserialize("...")
       - pattern-not: unserialize("...", ...)
+      - pattern-not: yaml_parse("...")
+      - pattern-not: yaml_parse("...", ...)
 
   # --- SSRF (CWE-918) ----------------------------------------------------
   - id: sa-ssrf-taint
@@ -169,15 +202,24 @@ rules:
       - pattern: $_REQUEST
       - pattern: $_COOKIE
       - pattern: $_SERVER
+      - pattern: filter_input(...)
+      - pattern: filter_input_array(...)
+      - pattern: getallheaders()
+      - pattern: apache_request_headers()
     pattern-sanitizers:
       # A realpath()'d value is a contained local filesystem path, not an
-      # attacker-chosen URL, so it cannot drive an outbound request.
+      # attacker-chosen URL, so it cannot drive an outbound request. An
+      # integer-coerced value cannot be a URL/host either.
       - pattern: realpath(...)
+      - pattern: (int)$X
+      - pattern: (integer)$X
+      - pattern: intval(...)
     pattern-sinks:
       - pattern-either:
           - pattern: file_get_contents($U)
           - pattern: fopen($U, ...)
           - pattern: curl_setopt($CH, CURLOPT_URL, $U)
+          - pattern: curl_setopt_array($CH, $U)
           - pattern: $CLIENT->request($M, $U, ...)
           - pattern: $CLIENT->get($U, ...)
 
@@ -197,10 +239,18 @@ rules:
       - pattern: $_REQUEST
       - pattern: $_COOKIE
       - pattern: $_SERVER
+      - pattern: filter_input(...)
+      - pattern: filter_input_array(...)
+      - pattern: getallheaders()
+      - pattern: apache_request_headers()
     pattern-sanitizers:
       # realpath() + a prefix check is the proper containment primitive;
-      # basename() alone is NOT sufficient and is intentionally not listed.
+      # basename() alone is NOT sufficient and is intentionally not listed. An
+      # integer-coerced value cannot carry a `../` traversal sequence.
       - pattern: realpath(...)
+      - pattern: (int)$X
+      - pattern: (integer)$X
+      - pattern: intval(...)
     pattern-sinks:
       - pattern-either:
           - pattern: file_get_contents($P)
@@ -209,6 +259,8 @@ rules:
           # Additional file-read sinks / aliases.
           - pattern: file($P)
           - pattern: file($P, ...)
+          - pattern: highlight_file($P)
+          - pattern: show_source($P)
           - pattern: new SplFileObject($P, ...)
           - pattern: new SplFileObject($P)
           - pattern: new \SplFileObject($P, ...)
@@ -234,6 +286,10 @@ rules:
       - pattern: $_REQUEST
       - pattern: $_COOKIE
       - pattern: $_SERVER
+      - pattern: filter_input(...)
+      - pattern: filter_input_array(...)
+      - pattern: getallheaders()
+      - pattern: apache_request_headers()
     pattern-sanitizers:
       - pattern: htmlspecialchars(...)
       - pattern: htmlentities(...)
@@ -246,6 +302,12 @@ rules:
           # printf-family writes user data straight to output.
           - pattern: printf(...)
           - pattern: vprintf(...)
+          # exit/die emit their string argument to the response body.
+          - pattern: exit($X)
+          - pattern: die($X)
+          # writing to the output stream is an echo by another name.
+          - pattern: file_put_contents("php://output", $X)
+          - pattern: file_put_contents('php://output', $X)
 
   # --- XSS via Twig raw filter (CWE-79) ----------------------------------
   - id: sa-xss-twig-raw
@@ -275,11 +337,18 @@ rules:
       - pattern-either:
           - pattern: md5($P)
           - pattern: sha1($P)
-          # hash() alias forms of the same weak primitives.
+          # hash() / hash_hmac() alias forms of the same weak primitives.
           - pattern: hash("md5", $P)
           - pattern: hash('md5', $P)
           - pattern: hash("sha1", $P)
           - pattern: hash('sha1', $P)
+          - pattern: hash_hmac("md5", $P, ...)
+          - pattern: hash_hmac('md5', $P, ...)
+          - pattern: hash_hmac("sha1", $P, ...)
+          - pattern: hash_hmac('sha1', $P, ...)
+          # crypt() with a weak/auto scheme on a credential.
+          - pattern: crypt($P)
+          - pattern: crypt($P, ...)
       - metavariable-regex:
           metavariable: $P
           regex: (?i).*(pass|pwd|secret|token|credential|api_?key).*
@@ -305,6 +374,24 @@ rules:
           regex: (?i)^\$(api_?key|secret|password|passwd|pwd|private_?key|access_?key|auth_?token|client_?secret)$
       - pattern-not: $K = "";
 
+  # --- Hardcoded credential assigned to a credential-named property -------
+  - id: sa-hardcoded-secret-property
+    languages: [php]
+    severity: ERROR
+    message: Hardcoded credential literal assigned to a property (CWE-798, A02:2021).
+    metadata:
+      family: secret
+      cwe: CWE-798
+      owasp: A02:2021
+    patterns:
+      - pattern-either:
+          - pattern: $O->$F = "...";
+          - pattern: $O->$F = $V ?? "...";
+      - metavariable-regex:
+          metavariable: $F
+          regex: (?i)^(api_?key|secret|password|passwd|pwd|private_?key|access_?key|auth_?token|client_?secret)$
+      - pattern-not: $O->$F = "";
+
   # --- XXE via LIBXML_NOENT (CWE-611) ------------------------------------
   - id: sa-xxe-noent
     languages: [php]
@@ -323,6 +410,8 @@ rules:
       # on the same external-entity expansion as LIBXML_NOENT.
       - pattern: $R->setParserProperty(XMLReader::SUBST_ENTITIES, true)
       - pattern: $R->setParserProperty(\XMLReader::SUBST_ENTITIES, true)
+      # DOMDocument::$resolveExternals = true re-enables external entity loading.
+      - pattern: $D->resolveExternals = true
     # NOTE: the explicit LIBXML_NOENT constant is the reliable signal; a
     # variable flags-arg is intentionally not asserted by the corpus.
 
@@ -342,6 +431,10 @@ rules:
       - pattern: $_REQUEST
       - pattern: $_COOKIE
       - pattern: $_SERVER
+      - pattern: filter_input(...)
+      - pattern: filter_input_array(...)
+      - pattern: getallheaders()
+      - pattern: apache_request_headers()
     pattern-sanitizers:
       # An integer-coerced value cannot carry a URL/host, so it cannot drive an
       # open redirect (consistent with the SQLi/XSS/command sanitizer lists).
