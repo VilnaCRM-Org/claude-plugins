@@ -13,3 +13,6 @@ _bmad-output/
 .ralph/
 bmalph/
 .claude/
+
+# BMAD planning scratch (workflow driver)
+specs/**/.bmad-plan.mjs
