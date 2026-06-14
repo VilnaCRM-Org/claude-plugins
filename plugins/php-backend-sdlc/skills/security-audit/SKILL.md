@@ -74,7 +74,8 @@ entry points with one identical body:
 - **Standalone** — invokable directly as `php-backend-sdlc:security-audit`
   against an authorized target.
 
-There is **no `/sdlc-security` command** — the command surface stays 8 (FR-2).
+There is **no dedicated security slash-command** — the command surface stays 8
+(FR-2); the security lens runs inside `/sdlc-review` triage or standalone.
 The skill **owns the loop** (triage → fan-out → find → verify → fix → regress
 → re-verify → loop); the `security-auditor` subagents are **find/verify only**;
 all code edits route through the existing `php-implementer`. Its culture is

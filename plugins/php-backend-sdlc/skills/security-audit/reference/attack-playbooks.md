@@ -92,7 +92,8 @@ operation/voter wiring.
 
 ## BOPLA / Mass assignment — Broken Object Property Level Authorization (API3:2023, CWE-915)
 
-**WSTG 4.2** — WSTG-BUSL-01 (Business Logic Data Validation), WSTG-ATHZ-04.
+**WSTG 4.2** — WSTG-BUSL-01 (Business Logic Data Validation),
+WSTG-ATHZ-02 (Bypassing Authorization Schema).
 **Tools** — `curl`, `jq`; Semgrep / Psalm for serializer-group wiring.
 
 - **Static lane (candidate):** Inspect the DTO / entity serialization
@@ -365,11 +366,13 @@ inventory aligns with WSTG-INFO-08.
 
 **WSTG 4.2** — `WSTG-CRYP-*` (Cryptography), WSTG-CRYP-03 (sensitive
 information sent via unencrypted channels), WSTG-CRYP-04 (weak algorithms).
-**Tools** — secret-scan (e.g. gitleaks/`git log -p` + entropy grep),
-Semgrep crypto rules, Grep; `curl`.
+**Tools** — secret-scan (gitleaks/trufflehog **filesystem mode**, e.g.
+`gitleaks dir`/`detect --no-git`, + entropy `grep`/`rg`), Semgrep crypto
+rules, Grep; `curl`. (The auditor has no `git` — scan the working tree, not
+history.)
 
-- **Static lane (candidate):** Run the secret-scan over the working tree
-  and git history for committed credentials/keys/tokens, and Semgrep crypto
+- **Static lane (candidate):** Run the secret-scan in filesystem mode over the
+  working tree for committed credentials/keys/tokens, and Semgrep crypto
   rules for weak primitives (ECB mode, MD5/SHA1 for security, hardcoded
   keys/IVs, `mt_rand()` for tokens). Candidate = a committed secret or a
   weak crypto primitive on a security-relevant path.
