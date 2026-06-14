@@ -199,12 +199,14 @@ tag + `sha` commit pin) so installs become reproducible per release while
 
 ## Publishing the wiki
 
-The wiki is authored in-repo under
-[`wiki/`](https://github.com/VilnaCRM-Org/claude-plugins/tree/main/plugins/php-backend-sdlc/wiki)
+The wiki is authored in-repo under `plugins/php-backend-sdlc/wiki/`
 so it is reviewed in PRs and gated by the `markdown-lint` CI job, then
-mirrored to the GitHub wiki remote. Wiki-internal links use the sibling
-`Slug.md` form (resolving both in the PR file view and on the published
-wiki); links into repo reference docs use absolute GitHub blob URLs.
+mirrored to the GitHub wiki remote by `scripts/publish-wiki.sh`.
+Wiki-internal links are written in the sibling `Slug.md` form so they
+resolve in the PR file view; the publish script strips the `.md` suffix
+when mirroring, because the GitHub wiki resolves page links by slug
+(`Slug`, not `Slug.md`). Links into repo reference docs use absolute
+GitHub blob URLs.
 
 ### The one-time UI seed
 

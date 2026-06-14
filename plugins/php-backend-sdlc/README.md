@@ -84,8 +84,8 @@ terse in-repo reference that backs it (read the wiki first, drop into
 ### Wiki
 
 Start with the [Wiki](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Home)
-for the full, browsable guide (the in-repo source lives at
-[wiki/Home.md](https://github.com/VilnaCRM-Org/claude-plugins/blob/main/plugins/php-backend-sdlc/wiki/Home.md)).
+for the full, browsable guide (the in-repo source lives under
+`plugins/php-backend-sdlc/wiki/`).
 Key pages:
 
 - [Getting-Started](https://github.com/VilnaCRM-Org/claude-plugins/wiki/Getting-Started)
