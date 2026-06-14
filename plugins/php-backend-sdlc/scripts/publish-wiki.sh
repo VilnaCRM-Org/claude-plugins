@@ -145,6 +145,22 @@ else
   for f in "${src_pages[@]}"; do
     cp -f "$f" "$CLONE_DIR/"
   done
+  # GitHub wiki resolves page links by slug WITHOUT a .md suffix; a
+  # [Title](Page.md) link 404s / falls through to repo content on the wiki.
+  # Strip .md from sibling wiki-page links in the PUBLISHED copies only — the
+  # in-repo source keeps .md so it browses correctly in the PR file view. The
+  # pattern matches bare slugs only (no slash/scheme), so absolute repo blob
+  # URLs like .../profile-schema.md are left untouched.
+  link_re='s/\]\(([A-Za-z0-9_-]+)\.md(#[^)]*)?\)/](\1\2)/g'
+  if command -v perl >/dev/null 2>&1; then
+    for f in "$CLONE_DIR"/*.md; do perl -i -pe "$link_re" "$f"; done
+    log_info "normalized sibling wiki links (stripped .md) for wiki resolution"
+  elif sed --version >/dev/null 2>&1; then
+    for f in "$CLONE_DIR"/*.md; do sed -E -i "$link_re" "$f"; done
+    log_info "normalized sibling wiki links (stripped .md) for wiki resolution"
+  else
+    log_warn "neither perl nor GNU sed found; wiki page links keep .md and may not resolve"
+  fi
 fi
 
 # --- stage, commit, push ----------------------------------------------------
