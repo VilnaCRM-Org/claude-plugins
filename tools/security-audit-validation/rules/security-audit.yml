@@ -1,0 +1,281 @@
+# Semgrep rule pack for the security-audit skill validation campaign.
+#
+# These rules model the *deterministic static lane* of the `security-auditor`
+# subagent's SAST pass. They run offline against the fixture corpus under
+# corpus/ with `--config` (no rules registry fetch). Each rule id is mapped back
+# to a dispatch family by corpus.py via the `family:` tag in `metadata`.
+#
+# Design notes:
+#  * Taint mode is used where a value must FLOW from a user source to a sink
+#    (so a value laundered through an intermediate variable is still caught,
+#    and a value coerced through a sanitizer like `(int)` is cleared).
+#  * Pattern mode is used where the SINK ITSELF is the signal regardless of
+#    immediate source (eval/unserialize of any value, weak-hash on a
+#    credential-named variable, a hardcoded secret literal, an XXE flag).
+#  * Clean fixtures are written so no taint reaches the sink (the value is
+#    rebuilt from a constant/allowlist or passed through a real sanitizer),
+#    so a correct rule stays silent on them.
+rules:
+  # --- SQLi / DQL (CWE-89) ------------------------------------------------
+  - id: sa-sqli-taint
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: User input reaches a SQL query string (CWE-89, A03:2021).
+    metadata:
+      family: sqli
+      cwe: CWE-89
+      owasp: A03:2021
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+    pattern-sanitizers:
+      - pattern: (int)$X
+      - pattern: (integer)$X
+      - pattern: intval(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $OBJ->query($Q)
+              - pattern: $OBJ->exec($Q)
+              - pattern: $OBJ->createQuery($Q)
+              - pattern: mysqli_query(...)
+              - pattern: pg_query(...)
+          - pattern-not: $OBJ->query("...")
+          - pattern-not: $OBJ->exec("...")
+
+  # --- OS command injection (CWE-78/77) ----------------------------------
+  - id: sa-command-injection-taint
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: User input reaches an OS command sink (CWE-78, A03:2021).
+    metadata:
+      family: command
+      cwe: CWE-78
+      owasp: A03:2021
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+    pattern-sanitizers:
+      # Only escapeshellarg fully neutralizes an argument; escapeshellcmd is
+      # intentionally NOT a sanitizer (it leaves argument injection open).
+      - pattern: escapeshellarg(...)
+    pattern-sinks:
+      - pattern-either:
+          - pattern: shell_exec(...)
+          - pattern: exec(...)
+          - pattern: system(...)
+          - pattern: passthru(...)
+          - pattern: proc_open(...)
+          - pattern: popen(...)
+
+  # --- Code injection / SSTI (CWE-94/1336) -------------------------------
+  - id: sa-code-injection-taint
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: User input reaches a code/template evaluation sink (CWE-94/1336, A03:2021).
+    metadata:
+      family: code
+      cwe: CWE-94
+      owasp: A03:2021
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+    pattern-sinks:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: assert(...)
+          - pattern: create_function(...)
+          - pattern: $T->createTemplate(...)
+
+  # --- Insecure deserialization (CWE-502) --------------------------------
+  - id: sa-insecure-deserialization-taint
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: User input reaches unserialize() (CWE-502, A08:2021).
+    metadata:
+      family: deserialization
+      cwe: CWE-502
+      owasp: A08:2021
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+    pattern-sinks:
+      - pattern: unserialize(...)
+
+  # --- SSRF (CWE-918) ----------------------------------------------------
+  - id: sa-ssrf-taint
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: User input reaches an outbound request sink (CWE-918, A10:2021/API7:2023).
+    metadata:
+      family: ssrf
+      cwe: CWE-918
+      owasp: A10:2021
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+    pattern-sanitizers:
+      # A realpath()'d value is a contained local filesystem path, not an
+      # attacker-chosen URL, so it cannot drive an outbound request.
+      - pattern: realpath(...)
+    pattern-sinks:
+      - pattern-either:
+          - pattern: file_get_contents($U)
+          - pattern: fopen($U, ...)
+          - pattern: curl_setopt($CH, CURLOPT_URL, $U)
+          - pattern: $CLIENT->request($M, $U, ...)
+          - pattern: $CLIENT->get($U, ...)
+
+  # --- Path traversal / LFI (CWE-22) -------------------------------------
+  - id: sa-path-traversal-taint
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: User input reaches a filesystem path sink without containment (CWE-22).
+    metadata:
+      family: path
+      cwe: CWE-22
+      owasp: A01:2021
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+    pattern-sanitizers:
+      # realpath() + a prefix check is the proper containment primitive;
+      # basename() alone is NOT sufficient and is intentionally not listed.
+      - pattern: realpath(...)
+    pattern-sinks:
+      - pattern-either:
+          - pattern: file_get_contents($P)
+          - pattern: fopen($P, ...)
+          - pattern: readfile($P)
+          - pattern: include($P)
+          - pattern: include_once($P)
+          - pattern: require($P)
+          - pattern: require_once($P)
+
+  # --- Reflected XSS (CWE-79) --------------------------------------------
+  - id: sa-xss-echo-taint
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: User input is echoed without output encoding (CWE-79, A03:2021).
+    metadata:
+      family: xss
+      cwe: CWE-79
+      owasp: A03:2021
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+    pattern-sanitizers:
+      - pattern: htmlspecialchars(...)
+      - pattern: htmlentities(...)
+      - pattern: (int)$X
+      - pattern: intval(...)
+    pattern-sinks:
+      - pattern-either:
+          - pattern: echo $X;
+          - pattern: print $X;
+
+  # --- XSS via Twig raw filter (CWE-79) ----------------------------------
+  - id: sa-xss-twig-raw
+    languages: [generic]
+    severity: WARNING
+    message: Twig `raw` filter disables output encoding (CWE-79).
+    metadata:
+      family: xss
+      cwe: CWE-79
+      owasp: A03:2021
+    paths:
+      include:
+        - "*.php"
+        - "*.twig"
+    pattern-regex: '\{\{[^}]*\|\s*raw'
+
+  # --- Weak cryptography on a credential (CWE-327/326) -------------------
+  - id: sa-weak-hash-credential
+    languages: [php]
+    severity: ERROR
+    message: Weak hash (md5/sha1) used on a credential-named value (CWE-327/326, A02:2021).
+    metadata:
+      family: crypto
+      cwe: CWE-327
+      owasp: A02:2021
+    patterns:
+      - pattern-either:
+          - pattern: md5($P)
+          - pattern: sha1($P)
+      - metavariable-regex:
+          metavariable: $P
+          regex: (?i).*(pass|pwd|secret|token|credential|api_?key).*
+
+  # --- Hardcoded credentials (CWE-798) -----------------------------------
+  - id: sa-hardcoded-secret
+    languages: [php]
+    severity: ERROR
+    message: Hardcoded credential literal (CWE-798, A02:2021).
+    metadata:
+      family: secret
+      cwe: CWE-798
+      owasp: A02:2021
+    patterns:
+      - pattern: $K = "...";
+      - metavariable-regex:
+          metavariable: $K
+          regex: (?i)^\$(api_?key|secret|password|passwd|pwd|private_?key|access_?key|auth_?token|client_?secret)$
+      - pattern-not: $K = "";
+
+  # --- XXE via LIBXML_NOENT (CWE-611) ------------------------------------
+  - id: sa-xxe-noent
+    languages: [php]
+    severity: ERROR
+    message: XML parsed with LIBXML_NOENT enables external entity expansion (CWE-611, A05:2021).
+    metadata:
+      family: xxe
+      cwe: CWE-611
+      owasp: A05:2021
+    pattern-either:
+      - pattern: $D->loadXML(..., LIBXML_NOENT, ...)
+      - pattern: $D->load(..., LIBXML_NOENT, ...)
+      - pattern: simplexml_load_string(..., LIBXML_NOENT, ...)
+      - pattern: simplexml_load_file(..., LIBXML_NOENT, ...)
+    # NOTE: the explicit LIBXML_NOENT constant is the reliable signal; a
+    # variable flags-arg is intentionally not asserted by the corpus.
+
+  # --- Open redirect (CWE-601) -------------------------------------------
+  - id: sa-open-redirect-taint
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: User input reaches a Location header (CWE-601, A01:2021).
+    metadata:
+      family: redirect
+      cwe: CWE-601
+      owasp: A01:2021
+    pattern-sources:
+      - pattern: $_GET
+      - pattern: $_POST
+      - pattern: $_REQUEST
+      - pattern: $_COOKIE
+    pattern-sinks:
+      - pattern-either:
+          - pattern: header($H)
+          - pattern: 'header("Location: " . $H)'

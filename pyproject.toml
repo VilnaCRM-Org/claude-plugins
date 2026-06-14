@@ -31,9 +31,12 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py310"
-# Only the Python toolkit is ours; everything else under the repo is plugin
+# Only the Python toolkits are ours; everything else under the repo is plugin
 # markdown/shell/JSON.
-include = ["tools/plugin-quality/**/*.py"]
+include = [
+    "tools/plugin-quality/**/*.py",
+    "tools/security-audit-validation/**/*.py",
+]
 
 [tool.ruff.lint]
 select = ["C90", "E", "F", "I"]
