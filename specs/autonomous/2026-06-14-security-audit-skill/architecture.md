@@ -127,7 +127,7 @@ Frontmatter: `name: security-audit` (= dir name, asserted by `component-counts.b
 8. **`## Verification`** — every family triaged; every reported finding carries reproduction + CWE + OWASP id + severity; a non-reproducible candidate is recorded downgraded/dropped; `make.ci` green at close; forbidden-suppression scan clean (inherited from `code-review` Step 6 / parent ADR-7).
 9. **`## Related Skills`** (closing) — relative links: `../code-review/SKILL.md` (suppression scan + per-comment ledger it reuses), `../testing-workflow/SKILL.md` (regression-test home), `../ci-workflow/SKILL.md` (`make.ci` gate), `../bmad-fr-nfr-review-gate/SKILL.md` (sibling gate lens). All `../`-relative (parent ADR-11 keeps links valid in the install cache).
 
-CI line-count check (NFR-9 AC): `wc -l skills/security-audit/SKILL.md` ≤ ~500; every enumeration (OWASP families, playbooks, remediations) lives in `reference/`, never inline.
+Line-count budget (NFR-9 AC): keep `wc -l skills/security-audit/SKILL.md` ≤ ~500 as an authoring guideline (verified in review — there is no `wc -l` CI gate); every enumeration (OWASP families, playbooks, remediations) lives in `reference/`, never inline.
 
 ## 5. Multi-Subagent Dispatch Design (FR-1, NFR-2, NFR-8 — resolves OQ-5)
 
@@ -205,7 +205,7 @@ FINDING <family-id>-<n>
 
 | File | FR | Contents | Edition labels (NFR-9 AC) |
 |---|---|---|---|
-| `reference/owasp-catalog.md` | FR-4 | the **full corpus** with per-family CWE mapping + a PHP-relevance / N/A-with-reason column; the single source the triage table draws from | Top 10 web 2003/2004/2007/2010/2013/2017/2021; API Top 10 2019/2023; LLM Top 10 2025 v2.0; Mobile 2014/2016/2024 (N/A-for-backend + reason); ASVS 5.0 (L1/L2/L3, **L2 default bar**); WSTG 4.2 (test-methodology index); Proactive Controls / Cheat Sheet Series (remediation source-of-truth pointer); CWE Top 25 2024 (ordered, PHP-relevance, memory-safety CWEs N/A-with-reason); SANS = same Top 25 taxonomy |
+| `reference/owasp-catalog.md` | FR-4 | the **full corpus** with per-family CWE mapping + a PHP-relevance / N/A-with-reason column; the single source the triage table draws from | Top 10 web 2003/2004/2007/2010/2013/2017/2021; API Top 10 2019/2023; LLM Top 10 2025 v2.0; Mobile 2014/2016/2024 (N/A-for-backend + reason); ASVS 5.0 (L1/L2/L3, **L2 default bar**); WSTG 4.2 (test-methodology index); Proactive Controls / Cheat Sheet Series (remediation source-of-truth pointer); CWE Top 25 2024 (ordered, PHP-relevance, memory-safety CWEs N/A-with-reason — the authoritative taxonomy, historically co-published as the "CWE/SANS Top 25"; SANS is the co-publisher of this same list, not a separate corpus) |
 | `reference/attack-playbooks.md` | FR-5 | per-family probing methodology, **WSTG-test-id mapped**; each entry states a concrete probe **and** the reproduce-against-running-service verification step; names the tool (`curl`/`jq`/GraphQL POST, Psalm `--taint-analysis`, Semgrep, `composer audit`, secret-scan); stack-generic (profile-resolved paths, no literals — NFR-4) | references WSTG 4.2 test ids |
 | `reference/remediation-patterns.md` | FR-6 | secure-by-default, root-cause fix per class, citing the OWASP cheat sheet + vetted library: Symfony SecurityBundle `auto` password hasher; Doctrine parameterized queries / QueryBuilder (never concatenated DQL); Twig auto-escaping (never `|raw` on user input); Symfony Serializer write-groups (mass-assignment); API Platform voters / `security` expressions (BOLA/BFLA); Paragon Initiative crypto guidance. States **"root-cause only, zero suppression"** + **"every fix gets a failing-then-passing regression test"** verbatim; recommends **no** suppression/baseline/config-relaxation/threshold-reduction anywhere (NFR-7) | cheat-sheet edition pointer |
 
@@ -227,7 +227,7 @@ Added to the **`capabilities`** table (after `capabilities.load_testing`):
 | --- | --- | --- | --- | --- |
 | `capabilities.dynamic_security_testing` | no | bool | `false` | Gates **dynamic** (live-service) security probing in `security-audit`; pairs with `make.start` the way `capabilities.load_testing` pairs with `make.load_tests`. When `false` (or `make.start: null`), dynamic probing degrades to skip-with-note; static/SAST/dep/secret/config lanes still run (NFR-3). |
 
-Annotated `# profile-example` block (FR-9 AC — both keys present): add `security: null` to the `make:` map and `dynamic_security_testing: false` to `capabilities:` in the canonical example. (Name resolved per SA-9: `capabilities.dynamic_security_testing` over `dast` — schema reads as prose, matches `load_testing`/`structurizr` style.) Both keys appear in the skill's and agent's `## Profile keys consumed` headers so `profile-keys-check` greps clean (FR-9 AC).
+Annotated `# profile-example` block (FR-9 AC — both keys present): add `security: null` to the `make:` map and `dynamic_security_testing: false` to `capabilities:` in the canonical example. (Name resolved per SA-9: `capabilities.dynamic_security_testing` over `dast` — schema reads as prose, matches `load_testing`/`structurizr` style.) Both keys appear in the **skill's** `## Profile keys consumed` header so `profile-keys-check` greps clean (that job scopes `skills/*/SKILL.md` only, not agents — FR-9 AC); they are also listed in the agent's matching header for prose parity, though the agent header is not what the CI job checks.
 
 ## 9. Integration Edits (FR-10)
 
@@ -241,7 +241,7 @@ Annotated `# profile-example` block (FR-9 AC — both keys present): add `securi
 | `README.md` | component counts (6→7 agents, 21→22 skills) wherever stated | FR-10 AC: no stale count |
 | parent `specs/.../2026-06-09-…/architecture.md` | §1.1 tree `agents/` (add `security-auditor.md`) + `skills/` (add `security-audit/`); §3 agent matrix gains a `security-auditor \| opus \| Bash, Read, Glob, Grep` row; counts "6 subagents"→7, "21 skills"→22 | FR-10: NFR-1 counts consistent across the plugin tree |
 
-This feature's **own PRD NFR-1** already states 8/7/22 (verified in `prd.md`). The `generalization-audit` CI job (parent §6) runs over all NEW files (skill, agent, reference, schema edits) — the denylist (`VilnaCRM` outside manifests, `user-service`, `Mongo[A-Z]\w*Repository`, `AppRunner`, `src/User`, `src/OAuth`, workspace.dsl container names) must not appear outside `# profile-example` fences (NFR-4 AC).
+This feature's **own PRD NFR-1** already states 8/7/22 (verified in `prd.md`). The `generalization-audit` CI job (parent §6) scopes `skills/ commands/ agents/ scripts/` only — so it covers the new skill, agent, and `reference/` files but **not** the `docs/profile-schema.md` edits (which fall outside its `find` roots; schema hygiene there is enforced by review, not this job). Across the files it does cover, the denylist (`VilnaCRM` outside manifests, `user-service`, `Mongo[A-Z]\w*Repository`, `AppRunner`, `src/User`, `src/OAuth`, workspace.dsl container names) must not appear outside `# profile-example` fences (NFR-4 AC).
 
 ## 10. Error Handling & Degrade Matrix (delta — extends parent §8)
 
@@ -274,5 +274,5 @@ Rule (inherits parent NFR-4): degrade paths never loop and never hard-fail; only
 ## 12. Validation (self-check against PRD release gate §4)
 
 - FR-1..10 each map to a § here (FR-1→§4/§5, FR-2→§2, FR-3→§3, FR-4..6→§7, FR-7→§5.2/SA-4, FR-8→§5.5/§6/SA-6, FR-9→§8, FR-10→§9). NFR-1..9 each map (NFR-1→§9, NFR-2→§5.3, NFR-3→§10, NFR-4→§7/§9, NFR-5→§3/SA-10, NFR-6→§5.2/§5.1, NFR-7→§4.6/§7, NFR-8→§5.1/§5.2, NFR-9→§4/§7).
-- CI-automated ACs are covered by existing jobs unchanged in shape: `component-counts.bats` (8/7/22), `generalization-audit` (new files), markdownlint + SKILL line-count (NFR-9), `profile-keys-check` (both new keys declared in skill+agent headers and documented in schema). No new CI job is required — the deltas fit the parent §6 matrix.
+- CI-automated ACs are covered by existing jobs unchanged in shape: `component-counts.bats` (8/7/22); `generalization-audit` (the new skill, agent, and `reference/` files — it scopes `skills/ commands/ agents/ scripts/`, not `docs/`); `markdown-lint` (NFR-9 markdown hygiene); `profile-keys-check` (the new keys declared in the **skill's** `## Profile keys consumed` header and documented in schema — that job scopes `skills/*/SKILL.md` only). The SKILL ≤ ~500-line bound (NFR-9) is an **authoring budget enforced in review, not a CI gate** — there is no `wc -l` line-count job. No new CI job is required — the deltas fit the parent §6 matrix.
 - Every OQ resolved: OQ-1→SA-9/§8, OQ-2→SA-2, OQ-3→SA-7, OQ-4→SA-6, OQ-5→SA-5/§6, OQ-6→SA-8.

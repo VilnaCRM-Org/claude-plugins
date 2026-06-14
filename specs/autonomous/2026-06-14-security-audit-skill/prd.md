@@ -20,7 +20,7 @@ Add the plugin's missing **adversarial security lens** to the existing `php-back
 ### 2.1 The skill — `skills/security-audit/SKILL.md`
 
 **FR-1 — `security-audit` skill, adversarial multi-subagent red-team loop** (G1, G2, G3, G4)
-A new triaged skill loadable as `php-backend-sdlc:security-audit`, kept under ~500 lines, in the verified skill format (YAML frontmatter `name`/`description` + `## Profile keys consumed` + Context/Task/Success-Criteria/Steps/Constraints/Verification, relative cross-links to its `reference/` files). It reads `.claude/php-sdlc.yml` at runtime (no per-repo rendering) and runs the canonical security loop:
+A new triaged skill loadable as `php-backend-sdlc:security-audit`, kept under ~500 lines, in the verified skill format (YAML frontmatter `name`/`description`, then `## Profile keys consumed` as the **first H2 of the body** — `profile-keys-check` parses the section between that heading and the next H2 — followed by Context/Task/Success-Criteria/Steps/Constraints/Verification, relative cross-links to its `reference/` files). It reads `.claude/php-sdlc.yml` at runtime (no per-repo rendering) and runs the canonical security loop:
 
 1. **Triage** — for every OWASP family in `reference/owasp-catalog.md`, record an explicit verdict: PROBE or N/A-with-reason (LLM family gated on detected LLM usage; OWASP Mobile and memory-safety CWEs N/A-with-reason for managed PHP). No silent skips.
 2. **Fan-out** — dispatch one `security-auditor` subagent per PROBE family in parallel (BOLA/IDOR, BOPLA/mass-assignment, BFLA, SQLi, SSTI, deserialization, SSRF, auth/session, misconfiguration, vulnerable deps, secrets, file upload, rate/resource, GraphQL-when `framework.graphql`, LLM-when-detected).
@@ -28,7 +28,7 @@ A new triaged skill loadable as `php-backend-sdlc:security-audit`, kept under ~5
 4. **Fix → regression-test** — the skill drives root-cause, secure-by-default fixes through `php-implementer`; each fix carries a failing-then-passing regression test.
 5. **Re-verify → loop** — the affected family re-verifies; only still-open families re-dispatch; the loop is bounded `MAX_ITERATIONS=5` (NFR-2) and exits when an iteration yields zero new verified findings, or escalates on breach.
 
-**AC:** A dry-run prompt walk-through shows the triage→fan-out→find→verify→fix→regress→re-verify→loop sequence, the per-family verdict table, the `MAX_ITERATIONS=5` counter, and the zero-new-findings exit condition; the skill loads as `php-backend-sdlc:security-audit`; SKILL.md is ≤ ~500 lines (CI line-count check) and every enumeration is delegated to a `reference/` file.
+**AC:** A dry-run prompt walk-through shows the triage→fan-out→find→verify→fix→regress→re-verify→loop sequence, the per-family verdict table, the `MAX_ITERATIONS=5` counter, and the zero-new-findings exit condition; the skill loads as `php-backend-sdlc:security-audit`; SKILL.md is ≤ ~500 lines (authoring budget verified in review — no `wc -l` CI gate exists) and every enumeration is delegated to a `reference/` file.
 
 **FR-2 — Placement within the SDLC** (G6)
 `security-audit` is a **skill, not a new command** (no `/sdlc-security` surface). It is triaged inside the existing verification gate (Stage 4 `/sdlc-review`) — `/sdlc-review`'s applicability triage records an EXECUTE-or-NOT-APPLICABLE verdict for it like every other skill, and it may be invoked standalone. It owns the find→verify→fix→regress→loop; `security-auditor` subagents are find/verify only; code edits route through `php-implementer`.
@@ -75,8 +75,8 @@ Verified findings drive suppression-free, secure-by-default fixes through `php-i
 
 **FR-9 — New profile keys in `docs/profile-schema.md`** (G4, G6)
 Two minimal keys added following existing conventions:
-- `make.security` — a **nullable** row in the required `make` map for the repo's own security/SAST suite (e.g. `make security`); `null` ⇒ the plugin runs its bundled/static fallback or degrades that stage with a note, exactly mirroring `make.ai_review_loop`/`make.pr_comments`/`make.fr_nfr_gate` precedent.
-- a `capabilities.*` boolean gating **dynamic** security testing (final name per architecture, leaning `capabilities.dynamic_security_testing`), pairing with `make.start` the way `capabilities.load_testing` pairs with `make.load_tests`. When false (or `make.start: null`), dynamic probing degrades to skip-with-note; static/SAST/dep/secret/config still run.
+- `make.security` — a **nullable** row in the required `make` map for the repo's own security/SAST suite (e.g. `make security`); `null` ⇒ the plugin runs its **bundled static lane** (Psalm `--taint-analysis` / Semgrep / `composer audit` / secret-scan) directly through the container `make`/`docker compose exec php` surface (no new `scripts/` file — SA-2), exactly mirroring the `make.ai_review_loop`/`make.pr_comments`/`make.fr_nfr_gate` null-substitution precedent.
+- `capabilities.dynamic_security_testing` — a boolean gating **dynamic** security testing (name resolved in architecture, SA-9), pairing with `make.start` the way `capabilities.load_testing` pairs with `make.load_tests`. When false (or `make.start: null`), dynamic probing degrades to skip-with-note; static/SAST/dep/secret/config still run.
 Both keys are documented in `docs/profile-schema.md` (table row + annotated `# profile-example` block) so the `profile-keys-check` CI job, which greps each skill's `## Profile keys consumed` header against that page, passes.
 **AC:** `docs/profile-schema.md` lists both new keys with required/nullable marking and default, and the `# profile-example` block carries them; the skill's `## Profile keys consumed` header lists both; `profile-keys-check` is green (a skill key absent from the schema page fails CI).
 
@@ -118,14 +118,14 @@ Apply, in one consistent change, all count and guide deltas for the new skill (2
 **AC:** A run shows N/A families excluded before fan-out, SAST-first candidate filtering documented, and the re-dispatch set shrinking to only still-open families across iterations.
 
 **NFR-9 — Docs / SKILL line bound** (G6): SKILL.md stays under ~500 lines with all enumerations delegated to `reference/`; the three reference files carry edition labels; the two new profile keys and the new skill/agent are documented in `docs/profile-schema.md` and the two meta-guides.
-**AC:** `wc -l skills/security-audit/SKILL.md` ≤ ~500 (CI line-count check); each reference file carries its edition labels; markdownlint passes; both new profile keys documented.
+**AC:** `wc -l skills/security-audit/SKILL.md` ≤ ~500 (authoring budget verified in review — no `wc -l` CI gate exists); each reference file carries its edition labels; markdownlint passes; both new profile keys documented.
 
 ## 4. Acceptance Criteria and Release Gate
 
 Acceptance criteria are embedded per requirement above; each **AC:** block is the binding, testable criterion for its FR/NFR. The release gate for this feature requires all of:
 
 1. All FR ACs demonstrated (FR-1..10), with a seeded-vulnerability evidence run documenting find→verify→fix→regress→re-verify→loop (FR-7/FR-8/G1/G3).
-2. CI-automated NFR ACs green: NFR-1 (component counts 8/7/22 via `component-counts.bats`), NFR-4 (generalization audit over the new files), NFR-9 (SKILL line-count + markdownlint), FR-9 (`profile-keys-check`) — all in the existing plugin CI.
+2. CI-automated NFR ACs green: NFR-1 (component counts 8/7/22 via `component-counts.bats`), NFR-4 (generalization audit over the new files), NFR-9 (markdownlint; the SKILL ≤ ~500-line budget is review-verified, not CI-gated), FR-9 (`profile-keys-check`, which scopes `skills/*/SKILL.md`) — all in the existing plugin CI.
 3. Run-documented NFR ACs evidenced: NFR-2 (forced-loop stops at 5 with report), NFR-3 (three degrade environments), NFR-5 (authorized-boundary framing present, no out-of-scope action), NFR-6 (per-family verdict + reproduction on every finding), NFR-7 (zero suppressions, regression test per fix), NFR-8 (triage-first fan-out shrinking).
 4. Traceability matrix (§5) verified complete in the implementation-readiness check — no orphan requirement, no uncovered goal.
 
@@ -164,7 +164,7 @@ Reverse check: every FR/NFR appears in at least one goal row (FR-1..10, NFR-1..9
 ## 8. Open Questions for Architecture
 
 1. **Capability key name (OQ-1):** `capabilities.dynamic_security_testing` vs `capabilities.dast` vs reusing an existing flag — minimal-surface schema decision; also finalize the `make.security` schema-table wording.
-2. **`make.security` null fallback (OQ-2):** ship a bundled minimal security script (à la `ai-review-loop.sh`) under `scripts/`, or degrade entirely? Decides whether a `make.security`-null repo still gets SAST and the `scripts/` surface delta.
+2. **`make.security` null fallback (OQ-2) — RESOLVED (architecture SA-2):** `null` ⇒ the plugin runs its bundled static lane (Psalm `--taint-analysis` / Semgrep / `composer audit` / secret-scan) directly through the container `make`/`docker compose exec php` surface — no new `scripts/` file is vendored. A `make.security`-null repo still gets full static SAST/dep/secret/config coverage; only dynamic probing is gated separately (by `capabilities.dynamic_security_testing` / `make.start`). See FR-9 and NFR-3.
 3. **LLM-family gating signal (OQ-3):** detect target LLM usage via composer deps, `clean-architecture-llm` artifacts, or a profile flag — to switch the LLM Top 10 family on/off.
 4. **Loop coupling with `make.ci` (OQ-4):** full `make.ci` per iteration (expensive) vs affected tests + family re-verify with one final `make.ci` (token/time vs safety trade-off).
 5. **Fix-routing contract (OQ-5):** the exact hand-off shape from `security-auditor` finding → skill → `php-implementer` edit → regression test → family re-verify (ADR for A2).
