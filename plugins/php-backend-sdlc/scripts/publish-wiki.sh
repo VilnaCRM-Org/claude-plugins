@@ -4,8 +4,8 @@
 # The canonical wiki source lives in the repository at
 #   plugins/php-backend-sdlc/wiki/*.md
 # and is published to the project's GitHub wiki, which is itself a separate
-# git repository at:
-#   https://github.com/VilnaCRM-Org/claude-plugins.wiki.git
+# git repository at <owner>/<repo>.wiki.git — derived automatically from this
+# checkout's `origin` remote (override with the WIKI_REMOTE env var).
 #
 # ONE-TIME SEED REQUIREMENT
 #   GitHub does NOT create the wiki repo until the wiki has at least one
@@ -31,20 +31,34 @@
 #               (no commit, no push).
 #
 # ENVIRONMENT
-#   WIKI_REMOTE   Override the wiki git remote URL (default:
-#                 https://github.com/VilnaCRM-Org/claude-plugins.wiki.git).
+#   WIKI_REMOTE   Override the wiki git remote URL (default: derived from the
+#                 `origin` remote as https://github.com/<owner>/<repo>.wiki.git).
 #
 # Authentication for the push uses your existing git credentials (HTTPS
 # token helper or an SSH-rewritten URL via WIKI_REMOTE).
 set -euo pipefail
 
 # --- configuration ----------------------------------------------------------
-WIKI_REMOTE="${WIKI_REMOTE:-https://github.com/VilnaCRM-Org/claude-plugins.wiki.git}"
-
 # Source dir is resolved relative to this script, so the script works from any
 # cwd: <script_dir>/../wiki holds the canonical *.md pages.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WIKI_SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/wiki"
+
+# Derive the wiki remote from this checkout's origin remote so the script is
+# repo-agnostic: <owner>/<repo>.git -> https://github.com/<owner>/<repo>.wiki.git
+# (override by exporting WIKI_REMOTE).
+derive_wiki_remote() {
+  local url path
+  url="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null)" \
+    || die "no 'origin' remote found; set WIKI_REMOTE explicitly"
+  case "$url" in
+    git@github.com:*)       path="${url#git@github.com:}" ;;
+    ssh://git@github.com/*) path="${url#ssh://git@github.com/}" ;;
+    https://github.com/*)   path="${url#https://github.com/}" ;;
+    *) die "unsupported origin URL '$url'; set WIKI_REMOTE explicitly" ;;
+  esac
+  printf 'https://github.com/%s.wiki.git\n' "${path%.git}"
+}
 
 # --- logging ----------------------------------------------------------------
 log_info()  { printf '[php-sdlc][INFO] %s\n' "$*"; }
@@ -75,6 +89,9 @@ trap cleanup EXIT
 # --- preflight --------------------------------------------------------------
 command -v git >/dev/null 2>&1 || die "git not found on PATH"
 [[ -d "$WIKI_SRC_DIR" ]] || die "wiki source dir not found: $WIKI_SRC_DIR"
+
+# Resolve the wiki remote (env override wins; otherwise derive from origin).
+WIKI_REMOTE="${WIKI_REMOTE:-$(derive_wiki_remote)}"
 
 # Collect the source pages up front so an empty source is caught before any
 # network work. Nullglob keeps the glob from matching a literal '*.md' when
