@@ -55,8 +55,17 @@ try:
     data = json.load(open(sys.argv[1]))
 except Exception:
     sys.exit(0)
+# A crafted composer.json may have non-object require/require-dev (or a
+# non-object root); coerce to {} so a malformed repo degrades to "absent"
+# instead of an AttributeError that would abort profile generation.
+if not isinstance(data, dict):
+    sys.exit(0)
 pkg = sys.argv[2]
-val = data.get('require', {}).get(pkg) or data.get('require-dev', {}).get(pkg)
+req = data.get('require')
+req = req if isinstance(req, dict) else {}
+dev = data.get('require-dev')
+dev = dev if isinstance(dev, dict) else {}
+val = req.get(pkg) or dev.get(pkg)
 if val:
     print(val)
 PYEOF
