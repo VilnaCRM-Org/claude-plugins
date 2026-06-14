@@ -494,6 +494,16 @@ WSTG application-DoS section.
   authorization gap on the limiter. Verify against a **non-fuzz env boot**
   (a CI/schemathesis profile that swaps in a no-op limiter will hide this
   entirely — see Cross-family notes on boot env).
+- **Enforcement parity across protocol doors (CWE-307, incomplete coverage):**
+  a throttle (or any guard) on the REST path of a sensitive handler is often
+  MISSING on the GraphQL mutation that reaches the SAME handler (or vice-versa).
+  When a limiter/guard is keyed by request path or mutation name, list every
+  protocol surface to each guarded handler (REST operation + GraphQL mutation +
+  message consumer) and confirm the same limiter/guard fires on ALL of them. A
+  GraphQL mutation-to-limiter map that omits a family the REST resolver covers
+  (e.g. 2FA / recovery-code mutations) is a brute-force / lockout bypass even
+  when the REST door is correctly throttled. The same parity check applies to
+  BFLA authorization guards and CSRF tokens.
 
 ## GraphQL — introspection / deep query / batching (CWE-770 / CWE-400 / CWE-639)
 
