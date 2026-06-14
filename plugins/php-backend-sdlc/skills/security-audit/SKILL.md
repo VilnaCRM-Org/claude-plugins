@@ -35,8 +35,16 @@ boundary rules are a hard contract, restated here and in
 and enforced at the Allowed-actions / Constraints level (a forbidden action,
 not advisory prose):
 
-1. **In-scope target only** — probe ONLY the profile-resolved local service
-   (the target mapped by `make.start`); never any host or URL outside it.
+1. **In-scope target only (verified, not assumed)** — probe ONLY the
+   profile-resolved local service (the base URL of the `make.start`-booted
+   service). The boundary is a checkable invariant, not just whatever URL was
+   passed: BEFORE any dynamic probe, verify the target host resolves to
+   loopback (`127.0.0.0/8`, `::1`), an RFC1918/private range (`10.0.0.0/8`,
+   `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), or a known
+   container/compose network name. If it does not, **refuse** — skip dynamic
+   probing with a note and record a boundary-violation; never probe a
+   public, remote, or third-party host even if one is supplied in the
+   dispatch.
 2. **No exfiltration** — never copy data, secrets, or credentials out of the
    disposable container instance.
 3. **Mutate via the API only** — change state only through the service's own
@@ -125,14 +133,24 @@ CWE/OWASP-id mappings; do not re-enumerate families here.
 
 ### 5.2 Fan-out (parallel red-team)
 
-Dispatch **one `security-auditor` subagent per PROBE family, in parallel** —
-the proven parallel-`php-implementer` idiom (no new infrastructure). The
-orchestrator issues N `Task`-tool dispatches in one turn. Each dispatch passes:
+First, **boot the service** when dynamic testing is in scope: if
+`capabilities.dynamic_security_testing` is true and `make.start` is non-null,
+the orchestrator boots the service via the `make.start` target and captures its
+in-scope base URL (loopback/private/container host per boundary rule 1). If the
+capability is false or `make.start` is null, dynamic probing degrades to
+skip-with-note and only the static lanes run — no base URL is passed.
+
+Then dispatch **one `security-auditor` subagent per PROBE family, in
+parallel** — the proven parallel-`php-implementer` idiom (no new
+infrastructure). The orchestrator issues N `Task`-tool dispatches in one turn.
+Each dispatch passes:
 
 - the assigned OWASP family id and its
   [`reference/attack-playbooks.md`](reference/attack-playbooks.md) entry;
 - the report contract (the finding-record schema in **Format** below);
 - the current iteration number from this loop's `MAX_ITERATIONS=5` guard;
+- the resolved base URL of the booted in-scope service (omitted when dynamic
+  testing is degraded — the auditor then runs static lanes only);
 - on re-dispatch, the prior ledger for that family.
 
 Resolve the family set and its profile gates from

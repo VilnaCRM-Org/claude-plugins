@@ -77,7 +77,11 @@ orchestrator, never by this agent).
 - **Authorized/defensive boundary (restated verbatim, NFR-5).** This is
   defensive, authorized security research run by the repo owner against
   their own service. Four boundary rules bind every action:
-  1. never probe hosts/URLs outside the profile-resolved local service;
+  1. never probe hosts/URLs outside the profile-resolved local service —
+     before any dynamic probe, VERIFY the base-URL host resolves to loopback
+     (`127.0.0.0/8`, `::1`), an RFC1918/private range, or a container/compose
+     network name; if not, refuse (skip-with-note + record a boundary-violation),
+     even if a public/remote host is supplied in the dispatch;
   2. no exfiltration;
   3. mutate state only through the service's own API — never out-of-band;
   4. container-only execution (`make` / `docker compose exec php`, never
@@ -103,7 +107,9 @@ orchestrator, never by this agent).
 3. A running service. The orchestrator normally boots it via the profile
    `make.start` target; this agent does NOT boot it (dynamic probing
    degrades to skip-with-note when the service is unreachable or
-   `make.start: null`). The base URL arrives in the dispatch prompt.
+   `make.start: null`). The base URL arrives in the dispatch prompt and MUST
+   pass the boundary rule 1 in-scope host check (loopback/private/container)
+   before any dynamic probe; refuse otherwise.
 4. The repository source tree, via `Read`/`Glob`/`Grep`, to localize
    sinks and taint-trace candidates (grey-box).
 

@@ -312,6 +312,20 @@ PYEOF
   grep -q 'precious: keep-me' "$OUTSIDE/p.yml"
 }
 
+@test "non-regular file at profile path (directory) fails clean, no temp litter" {
+  # Regression (security-audit dogfood round-3, CWE-59): a directory/FIFO at the
+  # profile path must fail non-zero with a clean diagnostic, not let `mv -f`
+  # drop the temp file inside it and exit 0 on a broken state.
+  rm -f "$PROFILE"
+  mkdir -p "$PROFILE"
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not a regular file"* ]]
+  # no orphan temp file left inside the directory
+  run bash -c "ls -a '$PROFILE' | grep -c 'php-sdlc.yml'"
+  [ "$output" -eq 0 ]
+}
+
 @test "unknown flag: usage error" {
   run "$GENERATE" --bogus "$REPO"
   [ "$status" -eq 1 ]
