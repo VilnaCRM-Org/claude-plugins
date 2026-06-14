@@ -237,6 +237,24 @@ malicious files where the payload arrives as a file).
   object is instantiated/processed (observable state change or type-driven
   behavior) rather than rejected. Record the payload and the observed
   effect; do not run a destructive gadget chain.
+- **Async / message-queue worker ingestion (do NOT only probe HTTP entry
+  points, CWE-502):** a message consumer deserializes the queue body just like
+  an HTTP endpoint deserializes a request — and it is easy to miss because the
+  sink is a worker, not a controller. Audit the messaging config (e.g.
+  `config/packages/messenger.yaml` / `framework.messenger`): for EVERY transport,
+  is an explicit JSON/safe `serializer:` set, or is there a
+  `default_serializer` override? A transport with neither falls back to the
+  **native PHP serializer** (`unserialize()` on the message body). Flag any
+  transport that (a) lacks a safe serializer AND (b) is backed by an
+  externally-writable broker (SQS/Redis/AMQP DSN) as a CWE-502 candidate — a
+  party who can enqueue controls a PHP object graph fed to `unserialize()`
+  (POP-chain / object injection). Map routed message classes to their handlers
+  to localize the object graph. Reproduce (authorized, local broker only) by
+  publishing a benign native-PHP-serialized object to the local queue and
+  confirming the consumer deserializes it (observable handler side effect), no
+  destructive gadget. Cross-reference rate/resource exhaustion: a poison or
+  malformed message on a transport with an infinite/uncapped retry strategy is
+  a permanent retry loop = worker DoS.
 
 ## SSRF — Server-Side Request Forgery (A10:2021, CWE-918)
 
