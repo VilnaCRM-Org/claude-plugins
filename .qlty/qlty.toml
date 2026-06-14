@@ -39,6 +39,10 @@ exclude_patterns = [
   "**/target/**",
   "**/templates/**",
   "**/testdata/**",
+  # Test fixtures hold INTENTIONAL fake secrets / sample payloads (e.g. the
+  # redaction-test ledgers) — they are scaffolding, not shippable code, so the
+  # secret/quality scanners must not flag them.
+  "**/tests/fixtures/**",
   "**/vendor/**",
 ]
 

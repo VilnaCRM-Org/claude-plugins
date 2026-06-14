@@ -316,37 +316,45 @@ publish(lens, body):
   # 1. resolve posting identity once (cached for the run)
   POSTING_LOGIN = ${--bot-login} OR `gh api user --jq .login 2>/dev/null`
      if empty -> log_warn "cannot resolve posting identity"; POSTING_LOGIN=""
-                 (the author filter then degrades to marker-only match, R7 note)
+                 (do NOT marker-only match — that could edit a human comment
+                  quoting the marker, R7; with no login the update path is
+                  disabled and a fresh comment is CREATED instead)
 
   # 2. list the PR's issue comments (paginated), guarded
   raw = gh api --paginate "repos/$OWNER/$NAME/issues/$PR/comments" \
-          --jq '.[] | {id, login: .user.login, body}'   # one JSON obj per line
+          --jq '.[] | [(.id|tostring),(.user.login//""),((.body//"")|gsub("[\n\r\t]";" "))]|@tsv'
         2>/dev/null
-     # On a non-zero gh exit OR a non-JSON / error-envelope body
-     # (raw_is_json + shape guard, get-pr-comments.sh:113-130,152-260):
+     # .body is //""-guarded so a null-body comment cannot error the jq and
+     # silently empty the list (which would create a duplicate every run).
+     # On a non-zero gh exit OR an empty/unreadable body:
      #   log_warn "comment list unreadable — creating without dedup"; goto CREATE
      # (R11: degrade, fall back to create; never fail the loop)
 
   # 3. find the target comment: marker in body AND author == POSTING_LOGIN
-  #    (case-insensitive login compare). Collect ALL matches.
+  #    (case-insensitive). A match REQUIRES a resolved POSTING_LOGIN — never an
+  #    empty-login marker-only match (R7). Collect ALL matches.
   matches = [ c in raw : marker(lens) ∈ c.body
-                         AND (POSTING_LOGIN == "" OR lower(c.login)==lower(POSTING_LOGIN)) ]
+                         AND POSTING_LOGIN != "" AND lower(c.login)==lower(POSTING_LOGIN) ]
 
-  # 4. create vs update vs corruption-recovery
+  # 4. create vs update vs corruption-recovery. The body is sent with -F (NOT
+  #    -f): gh's -F/--field reads @- from stdin; -f/--raw-field would post the
+  #    literal string "@-".
   if matches is empty:                                   # CREATE
-     gh api -X POST "repos/$OWNER/$NAME/issues/$PR/comments" -f body=@-  <<<"$body"
+     printf '%s' "$body" | gh api -X POST "repos/$OWNER/$NAME/issues/$PR/comments" -F body=@-
        || log_warn "create failed (HTTP/rate/abuse) — skipping"; (exit 0 still)
-  elif matches has exactly one (oldest by id):           # UPDATE
-     id = matches[0].id
-     gh api -X PATCH "repos/$OWNER/$NAME/issues/comments/$id" -f body=@- <<<"$body"
+  elif matches has exactly one:                          # UPDATE the oldest (min id)
+     id = min(matches.id, wrap-safe num_lt)
+     printf '%s' "$body" | gh api -X PATCH "repos/$OWNER/$NAME/issues/comments/$id" -F body=@-
        || log_warn "update failed — skipping"
   else:                                                   # CORRUPTION RECOVERY
-     # duplicate marker'd, author-matched comments → edit the OLDEST (lowest id),
+     # duplicate marker'd, author-matched comments → edit the OLDEST (min id),
      # minimize the rest via GraphQL minimizeComment (research §3 approach 2).
      id = min(matches.id)
-     gh api -X PATCH "repos/$OWNER/$NAME/issues/comments/$id" -f body=@- <<<"$body"
+     printf '%s' "$body" | gh api -X PATCH "repos/$OWNER/$NAME/issues/comments/$id" -F body=@-
      for extra in matches[1:]:
-        node_id = extra.node_id   # from the list (REST id is numeric; fetch node_id)
+        # node_id is fetched LAZILY here (a per-id REST read), so the common
+        # single-comment path needs only the 3-field list projection above.
+        node_id = gh api "repos/$OWNER/$NAME/issues/comments/$extra.id" --jq .node_id
         gh api graphql -f query='mutation($id:ID!){minimizeComment(input:{
            subjectId:$id, classifier:OUTDATED}){clientMutationId}}' -f id="$node_id" \
            >/dev/null 2>&1 || log_warn "could not minimize duplicate comment $id"

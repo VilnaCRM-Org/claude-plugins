@@ -51,3 +51,4 @@ capabilities:
   structurizr: false
   observability_emf: false
   load_testing: true
+  publish_pr_comments: false

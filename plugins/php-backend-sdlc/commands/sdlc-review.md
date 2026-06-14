@@ -193,12 +193,16 @@ EXACTLY ONCE for the whole loop (never per iteration, NFR-2) via the
 lens ledgers, the captured timing, and the existing `iteration <n>/5` counter:
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh" --conclusion \
+# Resolve the poster from make.post_review_findings (null → the bundled script),
+# the SAME null-substitution the per-lens Publish steps use — not a hardcoded path.
+POSTER="$(profile_make_target post_review_findings)"   # empty when the key is null
+POSTER="${POSTER:-${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh}"
+"$POSTER" --conclusion \
   --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/security.json" \
   --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/fr-nfr.json" \
   --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/code-review.json" \
-  --pr "$PR" --started-at "$REVIEW_STARTED_AT" --ended-at "$REVIEW_ENDED_AT" \
-  --iterations "$ITERATION"
+  --pr "${PR:?PR number required}" --started-at "$REVIEW_STARTED_AT" \
+  --ended-at "$REVIEW_ENDED_AT" --iterations "$ITERATION"
 ```
 
 The poster is idempotent (hidden `<!-- sdlc-review:conclusion -->` marker) and
