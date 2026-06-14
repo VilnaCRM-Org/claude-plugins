@@ -29,6 +29,7 @@ make:
   pr_comments: null
   fr_nfr_gate: null
   load_tests: load-tests
+  post_review_findings: null
 quality:
   phpinsights:
     quality: 100

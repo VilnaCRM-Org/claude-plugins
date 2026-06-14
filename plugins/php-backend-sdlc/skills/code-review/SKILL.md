@@ -8,9 +8,10 @@ description: Systematically retrieve, categorize, and address PR code review com
 ## Profile keys consumed
 
 - `project.repo`
-- `make.ci`, `make.ai_review_loop`, `make.pr_comments`, `make.psalm`, `make.deptrac`, `make.tests`, `make.phpinsights`, `make.infection`
+- `make.ci`, `make.ai_review_loop`, `make.pr_comments`, `make.psalm`, `make.deptrac`, `make.tests`, `make.phpinsights`, `make.infection`, `make.post_review_findings`
 - `quality.phpinsights.quality`, `quality.phpinsights.architecture`, `quality.phpinsights.style`, `quality.phpinsights.complexity`
 - `quality.deptrac_violations`, `quality.psalm_errors`, `quality.infection_msi`
+- `capabilities.publish_pr_comments`
 - `ci.provider`, `ci.required_checks`
 - `review.ai_review_agents`, `review.coderabbit`, `review.request_changes_blocking`
 
@@ -362,6 +363,30 @@ comment (all three sources), and one validated `COMMENT|url|commit|sha`,
 `COMMENT|url|reply|url`, or `COMMENT|url|decline|url` line per `COMMENT_META`
 line, following the Evidence Ledger Protocol exactly — including the
 post-snapshot restart rule.
+
+### Step 5b: Publish findings (gated)
+
+When `capabilities.publish_pr_comments` is `true`, project the Step 2
+priority/disposition categorization and the evidence-ledger dispositions
+(`fixed` = commit, `dropped` = decline/stale) to the canonical ledger JSON
+(schema in the poster header) at
+`${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/code-review.json`, then publish ONE
+consolidated, idempotent PR comment via the target mapped by
+`make.post_review_findings`; when that key is `null`, the plugin substitutes
+its script (the same null-substitution pattern as `make.pr_comments` →
+`get-pr-comments.sh` in Step 1):
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh" code-review \
+  --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/code-review.json" --pr "$PR"
+```
+
+The poster is idempotent (hidden `<!-- sdlc-review:code-review -->` marker — it
+updates its prior comment, never spams), authorized (writes only to the resolved
+repo's own PR), and DEGRADES (NFR-3): `capabilities.publish_pr_comments`
+false/absent, `gh` absent, no PR, an empty ledger, a mismatched base repo, or a
+`gh` write failure all skip-with-note and exit 0 — publishing NEVER fails this
+workflow. When the flag is false/absent, skip this step with a note.
 
 ### Step 6: Run Quality Checks
 

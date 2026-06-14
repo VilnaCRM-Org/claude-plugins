@@ -144,7 +144,8 @@ fi
 
 # --- make map completeness (null = capability absent, NFR-4) ----------------
 MAKE_KEYS=(ci start tests e2e psalm deptrac phpinsights infection
-           ai_review_loop pr_comments fr_nfr_gate load_tests)
+           ai_review_loop pr_comments fr_nfr_gate load_tests
+           post_review_findings)
 for key in "${MAKE_KEYS[@]}"; do
   if ! yaml_has "$PROFILE" "make.$key"; then
     violation "make map incomplete: 'make.$key' not declared (use null when the capability is absent)"

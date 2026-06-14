@@ -9,9 +9,11 @@ description: Adversarial, authorized red-team / penetration-testing loop for a P
 
 - `make.security`
 - `capabilities.dynamic_security_testing`
+- `capabilities.publish_pr_comments`
 - `make.start`
 - `make.ci`
 - `make.psalm`
+- `make.post_review_findings`
 - `architecture.source_root`
 - `architecture.bounded_contexts`
 - `framework.api_platform`
@@ -230,6 +232,29 @@ zero new verified findings. On `iteration > 5`, or on a tripped
 `php-implementer` / Ralph circuit breaker, emit the canonical escalation block
 and STOP — never auto-reset a breaker (NFR-2).
 
+### 5.7 Publish (gated)
+
+When `capabilities.publish_pr_comments` is `true`, project this loop's promoted
+finding records (§5.4) — deduped on the same `(cwe, location, endpoint)` tuple,
+each `auto_fixed: true` with its `regression_test` when routed through §5.5 — to
+the canonical ledger JSON (schema in the poster header) at
+`${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/security.json`, then publish ONE
+consolidated, idempotent PR comment via the target mapped by
+`make.post_review_findings`; when that key is `null`, the plugin substitutes
+`"${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh"`:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh" security \
+  --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/security.json" --pr "$PR"
+```
+
+The poster is idempotent (hidden `<!-- sdlc-review:security -->` marker — it
+updates its prior comment, never spams), authorized (writes only to the resolved
+repo's own PR), and DEGRADES (NFR-3): `capabilities.publish_pr_comments`
+false/absent, `gh` absent, no PR, an empty ledger, a mismatched base repo, or a
+`gh` write failure all skip-with-note and exit 0 — publishing NEVER fails this
+loop. When the flag is false/absent, skip this step with a note.
+
 ## Constraints
 
 **NEVER**:
@@ -268,6 +293,8 @@ and STOP — never auto-reset a breaker (NFR-2).
   the diff for forbidden suppressions (the
   [`../code-review/SKILL.md`](../code-review/SKILL.md) Step 6 scan) before
   declaring success.
+- Run the §5.7 Publish step gated on `capabilities.publish_pr_comments`; it
+  degrades with a note (NFR-3) and never fails this loop.
 
 ## Format
 

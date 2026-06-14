@@ -1,0 +1,12 @@
+{
+  "lens": "fr-nfr",
+  "findings": [
+    {
+      "id": "FR-1-1",
+      "severity": "Medium",
+      "location": "src/Catalog/Handler.php:5",
+      "summary": "Acceptance criterion not covered by the change set",
+      "status": "open"
+    }
+  ]
+}

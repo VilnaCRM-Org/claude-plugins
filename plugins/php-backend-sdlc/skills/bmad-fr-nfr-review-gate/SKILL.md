@@ -23,9 +23,11 @@ applicable rows score 5/5 and the gate run reports zero new findings.
 - `make.load_tests`
 - `make.deptrac`
 - `make.pr_comments`
+- `make.post_review_findings`
 - `quality.phpinsights.complexity`
 - `quality.infection_msi`
 - `capabilities.load_testing`
+- `capabilities.publish_pr_comments`
 - `ci.required_checks`
 - `review.request_changes_blocking`
 
@@ -243,6 +245,29 @@ risk blocks PASS.
    posts status updates.
 9. For PR work, leave the final result visible on the PR through the
    `BMAD FR/NFR Review Gate` commit status (and the findings comment on FAIL).
+
+## Publish (gated)
+
+The gate's `BMAD FR/NFR Review Gate` commit status remains the durable success
+signal; this Publish step is an additional consolidated view and does not
+replace it. When `capabilities.publish_pr_comments` is `true`, project the gate
+findings / per-requirement matrix to the canonical ledger JSON (schema in the
+poster header) at `${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/fr-nfr.json`, then
+publish ONE consolidated, idempotent PR comment via the target mapped by
+`make.post_review_findings`; when that key is `null` (the shipped default), the
+plugin substitutes its script:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh" fr-nfr \
+  --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/fr-nfr.json" --pr "$PR"
+```
+
+The poster is idempotent (hidden `<!-- sdlc-review:fr-nfr -->` marker — it
+updates its prior comment, never spams), authorized (writes only to the resolved
+repo's own PR), and DEGRADES (NFR-3): `capabilities.publish_pr_comments`
+false/absent, `gh` absent, no PR, an empty ledger, a mismatched base repo, or a
+`gh` write failure all skip-with-note and exit 0 — publishing NEVER fails this
+gate. When the flag is false/absent, skip this step with a note.
 
 ## Required PASS Markers
 

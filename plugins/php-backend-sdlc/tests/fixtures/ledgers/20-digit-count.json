@@ -1,0 +1,8 @@
+{
+  "lens": "fr-nfr",
+  "findings": [
+    {"id": "N1", "severity": "High",   "location": "src/A.php:1", "summary": "f1", "status": "open"},
+    {"id": "N2", "severity": "High",   "location": "src/B.php:2", "summary": "f2", "status": "open"},
+    {"id": "N3", "severity": "Medium", "location": "src/C.php:3", "summary": "f3", "status": "open"}
+  ]
+}

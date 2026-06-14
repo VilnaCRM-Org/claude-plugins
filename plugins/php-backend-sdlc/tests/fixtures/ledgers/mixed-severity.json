@@ -1,0 +1,40 @@
+{
+  "lens": "code-review",
+  "findings": [
+    {
+      "id": "LOW-1",
+      "severity": "Low",
+      "location": "src/Util/Str.php:3",
+      "summary": "Prefer a named constant here",
+      "status": "open"
+    },
+    {
+      "id": "CRIT-1",
+      "severity": "Critical",
+      "location": "src/Payment/Charge.php:21",
+      "summary": "Unchecked refund amount sign",
+      "status": "open"
+    },
+    {
+      "id": "MED-1",
+      "severity": "Medium",
+      "location": "src/Order/Cart.php:9",
+      "summary": "Race on cart total recompute",
+      "status": "open"
+    },
+    {
+      "id": "DROPPED-1",
+      "severity": "Critical",
+      "location": "src/Old/Thing.php:1",
+      "summary": "STALE-DECLINED-THREAD must not sit above an open row",
+      "status": "dropped"
+    },
+    {
+      "id": "HIGH-1",
+      "severity": "High",
+      "location": "src/Auth/Token.php:14",
+      "summary": "Token TTL not enforced",
+      "status": "open"
+    }
+  ]
+}
