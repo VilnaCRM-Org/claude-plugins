@@ -303,6 +303,22 @@ Management); JWT specifics under WSTG-SESS-10 / WSTG-ATHN-04.
   unchanged across the login boundary so a pre-set id remains valid. For
   expiry, reproduction succeeds if an expired token is still accepted.
   Record the token variant and the observed status.
+- **Identity resolution / account linking (CWE-290 / CWE-287 / CWE-362):** a
+  business-logic auth class distinct from token forgery. Audit how the service
+  maps an external identity to a local account: (a) **normalization-collision
+  uniqueness bypass** — if the uniqueness constraint moved onto a *normalized*
+  field (e.g. `normalizedEmail`, a partial/sparse unique index) while legacy
+  rows are un-backfilled or the raw field's unique index was demoted, two
+  accounts can collide under `lower(trim(x))`; race N concurrent registrations
+  with case/Unicode-fold variants of an un-normalized email and confirm two
+  docs share the canonical form (TOCTOU between an app-layer `findBy` check and
+  the write). (b) **social-login email-trust auto-link** — if OAuth/social
+  sign-in auto-links to an existing local account by email, confirm the link is
+  gated on a provider `email_verified` claim for *every* provider adapter; an
+  unverified-email provider then allows account takeover by email collision.
+  Static evidence (index definition, resolver `findBy`→write window, the
+  verified-email gate) localizes it; the race winnability is the load-bearing
+  dynamic probe.
 
 ## Security misconfiguration (A05:2021, CWE-16 / CWE-209 / CWE-942)
 
@@ -445,6 +461,21 @@ WSTG application-DoS section.
   Reproduction succeeds when the cap/limit is shown absent (oversized
   payload served, or no throttling under the burst). Record the parameter,
   the response size/time, and the absence of a limit response.
+- **Limiter-KEY abuse (do not only test volume — test the key, CWE-770 +
+  CWE-639):** a rate limiter whose bucket key is derived from
+  attacker-controlled input (a request-body `email`/username, an
+  `X-Forwarded-For` header, an account id) is itself an attack surface, even
+  when the limit value is correct. Grep the limiter key construction under
+  `<source_root>` (e.g. a target/key resolver returning `sprintf('email:%s',
+  $email)` from the request body). Two reproductions: **(a) victim lockout** —
+  exhaust a *victim's* key bucket with attacker-supplied wrong attempts and
+  confirm the legitimate owner is then throttled/locked (a targeted DoS);
+  **(b) per-key evasion** — rotate the attacker-controlled key value each
+  request and confirm the per-key limit never trips (brute-force bypass).
+  Cross-reference BOLA/IDOR: an attacker-chosen key is an object-level
+  authorization gap on the limiter. Verify against a **non-fuzz env boot**
+  (a CI/schemathesis profile that swaps in a no-op limiter will hide this
+  entirely — see Cross-family notes on boot env).
 
 ## GraphQL — introspection / deep query / batching (CWE-770 / CWE-400 / CWE-639)
 
@@ -473,6 +504,17 @@ to resolvers. Dispatched **only when `framework.graphql` is true.**
   disabled) or the deep/batched query runs without limit enforcement.
   Apply the BOLA/BFLA/injection probes above to individual resolvers as
   well. Record the query and the response.
+- **Security control that is itself an amplifier (CWE-674, pre-cap
+  recursion):** the depth/complexity caps are enforced by the GraphQL
+  *executor*. Audit any request-phase code that PARSES OR WALKS the query
+  BEFORE the executor runs — a `kernel.request` listener/inspector (e.g. a
+  rate-limit query inspector) that recurses over a hostile, unauthenticated
+  query body is a CPU/stack amplifier the `max_query_depth`/`max_query_complexity`
+  config does not protect (those run later). Grep for request-phase resolvers
+  that recurse over the query AST/selection set; confirm an input-size guard
+  bounds them. Reproduce by POSTing a maximally nested query within the body
+  size cap and comparing `time_total` to a trivial query. "Is `max_query_depth`
+  set?" is NOT sufficient — it never reaches this pre-executor code path.
 
 ## LLM Top 10 — prompt injection / output handling (LLM01 / LLM02, 2025 v2.0)
 

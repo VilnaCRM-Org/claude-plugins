@@ -291,7 +291,7 @@ holds; the OWASP id and CWE(s) come straight from the tables above.
 | BOLA / IDOR | API1:2023 / A01:2021 | CWE-639, CWE-284 | always |
 | BOPLA / mass-assignment | API3:2023 | CWE-915, CWE-213 | always |
 | BFLA | API5:2023 / A01:2021 | CWE-285, CWE-862 | always |
-| Injection — SQLi/DQL | A03:2021 | CWE-89, CWE-78, CWE-77 | always |
+| Injection — SQLi/DQL/NoSQL | A03:2021 | CWE-89, CWE-943, CWE-78, CWE-77 | always (CWE-943 NoSQL operator injection when `persistence.mapper` is doctrine-odm) |
 | SSTI | A03:2021 | CWE-1336, CWE-94 | always |
 | Insecure deserialization | A08:2021 | CWE-502 | always |
 | SSRF | A10:2021 / API7:2023 | CWE-918 | always |
