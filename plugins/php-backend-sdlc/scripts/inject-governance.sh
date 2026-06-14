@@ -184,6 +184,7 @@ reject_irregular() {
 # concurrent run swap the content mid-render, producing duplicated or
 # interleaved governance blocks from a torn view.
 file_exists=0
+existing_mode=""
 render_managed() {
   local file=$1
   reject_symlink "$file"
@@ -194,6 +195,12 @@ render_managed() {
     return 0
   fi
   file_exists=1
+  # Capture the mode HERE, under the symlink/irregular guard, so write_managed
+  # can preserve it WITHOUT a second `chmod --reference="$file"` dereference
+  # later (which follows symlinks and was a TOCTOU: $file could be swapped for
+  # a symlink between the guard and that chmod, letting an attacker pick the new
+  # file's mode). CWE-367.
+  existing_mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
   cat "$file" >"$snap_file"
   # Compute fence balance ONCE from the snapshot and thread the same value
   # through every pass, so counting, pairing, and the rewrites all agree on
@@ -268,8 +275,12 @@ write_managed() {
   out_file="$(mktemp "$TARGET/.sdlc-governance.XXXXXX")" \
     || die "cannot create temp file in $TARGET"
   cat "$new_file" >"$out_file"
-  if [[ -f "$file" ]]; then
-    chmod --reference="$file" "$out_file" 2>/dev/null || true
+  # Preserve the overwrite mode from the value captured under render_managed's
+  # symlink/irregular guard (no second symlink-following dereference of $file —
+  # closes the CWE-367 TOCTOU). Fall back to the umask-derived create mode for a
+  # new file.
+  if [[ "$file_exists" -eq 1 && -n "$existing_mode" ]]; then
+    chmod "$existing_mode" "$out_file" 2>/dev/null || true
   else
     printf -v mode '%o' "$(( 0666 & ~0$(umask) ))"
     chmod "$mode" "$out_file" 2>/dev/null || true

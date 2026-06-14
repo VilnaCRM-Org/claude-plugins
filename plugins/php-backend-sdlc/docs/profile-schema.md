@@ -77,6 +77,7 @@ between "absent capability" and "forgot to declare" is intentional.
 | `make.pr_comments` | yes (nullable) | `null` | PR comment listing; plugin substitutes `scripts/get-pr-comments.sh` when `null`. |
 | `make.fr_nfr_gate` | yes (nullable) | `null` | FR/NFR gate; plugin substitutes `scripts/fr-nfr-gate.sh` when `null`. |
 | `make.load_tests` | yes (nullable) | `load-tests` | Load tests; pair with `capabilities.load_testing`. |
+| `make.security` | yes (nullable) | `null` | Security/SAST suite; plugin runs its bundled static lane (Psalm taint / Semgrep / `composer audit` / secret-scan) when `null` (SA-2). Mirrors `make.ai_review_loop`/`make.pr_comments`/`make.fr_nfr_gate` null-substitution precedent. |
 
 ## `quality` — raise-only thresholds (ADR-7)
 
@@ -126,6 +127,7 @@ it:
 | `capabilities.structurizr` | no | bool | `false` | Gates the architecture-sync skill (skip-with-note when false). |
 | `capabilities.observability_emf` | no | bool | `false` | Selects the metrics emission backend for the observability skill: AWS EMF when `true`, generic backend (Prometheus/StatsD/OTel/structured logs) when `false`. Never skip-gates the skill. |
 | `capabilities.load_testing` | no | bool | `false` | Gates load-test skills; pair with `make.load_tests`. |
+| `capabilities.dynamic_security_testing` | no | bool | `false` | Gates **dynamic** (live-service) security probing in `security-audit`; pairs with `make.start` the way `capabilities.load_testing` pairs with `make.load_tests`. When `false` (or `make.start: null`), dynamic probing degrades to skip-with-note; static/SAST/dep/secret/config lanes still run (NFR-3). |
 
 ## Annotated example
 
@@ -165,6 +167,7 @@ make:                              # required map; null value = capability absen
   pr_comments: null
   fr_nfr_gate: null
   load_tests: load-tests
+  security: null                   # plugin runs bundled static lane when null
 quality:                           # required; values may only be RAISED vs these defaults
   phpinsights: {quality: 100, architecture: 100, style: 100, complexity: 94}
   deptrac_violations: 0
@@ -182,6 +185,7 @@ capabilities:
   structurizr: true                # bool, default false
   observability_emf: true
   load_testing: true
+  dynamic_security_testing: false  # gates live-service probing; static lanes run regardless
 ```
 
 ## Validation

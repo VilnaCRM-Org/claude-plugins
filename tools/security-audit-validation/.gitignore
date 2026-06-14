@@ -1,0 +1,9 @@
+# Python bytecode.
+__pycache__/
+*.pyc
+# Coverage data.
+.coverage
+# Campaign scratch (adversarial round driver, arbiter, captured rounds).
+.campaign-round.mjs
+.arbiter.py
+round*.json

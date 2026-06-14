@@ -52,13 +52,14 @@ quality thresholds it carries are raise-only; see the
 | `/sdlc-issue` | 1 | Task text → labeled GitHub issue with testable acceptance criteria |
 | `/sdlc-plan` | 2 | Non-interactive BMAD planning chain → six artifacts under `specs/<slug>/` |
 | `/sdlc-implement` | 3 | bmalph/Ralph implementation, parallel story dispatch, breaker safety |
-| `/sdlc-review` | 4 | 21-skill triage, multi-lens review, FR/NFR gate loop |
+| `/sdlc-review` | 4 | 22-skill triage, multi-lens review, FR/NFR gate loop |
 | `/sdlc-qa` | 5 | Black-box HTTP verification against the acceptance criteria |
 | `/sdlc-finish-pr` | 6 | PR creation, CI-fix loop, comment-resolution loop |
 
-Commands delegate to six subagents (php-implementer,
+Commands delegate to seven subagents (php-implementer,
 code-quality-reviewer, fr-nfr-reviewer, qa-manual-tester, ci-fixer,
-pr-comment-resolver) and a 21-skill library with applicability triage.
+pr-comment-resolver, security-auditor) and a 22-skill library with
+applicability triage.
 
 ## Documentation
 

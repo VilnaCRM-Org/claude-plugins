@@ -55,8 +55,17 @@ try:
     data = json.load(open(sys.argv[1]))
 except Exception:
     sys.exit(0)
+# A crafted composer.json may have non-object require/require-dev (or a
+# non-object root); coerce to {} so a malformed repo degrades to "absent"
+# instead of an AttributeError that would abort profile generation.
+if not isinstance(data, dict):
+    sys.exit(0)
 pkg = sys.argv[2]
-val = data.get('require', {}).get(pkg) or data.get('require-dev', {}).get(pkg)
+req = data.get('require')
+req = req if isinstance(req, dict) else {}
+dev = data.get('require-dev')
+dev = dev if isinstance(dev, dict) else {}
+val = req.get(pkg) or dev.get(pkg)
 if val:
     print(val)
 PYEOF
@@ -370,6 +379,13 @@ emit_profile >"$tmp"
 # symlinked profile file and a symlinked .claude dir, and require the
 # resolved parent dir to live inside $TARGET.
 [[ -L "$PROFILE_FILE" ]] && die "profile path is a symlink; refusing to write: $PROFILE_FILE"
+# Reject a non-regular file at the profile path (directory, FIFO, socket,
+# device). The create-vs-update test below uses `[[ ! -f ]]`, which is also
+# false for every non-regular type, so without this guard write_profile's
+# `mv -f` would drop the temp file INSIDE a directory (temp litter, no profile,
+# exit 0) or clobber a FIFO into a regular file — a broken state reported as
+# success. Mirrors inject-governance.sh:reject_irregular.
+[[ -e "$PROFILE_FILE" && ! -f "$PROFILE_FILE" ]] && die "refusing to write profile: $PROFILE_FILE exists but is not a regular file"
 PROFILE_DIR="$(dirname "$PROFILE_FILE")"
 mkdir -p "$PROFILE_DIR"
 [[ -L "$PROFILE_DIR" ]] && die "profile parent (.claude) is a symlink; refusing to write: $PROFILE_DIR"

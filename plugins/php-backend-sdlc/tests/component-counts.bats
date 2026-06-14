@@ -1,15 +1,15 @@
 #!/usr/bin/env bats
 # Component-count + load-integrity tests (Story E7-S2, NFR-1).
 #
-# Asserts the exact install-cache layout — 8 commands / 6 agents /
-# 21 skills + 2 loose meta-guides — so the suite fails when any
+# Asserts the exact install-cache layout — 8 commands / 7 agents /
+# 22 skills + 2 loose meta-guides — so the suite fails when any
 # component file is removed or added. Also checks the load-integrity
 # invariants the CI frontmatter-check and manifest-validate jobs
 # enforce, so a broken component is caught locally before push.
 #
 # `claude plugin` listing smoke (NFR-1): after
 # `claude plugin install php-backend-sdlc@vilnacrm-plugins`, the
-# `/plugin` manager must list all 8 commands, 6 agents, and 21 skills;
+# `/plugin` manager must list all 8 commands, 7 agents, and 22 skills;
 # these counts are the canonical reference for that manual check.
 
 setup() {
@@ -54,16 +54,16 @@ assert_frontmatter_keys() {
   [ "$output" -eq 8 ]
 }
 
-@test "exactly 6 agent markdown files" {
+@test "exactly 7 agent markdown files" {
   run bash -c "ls '$PLUGIN_ROOT'/agents/*.md | wc -l"
   [ "$status" -eq 0 ]
-  [ "$output" -eq 6 ]
+  [ "$output" -eq 7 ]
 }
 
-@test "exactly 21 skills (skills/*/SKILL.md)" {
+@test "exactly 22 skills (skills/*/SKILL.md)" {
   run bash -c "ls '$PLUGIN_ROOT'/skills/*/SKILL.md | wc -l"
   [ "$status" -eq 0 ]
-  [ "$output" -eq 21 ]
+  [ "$output" -eq 22 ]
 }
 
 @test "every skill directory contains a SKILL.md" {

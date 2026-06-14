@@ -123,7 +123,7 @@ Complex skills have a multi-file structure:
 - Need detailed patterns → `implementing-ddd-architecture/REFERENCE.md`, `code-organization/DIRECTORY-STRUCTURE.md`
 - Want complete caching examples → `cache-management/examples/`
 
-## Available Skills (21 Total)
+## Available Skills (22 Total)
 
 ### Autonomous Planning Skills
 
@@ -170,6 +170,20 @@ Complex skills have a multi-file structure:
 | **Load Testing**      | `load-testing/SKILL.md`                  | Create K6 performance tests (gated by `capabilities.load_testing`, `make.load_tests`)                |
 | **Cache Management**  | `cache-management/SKILL.md`              | Cache keys, TTLs, invalidation, decorators                                                           |
 | **Observability**     | `observability-instrumentation/SKILL.md` | Business metrics — EMF when `capabilities.observability_emf` is `true`, generic backend when `false` |
+
+### Security Skills
+
+| Skill              | File                      | When to Use                                                                                                                                                                                                                                                             |
+| ------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Security Audit** | `security-audit/SKILL.md` | Adversarial, authorized red-team / penetration-test loop against a PHP backend you own — one auditor per OWASP/vuln family, verify-by-reproduction, root-cause suppression-free fixes (gated by `capabilities.dynamic_security_testing`, `make.security`, `make.start`) |
+
+The `security-audit` skill ships supporting `reference/` files. Read its
+`SKILL.md` first for the triage → fan-out → find → verify → fix → regress →
+re-verify loop, then read its reference catalogs as you need them:
+
+- `security-audit/reference/owasp-catalog.md` — the OWASP/CWE corpus (edition-labelled) the triage table draws from
+- `security-audit/reference/attack-playbooks.md` — per-family probe + reproduce-against-running-service step
+- `security-audit/reference/remediation-patterns.md` — secure-by-default, suppression-free remediation per vuln family
 
 ## Practical Examples
 
@@ -219,6 +233,32 @@ Complex skills have a multi-file structure:
 4. **For config extraction**: Follow the hardcoded-configuration extraction section
 5. **Validate**: Run the targets mapped by `make.psalm`, `make.deptrac`, and `make.tests`
 6. **If CI fails after refactoring**: Consult the CI-failure routing in `code-organization` and `ci-workflow`
+
+### Example 6: User asks to "security-audit" or "red-team the API"
+
+**Your workflow:**
+
+1. **Identify skill**: Read `SKILL-DECISION-GUIDE.md` → Points to `security-audit`
+2. **Read skill**: Open `security-audit/SKILL.md` and follow the triage → fan-out → find → verify → fix → regress → re-verify loop
+3. **Read supporting files**: Pull in `security-audit/reference/owasp-catalog.md` (corpus + triage), `security-audit/reference/attack-playbooks.md` (per-family probes), and `security-audit/reference/remediation-patterns.md` (secure-by-default fixes) as each step needs them
+4. **Stay defensive/authorized**: Probe ONLY the profile-resolved local service; never an out-of-profile host
+5. **Route fixes, don't edit**: The auditor reports verified findings; root-cause fixes are routed through `php-implementer` with a failing-then-passing regression test per fix
+6. **Validate**: Re-verify the affected family clean, then run the target mapped by `make.ci`
+
+## Cross-Agent Reference
+
+Most skills are self-contained markdown you execute directly. The `security-audit`
+skill, however, prescribes fanning out a dedicated red-team subagent — one
+instance per OWASP/vuln family — rather than running every probe inline:
+
+| Agent                | File                            | Role                                                                                                                                                                                                                                             |
+| -------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Security Auditor** | `../agents/security-auditor.md` | Authorized, defensive red-team unit for ONE assigned OWASP/vuln family — black-box HTTP/GraphQL probing + source SAST, verify-by-reproduction, reports findings (CWE + OWASP id + severity), never edits code (fixes route to `php-implementer`) |
+
+Non-Claude agents that cannot dispatch a subagent should read
+`../agents/security-auditor.md` and apply its per-family probe-and-report
+contract sequentially, one family at a time, preserving the same
+authorized/defensive boundary and verify-by-reproduction rule.
 
 ## Key Differences from Claude Code
 
@@ -319,6 +359,9 @@ skills/
 ├── openapi-development/
 ├── quality-standards/
 ├── query-performance-analysis/
+├── security-audit/
+│   ├── SKILL.md
+│   └── reference/             # OWASP catalog, attack playbooks, remediation patterns
 ├── structurizr-architecture-sync/
 └── testing-workflow/
     └── SKILL.md                # Every skill directory has a SKILL.md;
@@ -351,7 +394,7 @@ skills/
 
 If you encounter issues:
 
-1. **Read troubleshooting**: only `load-testing/` ships a `reference/` directory (including troubleshooting docs); `implementing-ddd-architecture/REFERENCE.md` and `code-organization/DIRECTORY-STRUCTURE.md` carry the detailed patterns for those skills
+1. **Read troubleshooting**: `load-testing/` and `security-audit/` each ship a `reference/` directory (load-testing's includes troubleshooting docs; security-audit's holds `owasp-catalog.md`, `attack-playbooks.md`, and `remediation-patterns.md`); `implementing-ddd-architecture/REFERENCE.md` and `code-organization/DIRECTORY-STRUCTURE.md` carry the detailed patterns for those skills
 2. **Check examples**: only `cache-management/` ships an `examples/` directory (complete working cache patterns); other skills inline their examples in `SKILL.md`
 3. **Review the host repository's agent guidelines** (its `AGENTS.md`/`CLAUDE.md`) for repo-specific conventions
 4. **Check the profile**: `.claude/php-sdlc.yml` resolves every logical target and capability flag
