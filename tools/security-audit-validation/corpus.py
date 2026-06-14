@@ -403,6 +403,35 @@ _STATIC_FIXTURES: tuple[Fixture, ...] = (
         FINDING,
         J_FINDING,
     ),
+    # --- Round-3 regression fixtures (final sound rule improvements). ---
+    Fixture(
+        "SC-SQLI-E7", "sqli", "sqli/edge_files_source.php", "CWE-89", FINDING, J_FINDING
+    ),
+    Fixture("SC-XSS-E5", "xss", "xss/edge_print_r.php", "CWE-79", FINDING, J_FINDING),
+    Fixture("SC-XSS-E6", "xss", "xss/edge_var_dump.php", "CWE-79", FINDING, J_FINDING),
+    Fixture(
+        "SC-SSRF-E4", "ssrf", "ssrf/edge_get_headers.php", "CWE-918", FINDING, J_FINDING
+    ),
+    Fixture(
+        "SC-DESER-E6",
+        "deserialization",
+        "deserialization/edge_igbinary.php",
+        "CWE-502",
+        FINDING,
+        J_FINDING,
+    ),
+    Fixture(
+        "SC-CRYPTO-E6", "crypto", "crypto/edge_mhash.php", "CWE-327", FINDING, J_FINDING
+    ),
+    Fixture(
+        "SC-SECRET-E5",
+        "secret",
+        "secret/edge_define.php",
+        "CWE-798",
+        FINDING,
+        J_FINDING,
+    ),
+    Fixture("SC-PATH-E6", "path", "path/edge_copy.php", "CWE-22", FINDING, J_FINDING),
 )
 
 

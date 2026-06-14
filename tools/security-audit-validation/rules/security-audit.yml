@@ -36,6 +36,7 @@ rules:
       - pattern: filter_input_array(...)
       - pattern: getallheaders()
       - pattern: apache_request_headers()
+      - pattern: $_FILES
     pattern-sanitizers:
       - pattern: (int)$X
       - pattern: (integer)$X
@@ -86,6 +87,7 @@ rules:
       - pattern: filter_input_array(...)
       - pattern: getallheaders()
       - pattern: apache_request_headers()
+      - pattern: $_FILES
     pattern-sanitizers:
       # Only escapeshellarg fully neutralizes an argument; escapeshellcmd is
       # intentionally NOT a sanitizer (it leaves argument injection open).
@@ -148,6 +150,7 @@ rules:
       - pattern: filter_input_array(...)
       - pattern: getallheaders()
       - pattern: apache_request_headers()
+      - pattern: $_FILES
     pattern-sinks:
       - pattern-either:
           - pattern: eval(...)
@@ -181,6 +184,8 @@ rules:
           # yaml_parse with PHP-object support deserializes arbitrary objects.
           - pattern: yaml_parse($X)
           - pattern: yaml_parse($X, ...)
+          # igbinary is a binary unserialize with the same object-injection risk.
+          - pattern: igbinary_unserialize($X)
       - pattern-not: unserialize("...")
       - pattern-not: unserialize("...", ...)
       - pattern-not: yaml_parse("...")
@@ -206,6 +211,7 @@ rules:
       - pattern: filter_input_array(...)
       - pattern: getallheaders()
       - pattern: apache_request_headers()
+      - pattern: $_FILES
     pattern-sanitizers:
       # A realpath()'d value is a contained local filesystem path, not an
       # attacker-chosen URL, so it cannot drive an outbound request. An
@@ -220,6 +226,8 @@ rules:
           - pattern: fopen($U, ...)
           - pattern: curl_setopt($CH, CURLOPT_URL, $U)
           - pattern: curl_setopt_array($CH, $U)
+          - pattern: get_headers($U)
+          - pattern: get_headers($U, ...)
           - pattern: $CLIENT->request($M, $U, ...)
           - pattern: $CLIENT->get($U, ...)
 
@@ -243,6 +251,7 @@ rules:
       - pattern: filter_input_array(...)
       - pattern: getallheaders()
       - pattern: apache_request_headers()
+      - pattern: $_FILES
     pattern-sanitizers:
       # realpath() + a prefix check is the proper containment primitive;
       # basename() alone is NOT sufficient and is intentionally not listed. An
@@ -261,6 +270,7 @@ rules:
           - pattern: file($P, ...)
           - pattern: highlight_file($P)
           - pattern: show_source($P)
+          - pattern: copy($P, ...)
           - pattern: new SplFileObject($P, ...)
           - pattern: new SplFileObject($P)
           - pattern: new \SplFileObject($P, ...)
@@ -290,6 +300,7 @@ rules:
       - pattern: filter_input_array(...)
       - pattern: getallheaders()
       - pattern: apache_request_headers()
+      - pattern: $_FILES
     pattern-sanitizers:
       - pattern: htmlspecialchars(...)
       - pattern: htmlentities(...)
@@ -305,6 +316,10 @@ rules:
           # exit/die emit their string argument to the response body.
           - pattern: exit($X)
           - pattern: die($X)
+          # debug-dump helpers print their argument when not in return mode.
+          - pattern: print_r($X)
+          - pattern: var_dump($X)
+          - pattern: var_export($X)
           # writing to the output stream is an echo by another name.
           - pattern: file_put_contents("php://output", $X)
           - pattern: file_put_contents('php://output', $X)
@@ -349,6 +364,11 @@ rules:
           # crypt() with a weak/auto scheme on a credential.
           - pattern: crypt($P)
           - pattern: crypt($P, ...)
+          # mhash() with a weak algorithm constant.
+          - pattern: mhash(MHASH_MD5, $P, ...)
+          - pattern: mhash(MHASH_MD5, $P)
+          - pattern: mhash(MHASH_SHA1, $P, ...)
+          - pattern: mhash(MHASH_SHA1, $P)
       - metavariable-regex:
           metavariable: $P
           regex: (?i).*(pass|pwd|secret|token|credential|api_?key).*
@@ -391,6 +411,23 @@ rules:
           metavariable: $F
           regex: (?i)^(api_?key|secret|password|passwd|pwd|private_?key|access_?key|auth_?token|client_?secret)$
       - pattern-not: $O->$F = "";
+
+  # --- Hardcoded credential defined as a named constant -------------------
+  # A regex rule: metavariable-regex does not bind to string-literal arguments
+  # of define() in this engine, so match the call shape directly. Requires a
+  # credential-named constant AND a non-empty literal value.
+  - id: sa-hardcoded-secret-define
+    languages: [generic]
+    severity: ERROR
+    message: Hardcoded credential literal in a define() constant (CWE-798, A02:2021).
+    metadata:
+      family: secret
+      cwe: CWE-798
+      owasp: A02:2021
+    paths:
+      include:
+        - "*.php"
+    pattern-regex: '(?i)define\s*\(\s*[''"][a-z0-9_]*(api_?key|secret|password|passwd|pwd|private_?key|access_?key|auth_?token|client_?secret)[a-z0-9_]*[''"]\s*,\s*[''"][^''"]+[''"]'
 
   # --- XXE via LIBXML_NOENT (CWE-611) ------------------------------------
   - id: sa-xxe-noent
@@ -435,6 +472,7 @@ rules:
       - pattern: filter_input_array(...)
       - pattern: getallheaders()
       - pattern: apache_request_headers()
+      - pattern: $_FILES
     pattern-sanitizers:
       # An integer-coerced value cannot carry a URL/host, so it cannot drive an
       # open redirect (consistent with the SQLi/XSS/command sanitizer lists).

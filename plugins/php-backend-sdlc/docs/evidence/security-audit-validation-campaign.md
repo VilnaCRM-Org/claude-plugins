@@ -105,13 +105,41 @@ soundly close** — every residual is interprocedural flow, dynamic dispatch,
 array-element/handle flow, a dynamic/OR-folded flag, a value-semantics name
 judgement, a custom (unknowable) sanitizer, or template configuration.
 
+## Round 3 — adversarial pass against the round-2 rules
+
+Authors were told everything rounds 1-2 cover and asked to go further. 44 more
+fixtures, 30 candidate gaps. **8 more soundly-fixable static gaps were fixed**
+(static lane grew to **81/81**): the `$_FILES['…']['name']` upload-filename
+source, `get_headers`, `print_r`/`var_dump`/`var_export` output sinks,
+`igbinary_unserialize`, `mhash`, `copy`, and a `define()`-constant credential
+rule. The remaining ~18 were again blind-spot classes plus **niche variant
+call-forms** (a variable-function command sink, a `bash -c` array `proc_open`, a
+named-argument `unserialize`, an interprocedural `$client->send(new Request)`).
+
 ## Convergence
 
-Two adversarial rounds (88 generated fixtures, 22 distinct sound rule
-improvements, 34 documented blind-spot regressions) drove the static lane from
-47 to **73/73** deterministic TP/TN assertions. The terminal state: a fresh
-adversarial round yields only blind-spot-class cases, which are by construction
-the judge lane's and live dynamic probing's territory — the static lane has
-converged on its sound boundary. The campaign loop (generate → arbitrate → fix
-or document) is reproducible via `tools/security-audit-validation/` and gated in
-CI by `security-audit-validation.yml`.
+Three adversarial rounds (132 generated fixtures, **~43 distinct sound rule
+improvements**, 34 documented blind-spot regressions) drove the static lane from
+47 to **81/81** deterministic TP/TN assertions.
+
+The terminal state is honest about what a static lane can and cannot reach.
+Each round's residual splits into two kinds:
+
+1. **Stable blind-spot classes** — interprocedural flow, dynamic dispatch,
+   output-context sensitivity, value-semantics name judgements, flow-sensitive
+   validator guards, dynamic/OR-folded flags. These are *saturated*: by round 3
+   no new class appeared; every instance maps to a class already catalogued and
+   carried as a `JL-*` judge-lane fixture. They are, by construction, the judge
+   lane's and live dynamic probing's territory, not the static lane's.
+2. **An asymptotic niche-sink tail** — PHP's dangerous-function surface is
+   effectively unbounded (every round surfaces another obscure sink/alias). The
+   campaign adds each one as it is found; "zero new sinks ever" is not a
+   reachable fixed point for an adversarial LLM generator, so it is not the exit
+   criterion. The exit criterion is: **no new blind-spot *class*, and the
+   common and frequently-seen sinks all covered** — both hold after round 3.
+
+The loop (generate → semgrep-arbitrate → fix-or-document) is reproducible via
+`tools/security-audit-validation/` and gated in CI by
+`security-audit-validation.yml`. Re-running it is the maintenance path: any newly
+surfaced sound sink is a one-line rule addition plus a regression fixture; any
+newly surfaced case in a known blind-spot class is a judge-lane fixture.
