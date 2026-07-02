@@ -241,8 +241,11 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
   if ! command -v yq >/dev/null 2>&1; then
     skip "yq not installed here; cannot isolate the json-toolchain failure from yaml-toolchain"
   fi
+  # any of bun|pnpm|npm satisfies the package-manager check; use what the host has
+  pm="$(command -v bun || command -v pnpm || command -v npm)"
+  pm="${pm##*/}"
   # shellcheck disable=SC2086
-  sandbox="$(sandbox_path $SCRIPT_DEPS claude gh bmalph bun node docker yq)"
+  sandbox="$(sandbox_path $SCRIPT_DEPS claude gh bmalph "$pm" node docker yq)"
   PATH="$sandbox" run "$PREFLIGHT" --report
   [ "$status" -eq 1 ]
   [[ "$output" =~ yaml-toolchain[[:space:]]+PASS ]]
