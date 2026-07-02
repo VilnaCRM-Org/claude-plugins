@@ -38,7 +38,10 @@ sandbox_path() {
     if [ -x "$STUBS/$tool" ]; then
       ln -s "$STUBS/$tool" "$dir/$tool"
     else
-      src="$(command -v "$tool")"
+      src="$(command -v "$tool")" || {
+        echo "sandbox_path: required host tool '$tool' not on PATH" >&2
+        return 1
+      }
       ln -s "$src" "$dir/$tool"
     fi
   done
@@ -204,10 +207,13 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
 }
 
 @test "missing docker binary: FAIL with get-docker remediation" {
-  # sandbox has a package manager (bun) and node so checks 1-8 pass; docker
-  # (check 9) is absent and must FAIL.
+  # sandbox has a package manager and node so checks 1-8 pass; docker
+  # (check 9) is absent and must FAIL. The check accepts any of bun|pnpm|npm,
+  # so link whichever the host provides (CI runners have npm but not bun).
+  pm="$(command -v bun || command -v pnpm || command -v npm)"
+  pm="${pm##*/}"
   # shellcheck disable=SC2086
-  sandbox="$(sandbox_path $SCRIPT_DEPS claude gh bmalph bun node)"
+  sandbox="$(sandbox_path $SCRIPT_DEPS claude gh bmalph "$pm" node)"
   PATH="$sandbox" run "$PREFLIGHT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL: docker"* ]]
