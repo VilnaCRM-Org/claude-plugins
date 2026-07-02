@@ -9,7 +9,7 @@ This plugin ships a modular **Skills system** for the **React 18 + TypeScript + 
 ## Profile keys consumed
 
 - Logical target map: `make.ci`, `make.lint`, `make.lint_eslint`, `make.lint_deps`, `make.format`, `make.test_unit_client`, `make.test_unit_server`, `make.test_integration`, `make.test_e2e`, `make.test_visual`, `make.test_mutation`, `make.lighthouse_desktop`, `make.lighthouse_mobile`, `make.test_load`, `make.storybook_build`, `make.a11y`
-- Quality floors / ceilings: `quality.coverage_statements`, `quality.mutation_msi`, `quality.eslint_errors`, `quality.lighthouse_mobile`, `quality.visual_diffs`
+- Quality floors / ceilings: `quality.coverage_statements`, `quality.mutation_msi`, `quality.eslint_errors`, `quality.tsc_errors`, `quality.markdownlint_errors`, `quality.jscpd_clones`, `quality.metrics_enforced`, `quality.depcruise_violations`, `quality.lighthouse_mobile`, `quality.visual_diffs`
 - Framework / architecture: `framework.ui`, `framework.bundler`, `framework.package_manager`, `framework.state`, `framework.di`, `architecture.source_root`, `architecture.modules`, `architecture.component_prefix`
 - Capability flags: `capabilities.accessibility_audit`, `capabilities.dynamic_a11y_testing`, `capabilities.figma`, `capabilities.lighthouse`, `capabilities.visual_testing`, `capabilities.mutation_testing`, `capabilities.load_testing`, `capabilities.storybook`, `capabilities.observability`
 - Companion install metadata: `companion.skills`, `companion.agents`, `companion.install_command`

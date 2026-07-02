@@ -67,6 +67,7 @@ present() {
 # Returns non-zero on any failure (missing tool, non-zero installer exit).
 run_install() {
   local name=$1 cmd
+  [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || { log_warn "skipping companion with unsafe name: $name"; return 1; }
   if [[ "$install_command" == *"{name}"* ]]; then
     cmd="${install_command//\{name\}/$name}"
     bash -c "$cmd"

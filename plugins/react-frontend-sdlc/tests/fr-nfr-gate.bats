@@ -60,6 +60,17 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
   ! grep -q 'pr comment' "$GH_LOG"
 }
 
+@test "zero findings but status post fails: exit 1, never a silent local pass" {
+  # The commit status is the gate's durable verdict: a clean claude run
+  # whose success status cannot be recorded must fail, not exit 0 with
+  # only a warning in the log.
+  STUB_GH_EXIT=1 STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"failed to post commit status"* ]]
+  [[ "$output" != *"PASS — zero new findings"* ]]
+  grep -q -- '-f state=success' "$GH_LOG"
+}
+
 @test "findings run: exit 1, failure status, comment body contains the findings" {
   route_gh
   STUB_CLAUDE_OUTPUT="$FINDINGS_JSON" run "$GATE"

@@ -78,8 +78,8 @@ companion:
 ### Absent-only
 
 For each listed name, the installer checks the user config dir first and acts
-**only on companions that are ABSENT** — a skill present as `skills/<name>/` or a
-agent present as `agents/<name>.md` is left exactly as the user has it (reported
+**only on companions that are ABSENT** — a skill present as `skills/<name>/` or
+an agent present as `agents/<name>.md` is left exactly as the user has it (reported
 as "already present, skipped"). Re-running setup never re-installs or clobbers a
 companion you already have.
 

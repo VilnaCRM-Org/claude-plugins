@@ -170,13 +170,16 @@ PYEOF
   fi
 }
 
-# yaml_get_list FILE DOTTED.PATH — one list item per line, '' when absent.
+# yaml_get_list FILE DOTTED.PATH — one list item per line, '' when the key
+# is absent or its value is not a sequence (both backends; the yq splat
+# already yields nothing for scalars, so the fallback must match).
 yaml_get_list() {
   local file=$1 keypath=$2
   [[ -f "$file" ]] || die "yaml_get_list: no such file: $file"
   if have_yq; then
     yq "(.${keypath} // [])[]" "$file"
   else
+    yaml_is_list "$file" "$keypath" || return 0
     yaml_get "$file" "$keypath"
   fi
 }

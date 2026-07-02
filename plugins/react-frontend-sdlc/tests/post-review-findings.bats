@@ -122,6 +122,24 @@ route_gh() {
   [ "$output" = "$jq_out" ]
 }
 
+@test "--json on an empty ledger: exit 0, empty stdout (no skip-note pollution)" {
+  run "$SCRIPT" accessibility --file "$LEDGERS/empty.json" --pr 7 --json
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -f "$GH_LOG" ]
+}
+
+@test "--json on an all-dropped ledger still emits the projection rows" {
+  # render_lens would skip (zero open) — the machine-readable projection must
+  # still come out, including the dropped row.
+  printf '{"lens":"accessibility","findings":[{"id":"D","severity":"Low","location":"a:1","summary":"x","status":"dropped"}]}' > "$WORK/alldrop.json"
+  run "$SCRIPT" accessibility --file "$WORK/alldrop.json" --pr 7 --json
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"dropped"* ]]
+  [[ "$output" == *"a:1"* ]]
+  [ ! -f "$GH_LOG" ]
+}
+
 @test "jq vs python3 byte-identical conclusion render" {
   jq_out="$("$SCRIPT" --conclusion --file "$LEDGERS/full.json" --file "$LEDGERS/minimal.json" \
             --pr 7 --duration-seconds 724 --iterations 4 --dry-run)"
@@ -238,6 +256,17 @@ route_gh() {
   [[ "$output" == *"eyJ...REDACTED"* ]]
   [[ "$output" == *"password=REDACTED"* ]]
   [[ "$output" == *"https://REDACTED@internal.example.com/feed"* ]]
+}
+
+@test "redaction: --json TSV output is redacted too, not just the rendered body" {
+  run "$SCRIPT" code-review --file "$LEDGERS/secret-laden.json" --pr 7 --json
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"AKIAIOSFODNN7EXAMPLE"* ]]
+  [[ "$output" != *"SflKxwRJSMeKKF2QT4fwpMeJf36"* ]]
+  [[ "$output" != *"SuperSecretPw123"* ]]
+  [[ "$output" != *"admin:hunter2"* ]]
+  [[ "$output" == *"AKIA...REDACTED"* ]]
+  [[ "$output" == *"password=REDACTED"* ]]
 }
 
 @test "redaction is identical on the python3 backend (no jq)" {
@@ -461,6 +490,29 @@ EOF
   [[ "$output" == *"1h 02m 05s"* ]]
 }
 
+@test "conclusion duration: leading-zero --duration-seconds is decimal, never octal, never a crash" {
+  # bash (( )) would read 011 as octal 9 and abort on 0090 (9 invalid in octal)
+  run "$SCRIPT" --conclusion --file "$LEDGERS/minimal.json" --pr 7 --duration-seconds 011 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"11s"* ]]
+  [[ "$output" != *"value too great for base"* ]]
+  run "$SCRIPT" --conclusion --file "$LEDGERS/minimal.json" --pr 7 --duration-seconds 0090 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1m 30s"* ]]
+  [[ "$output" != *"value too great for base"* ]]
+}
+
+@test "conclusion stdin path cleans up its mktemp file" {
+  tmpd="$BATS_TEST_TMPDIR/concl-tmpdir"
+  mkdir -p "$tmpd"
+  TMPDIR="$tmpd" run bash -c "\"$SCRIPT\" --conclusion --pr 7 --dry-run < \"$LEDGERS/full.json\""
+  [ "$status" -eq 0 ]
+  # the ledger was actually read before removal...
+  [[ "$output" == *"| accessibility | 1 | 1 | 1 | 0 | 3 |"* ]]
+  # ...and no stale mktemp file is left behind
+  [ -z "$(ls -A "$tmpd")" ]
+}
+
 @test "conclusion duration: no source renders n/a" {
   run "$SCRIPT" --conclusion --file "$LEDGERS/full.json" --pr 7 --dry-run
   [ "$status" -eq 0 ]
@@ -522,6 +574,22 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"| F1 |"* ]]
   [[ "$output" == *"| F2 |"* ]]
+}
+
+@test "regression: id-less wcag-less findings with distinct fields are NOT collapsed (FR-4)" {
+  printf '{"lens":"code-review","findings":[{"severity":"High","location":"src/a.ts:1","summary":"FIRST-NOID"},{"severity":"High","location":"src/b.ts:9","summary":"SECOND-NOID"}]}' > "$WORK/noid.json"
+  run "$SCRIPT" code-review --file "$WORK/noid.json" --pr 7 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"FIRST-NOID"* ]]
+  [[ "$output" == *"SECOND-NOID"* ]]
+}
+
+@test "regression: identical id-less rows still dedupe to one row (FR-4)" {
+  printf '{"lens":"code-review","findings":[{"severity":"High","location":"src/a.ts:1","summary":"SAME-NOID"},{"severity":"High","location":"src/a.ts:1","summary":"SAME-NOID"}]}' > "$WORK/noid-dup.json"
+  run "$SCRIPT" code-review --file "$WORK/noid-dup.json" --pr 7 --dry-run
+  [ "$status" -eq 0 ]
+  data_rows="$(printf '%s\n' "$output" | grep -cE '^\| (Critical|High|Medium|Low) ')"
+  [ "$data_rows" -eq 1 ]
 }
 
 @test "regression: a normal digit-less location path is not over-redacted (FR-7)" {

@@ -29,7 +29,9 @@ server is not configured/reachable — record a capability-absent note and degra
 - The skip is bounded to the **visual-parity** check only. It does **not** waive the
   accessibility gate (route to the `accessibility-auditor` agent) or the visual-regression
   gate (the target mapped by `make.test_visual`, driven by the `qa-visual-tester` agent).
-  Those run regardless of `capabilities.figma`.
+  Those run regardless of `capabilities.figma`, subject only to their own gates: the
+  visual-regression lane is itself skipped with its own capability-absent note when
+  `capabilities.visual_testing` is `false` or `make.test_visual` is `null`.
 
 When `capabilities.figma` is `true`, this gate runs **before**
 [frontend-component-development](../frontend-component-development/SKILL.md) and before any
@@ -56,12 +58,13 @@ implementing the UI change** — do not silently guess the design intent.
 1. **Identify the surface + its Figma node.** Map the component/screen you are about to
    change (under the source root, `architecture.source_root`) to the corresponding Figma
    frame/component.
-2. **Pull the design via the Figma MCP** (load the tool schemas with `ToolSearch` first):
-   - `mcp__figma__get_design_context` — structured design + code context for the node.
-   - `mcp__figma__get_screenshot` — the rendered visual to compare against.
-   - `mcp__figma__get_variable_defs` — design tokens (colors, spacing, radii, type).
-   - `mcp__figma__get_metadata` — node structure/hierarchy when needed.
-   - `mcp__figma__get_code_connect_map` — existing component ↔ code mappings, if any.
+2. **Pull the design via the Figma MCP tools**, exposed under whatever server alias the
+   project has configured (load the tool schemas with `ToolSearch` first):
+   - `get_design_context` — structured design + code context for the node.
+   - `get_screenshot` — the rendered visual to compare against.
+   - `get_variable_defs` — design tokens (colors, spacing, radii, type).
+   - `get_metadata` — node structure/hierarchy when needed.
+   - `get_code_connect_map` — existing component ↔ code mappings, if any.
 3. **Compare the planned change to the design**, field by field: fill/background,
    text/label color, border + radius, spacing/padding, typography, size, and **every
    interaction state** the design defines (not just the default). Prefer the repo's design

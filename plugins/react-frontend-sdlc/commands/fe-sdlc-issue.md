@@ -69,10 +69,14 @@ and adopted, never duplicated.
 2. Ensure the plugin marker label `react-frontend-sdlc` exists:
    `gh label list` — if absent, `gh label create react-frontend-sdlc
    --description "Created by the react-frontend-sdlc SDLC loop"`.
-3. Create the issue:
+3. Create the issue — write the drafted body to a temp file (e.g.
+   `mktemp`) and pass it via `--body-file`; never inline the multiline
+   markdown body as a shell argument, where its quotes, backticks, and
+   `$` would be re-interpreted by the shell:
 
    ```bash
-   gh issue create --title "<title>" --body "<body>" --label react-frontend-sdlc
+   gh issue create --title "<title>" --body-file "<temp-body-file>" \
+     --label react-frontend-sdlc
    ```
 
 4. Verify by reading it back (`gh issue view <url> --json url,title,body,labels`):

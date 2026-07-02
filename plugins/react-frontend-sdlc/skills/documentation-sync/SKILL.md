@@ -20,6 +20,7 @@ description: Keep project documentation in sync with code changes. Use when impl
 - `make.storybook_build`
 - `quality.metrics_enforced`
 - `quality.mutation_msi`
+- `quality.lighthouse_desktop`
 - `quality.lighthouse_mobile`
 - `capabilities.storybook`
 - `capabilities.figma`
@@ -160,9 +161,9 @@ canonical defaults are 100% coverage across statements, branches, functions,
 and lines; the mutation MSI floor read from `stryker.config.mjs` `break`
 (`quality.mutation_msi`); the rust-code-analysis hard-fail policy
 (`quality.metrics_enforced`, authoritative source `config/metrics-policy.json`);
-and the Lighthouse performance floor (`quality.lighthouse_mobile` and its
-desktop counterpart). Thresholds are raise-only: never document a lowered
-bar. See [testing-workflow](../testing-workflow/SKILL.md) and
+and the Lighthouse performance floors (`quality.lighthouse_mobile` and
+`quality.lighthouse_desktop`). Thresholds are raise-only: never document a
+lowered bar. See [testing-workflow](../testing-workflow/SKILL.md) and
 [frontend-testing-workflow](../frontend-testing-workflow/SKILL.md) for how
 the suites run, and the `qa-visual-tester` agent for the visual + E2E gate.
 
@@ -171,9 +172,10 @@ the suites run, and the `qa-visual-tester` agent for the visual + E2E gate.
 Update the performance doc with the optimization name, measured impact
 (metric: before → after), and any required configuration change. Record the
 Lighthouse budget the change defends — the CI score is the one that counts,
-floored by `quality.lighthouse_mobile` for mobile and its desktop
-counterpart. Accessibility is non-negotiable: document a11y-affecting changes
-(focus order, ARIA, contrast, keyboard paths) and, when
+floored by `quality.lighthouse_mobile` for mobile and
+`quality.lighthouse_desktop` for desktop. Accessibility is non-negotiable:
+document a11y-affecting changes (focus order, ARIA, contrast, keyboard
+paths) and, when
 `capabilities.accessibility_audit` is set, note the audit that signed them
 off. Pair this with
 [frontend-performance-accessibility](../frontend-performance-accessibility/SKILL.md)
@@ -186,7 +188,8 @@ Update the patterns section when adopting or deprecating a pattern: pattern
 description, implementation example, benefits and trade-offs, and a migration
 path from the old pattern. Update diagrams for structural changes. When
 `capabilities.figma` is set, keep the design source and any exported screens
-synced in the same change (see the figma-design-check skill); when it is
+synced in the same change (see the
+[figma-design-check](../figma-design-check/SKILL.md) skill); when it is
 false, **SKIPPED:** note that no design source is wired and document the
 visual intent in prose.
 

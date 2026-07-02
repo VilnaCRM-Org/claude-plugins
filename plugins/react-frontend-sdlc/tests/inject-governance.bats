@@ -193,12 +193,12 @@ EOF
 
 @test "--diff previews without writing" {
   printf '# My project\n' > "$REPO/CLAUDE.md"
-  before="$(cat "$REPO/CLAUDE.md")"
+  cp "$REPO/CLAUDE.md" "$BATS_TEST_TMPDIR/before.md"
   run "$INJECT" --diff "$REPO"
   [ "$status" -eq 0 ]
   [[ "$output" == *"pending changes"* ]]
   [[ "$output" == *"+$BEGIN"* ]]
-  [ "$(cat "$REPO/CLAUDE.md")" = "$before" ]
+  cmp "$BATS_TEST_TMPDIR/before.md" "$REPO/CLAUDE.md"
   [ ! -f "$REPO/AGENTS.md" ]
 }
 
@@ -295,11 +295,11 @@ EOF
   printf '# docs\n\n```\n%s\nEXAMPLE text\n%s\n```\n' "$BEGIN" "$END" > "$REPO/CLAUDE.md"
   run "$INJECT" "$REPO"
   [ "$status" -eq 0 ]
-  first="$(cat "$REPO/CLAUDE.md")"
+  cp "$REPO/CLAUDE.md" "$BATS_TEST_TMPDIR/first.md"
   run "$INJECT" "$REPO"
   [ "$status" -eq 0 ]
   [[ "$output" == *"unchanged"* ]]
-  [ "$(cat "$REPO/CLAUDE.md")" = "$first" ]
+  cmp "$BATS_TEST_TMPDIR/first.md" "$REPO/CLAUDE.md"
   grep -qF 'EXAMPLE text' "$REPO/CLAUDE.md"
 }
 
@@ -317,22 +317,50 @@ EOF
   ! grep -qx 'STALE' "$REPO/CLAUDE.md"
   grep -q 'Skill-triage gate' "$REPO/CLAUDE.md"
   # rerun is byte-stable: no second block appended
-  first="$(cat "$REPO/CLAUDE.md")"
+  cp "$REPO/CLAUDE.md" "$BATS_TEST_TMPDIR/first.md"
   run "$INJECT" "$REPO"
   [ "$status" -eq 0 ]
   [[ "$output" == *"unchanged"* ]]
-  [ "$(cat "$REPO/CLAUDE.md")" = "$first" ]
+  cmp "$BATS_TEST_TMPDIR/first.md" "$REPO/CLAUDE.md"
   [ "$(grep -cxF "$BEGIN" "$REPO/CLAUDE.md")" -eq 1 ]
+}
+
+@test "markers inside a longer outer fence survive: closer must match opener length" {
+  # A 3-backtick line inside a 4-backtick fence is content, not a closer;
+  # the documented example between the inner fence lines must survive and
+  # one real block is appended outside the fence.
+  printf '# docs\n\n````\n```\n%s\nNESTED EXAMPLE text\n%s\n```\n````\n\ntail\n' \
+    "$BEGIN" "$END" > "$REPO/CLAUDE.md"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  grep -qF 'NESTED EXAMPLE text' "$REPO/CLAUDE.md"
+  [ "$(grep -cxF '````' "$REPO/CLAUDE.md")" -eq 2 ]
+  [ "$(grep -cxF '```' "$REPO/CLAUDE.md")" -eq 2 ]
+  [ "$(marker_pairs "$REPO/CLAUDE.md")" = "2 2" ]
+  grep -q 'Skill-triage gate' "$REPO/CLAUDE.md"
+}
+
+@test "markers inside a backtick fence nested in a tilde fence survive: closer must match delimiter" {
+  # Backtick fence lines inside an open ~~~ fence are content, not closers;
+  # the documented example stays suppressed until the matching ~~~ closer.
+  printf '# docs\n\n~~~\n```\n%s\nTILDE EXAMPLE text\n%s\n```\n~~~\n' \
+    "$BEGIN" "$END" > "$REPO/CLAUDE.md"
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  grep -qF 'TILDE EXAMPLE text' "$REPO/CLAUDE.md"
+  [ "$(grep -cxF '~~~' "$REPO/CLAUDE.md")" -eq 2 ]
+  [ "$(marker_pairs "$REPO/CLAUDE.md")" = "2 2" ]
+  grep -q 'Skill-triage gate' "$REPO/CLAUDE.md"
 }
 
 @test "R2 Bug 5: a read-only (0444) managed file needing a change is refused, unmodified" {
   printf 'user content, no markers\n' > "$REPO/CLAUDE.md"
   chmod 0444 "$REPO/CLAUDE.md"
-  before="$(cat "$REPO/CLAUDE.md")"
+  cp "$REPO/CLAUDE.md" "$BATS_TEST_TMPDIR/before.md"
   run "$INJECT" "$REPO"
   [ "$status" -eq 1 ]
   [[ "$output" == *"read-only"* ]]
-  [ "$(cat "$REPO/CLAUDE.md")" = "$before" ]
+  cmp "$BATS_TEST_TMPDIR/before.md" "$REPO/CLAUDE.md"
   ! grep -q 'react-frontend-sdlc:begin' "$REPO/CLAUDE.md"
   [ "$(stat -c '%a' "$REPO/CLAUDE.md")" = "444" ]
   # no temp litter left behind by the refused write

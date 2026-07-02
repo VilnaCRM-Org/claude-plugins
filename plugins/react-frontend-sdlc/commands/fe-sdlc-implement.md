@@ -54,8 +54,11 @@ story is done — or a safety mechanism stops it.
      prerequisite story is done.
 4. **Container-only execution** — every `react-implementer` runs build,
    test, and quality commands exclusively through the profile `make`
-   map (`make.build`, `make.lint`, `make.test_unit_client`, … or
-   `docker compose exec dev`). A `make.<key>: null` entry means the
+   map (`make.build`, `make.lint`, `make.test_unit_client`, …); an
+   ad-hoc command the map does not cover (a single test file, one `tsc`
+   pass) stays inside the dev container via the agent's sanctioned
+   `docker compose exec dev bun x <command>` escape hatch — never a
+   substitute for a mapped target. A `make.<key>: null` entry means the
    capability is absent: record it and skip that check with a note
    (NFR-4) — never substitute a host command.
 5. **Monitor progress** — Ralph tracks story checkboxes and emits

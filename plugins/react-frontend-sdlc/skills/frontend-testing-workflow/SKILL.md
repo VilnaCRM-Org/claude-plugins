@@ -30,6 +30,7 @@ description: Author and maintain frontend tests — Jest unit suites (jsdom clie
 - `architecture.path_aliases`
 - `framework.bundler`
 - `framework.package_manager`
+- `framework.graphql_mock`
 
 All test invocations go through the profile's `make` target map. A `null`
 value for a `make.*` key means the capability is absent: skip that suite
@@ -69,8 +70,9 @@ targets.
 | Mutation         | target mapped by `make.test_mutation`    | Stryker (driven by RTL)| component layer under root|
 
 Mirror source ownership: a test's directory tracks the source area it
-covers under `architecture.source_root`. Reference values from the
-canonical upstream profile:
+covers under `architecture.source_root` — typically one of the feature
+modules declared in `architecture.modules`, or a shared layer. Reference
+values from the canonical upstream profile:
 
 ```bash # profile-example
 make test-unit-client    # make.test_unit_client → jsdom + Testing Library

@@ -162,7 +162,7 @@ for pm in bun pnpm npm; do
   fi
 done
 if (( ${#pms_found[@]} > 0 )); then
-  record PASS "package-manager" "available: ${pms_found[*]} (any of bun|pnpm|npm satisfies)" "-"
+  record PASS "package-manager" "available: ${pms_found[*]} (any of bun, pnpm, npm satisfies)" "-"
 else
   record FAIL "package-manager" "none of bun, pnpm, or npm found on PATH" \
     "install a JS package manager: bun (https://bun.sh), pnpm (https://pnpm.io), or npm (bundled with Node.js)"

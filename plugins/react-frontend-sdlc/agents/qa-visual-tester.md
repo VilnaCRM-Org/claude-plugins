@@ -130,7 +130,7 @@ stack: make.start_prod = <target>, base URL = <url>
 ## Quality lanes
 | lane | target | gate | result | verdict |
 |---|---|---|---|---|
-| visual | make.test_visual | quality.visual_diffs <= 0 | <diff count> | PASS/FAIL/SKIPPED |
+| visual | make.test_visual | <= quality.visual_diffs | <diff count> | PASS/FAIL/SKIPPED |
 | lighthouse-desktop | make.lighthouse_desktop | >= quality.lighthouse_desktop | <score> | PASS/FAIL/SKIPPED |
 | lighthouse-mobile | make.lighthouse_mobile | >= quality.lighthouse_mobile | <score> | PASS/FAIL/SKIPPED |
 | a11y (axe-core) | make.a11y | 0 violations | <violation count> | PASS/FAIL/SKIPPED |

@@ -16,9 +16,10 @@
 # 'FR_NFR_NEW_FINDINGS: <n>'. Always posts the 'BMAD FR/NFR Review
 # Gate' commit status for HEAD; posts a PR comment carrying the
 # findings only when n > 0 (success stays comment-quiet to limit PR
-# noise — the status check is the durable signal). Exit 0 = zero new
-# findings; anything else (findings, malformed output, transport
-# failure after retry) exits 1 with a failure status.
+# noise — the status check is the durable signal, so a status post
+# that fails is itself fatal). Exit 0 = zero new findings with the
+# success status recorded; anything else (findings, malformed output,
+# transport failure after retry, an unpostable status) exits 1.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -90,7 +91,7 @@ post_status() {
     -f state="$state" \
     -f context="$STATUS_CONTEXT" \
     -f description="$description" >/dev/null \
-    || log_warn "failed to post commit status to $repo_slug@${head_sha}"
+    || die "failed to post commit status to $repo_slug@${head_sha} (the status check is the gate's durable verdict; restore gh access and re-run)"
 }
 
 post_comment() {

@@ -69,7 +69,7 @@ test, never by this agent).
 - **One family per dispatch.** This agent audits exactly ONE assigned WCAG 2.2
   principle / a11y family (e.g. perceivable/contrast, operable/keyboard,
   forms/name-role-value, modals/dialog, live-regions, alt-text/headings, links,
-  tables) — the family id and its `reference/wcag-playbooks.md` entry arrive in
+  tables) — the family id and its `reference/audit-playbooks.md` entry arrive in
   the dispatch prompt. It does not wander to other families; the orchestrator
   owns the full-corpus coverage.
 - **Grey-box (the deliberate difference from a pure `qa-visual-tester`).**
@@ -116,7 +116,7 @@ test, never by this agent).
 ## Inputs
 
 1. The dispatch prompt from the `accessibility-audit` skill orchestrator
-   (Task tool): the assigned WCAG family id, its `reference/wcag-playbooks.md`
+   (Task tool): the assigned WCAG family id, its `reference/audit-playbooks.md`
    entry (the static check + the reproduce-against-stack step + axe rule ids /
    WCAG test procedure), the finding-record report contract (Outputs, below),
    and the current iteration number from the skill's loop guard — plus, on a

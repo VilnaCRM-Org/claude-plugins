@@ -1,5 +1,5 @@
 ---
-description: "Review implemented frontend changes: 18-skill applicability triage, multi-lens quality + FR/NFR review with a MANDATORY accessibility gate, looping until zero new findings and a clean a11y verdict"
+description: "Review implemented frontend changes: 19-skill applicability triage, multi-lens quality + FR/NFR review with a MANDATORY accessibility gate, looping until zero new findings and a clean a11y verdict"
 argument-hint: "[slug | PR-URL]"
 allowed-tools: ["Bash", "Read", "Glob", "Grep", "Task"]
 ---
@@ -50,7 +50,7 @@ runs no git).
 ## Procedure
 
 1. **Applicability triage (ADR-5, NFR-5)** — for EVERY skill directory
-   at `${CLAUDE_PLUGIN_ROOT}/skills/*/SKILL.md` (18 in v1):
+   at `${CLAUDE_PLUGIN_ROOT}/skills/*/SKILL.md` (19 in v1):
    - Decide from the skill's frontmatter (`name` + trigger-rich
      `description`, including profile-gating conditions like "Skip when
      `capabilities.figma` is false") plus the decision guide — and
@@ -58,7 +58,7 @@ runs no git).
    - Record one verdict per skill: `EXECUTE` with one-line evidence
      (which changed file or behavior triggers it) or `NOT-APPLICABLE`
      with a one-line reason (including profile-gated skips).
-   - All 18 verdicts are recorded before any body loads. Token bound
+   - All 19 verdicts are recorded before any body loads. Token bound
      (NFR-5): full SKILL.md bodies + reference files load only for
      EXECUTE verdicts.
 2. **Execute applicable skills** — load each EXECUTE skill's body and
@@ -164,7 +164,7 @@ runs no git).
    That dispatch-commit-reinvoke cycle is one iteration of the loop
    below.
 5. **Report** — render the report template below. Every section is
-   mandatory; verdicts must cover 18/18 skills, and threshold rows must
+   mandatory; verdicts must cover 19/19 skills, and threshold rows must
    cite the actual values read from the profile.
 
 ### Report template
@@ -172,10 +172,10 @@ runs no git).
 ```text
 # SDLC Review Report — <slug>, iteration <n>/5
 
-## Skill triage (18/18 verdicts)
+## Skill triage (19/19 verdicts)
 | skill | verdict | evidence / reason |
 |---|---|---|
-| <one row per skill, all 18> | EXECUTE \| NOT-APPLICABLE | <one line> |
+| <one row per skill, all 19> | EXECUTE \| NOT-APPLICABLE | <one line> |
 | frontend-performance-accessibility | EXECUTE \| NOT-APPLICABLE | <a11y/perf static checks against the changed UI surface when in scope; the live a11y verdict is owned by the always-dispatched accessibility-auditor agent> |
 
 ## code-quality-reviewer
@@ -243,6 +243,8 @@ lens ledgers, the captured timing, and the existing `iteration <n>/5` counter:
 # Resolve the poster from make.post_review_findings, the SAME null-substitution
 # the per-lens Publish steps use: read the profile value (common.sh profile_get),
 # falling back to the bundled script when the key is null (its shipped default).
+# PR is optional: when unset, --pr is omitted and the poster resolves the PR
+# from the current branch or degrades (skip-with-note, FR-9) — never a crash.
 profile="$(profile_path)"
 POSTER="$(profile_get "$profile" make.post_review_findings "")"
 POSTER="${POSTER:-${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh}"
@@ -250,7 +252,7 @@ POSTER="${POSTER:-${CLAUDE_PLUGIN_ROOT}/scripts/post-review-findings.sh}"
   --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/accessibility.json" \
   --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/fr-nfr.json" \
   --file "${SDLC_LEDGER_DIR:-.sdlc/review-ledgers}/code-review.json" \
-  --pr "${PR:?PR number required}" --started-at "$REVIEW_STARTED_AT" \
+  ${PR:+--pr "$PR"} --started-at "$REVIEW_STARTED_AT" \
   --ended-at "$REVIEW_ENDED_AT" --iterations "$ITERATION"
 ```
 

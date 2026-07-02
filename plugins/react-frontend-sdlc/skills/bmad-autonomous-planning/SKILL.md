@@ -8,7 +8,9 @@ description: Creates the full BMAD planning artifact chain (research, brief, PRD
 ## Profile keys consumed
 
 - `project.name`, `project.repo`
-- `architecture.source_root`, `architecture.modules`
+- `architecture.source_root`, `architecture.modules`, `architecture.component_prefix`
+- `framework.ui`, `framework.state`, `framework.di`, `framework.router`, `framework.bundler`, `framework.runtime`, `framework.i18n`, `framework.graphql_mock`
+- `quality.coverage_statements`, `quality.coverage_branches`, `quality.coverage_functions`, `quality.coverage_lines`, `quality.mutation_msi`, `quality.jscpd_clones`, `quality.eslint_errors`, `quality.eslint_warnings`, `quality.tsc_errors`, `quality.depcruise_violations`, `quality.metrics_enforced`, `quality.visual_diffs`, `quality.lighthouse_desktop`, `quality.lighthouse_mobile`
 
 This skill invokes no `make.*` targets: the planning flow runs entirely in
 the current AI session. The frontend stack the plan must fit is read from
@@ -281,10 +283,10 @@ The architecture must fit the repository's actual stack and patterns as
 declared by the profile: the UI/styling layer, state manager, DI container,
 router, bundler, runtime, and i18n captured under `framework.*`, and the
 modular bulletproof-react layout under `architecture.source_root` with the
-feature modules in `architecture.modules` plus the reusable-component prefix
-convention. The plan slots new screens, components, hooks, and state into
-those existing modules and the shared component layer rather than inventing
-new top-level directories.
+feature modules in `architecture.modules` plus the reusable-component
+prefix convention (`architecture.component_prefix`). The plan slots new
+screens, components, hooks, and state into those existing modules and the
+shared component layer rather than inventing new top-level directories.
 
 ```text # profile-example
 # Reference-template fit statement derived from the profile:

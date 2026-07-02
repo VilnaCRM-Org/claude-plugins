@@ -101,6 +101,7 @@ never overwritten unless the user passed `--refresh` (NFR-3).
    {
      "permissions": {
        "allow": [
+         "Bash(bmalph:*)",
          "Bash(make:*)",
          "Bash(bun:*)",
          "Bash(docker compose exec dev:*)",
@@ -113,12 +114,16 @@ never overwritten unless the user passed `--refresh` (NFR-3).
 
    Merge, do not clobber: if the file exists, add only the missing
    entries to `permissions.allow` and leave every other setting intact.
-   These cover the container-only toolchain — Make drives every gate,
-   `bun` manages dependencies, `docker compose exec dev` reaches into
-   the dev container for single-test inner loops, and `git`/`gh` drive
-   the PR. Document in your summary that `bypassPermissions` is a
-   Ralph-driver opt-in only — `/fe-sdlc-setup` never writes it and
-   nothing in this plugin defaults to it.
+   These cover the container-only toolchain — `bmalph` drives the
+   bootstrap (step 2) and the stage-3 Ralph loop, Make drives every
+   gate, `bun` manages dependencies, `docker compose exec dev` reaches
+   into the dev container for single-test inner loops, and `git`/`gh`
+   drive the PR. The package-manager entry tracks
+   `framework.package_manager`: on a repo whose profile says `pnpm` or
+   `npm`, write `Bash(pnpm:*)` / `Bash(npm:*)` instead of `Bash(bun:*)`
+   (docs/permissions.md). Document in your summary that
+   `bypassPermissions` is a Ralph-driver opt-in only — `/fe-sdlc-setup`
+   never writes it and nothing in this plugin defaults to it.
 
 7. **Install companion skills (optional enhancement)** — run:
 
@@ -161,7 +166,7 @@ overwrite the invalid profile — without it the retry is a no-op) and
 re-validate. Exit condition (measurable):
 `setup-preflight.sh` exits 0 AND `validate-profile.sh` exits 0 AND the
 governance block exists in `CLAUDE.md`/`AGENTS.md` AND
-`.claude/settings.json` contains the five allowlist entries. The
+`.claude/settings.json` contains the six allowlist entries. The
 companion-skills install is best-effort and is intentionally outside the
 exit condition — its failure degrades to a warning and never blocks
 setup.

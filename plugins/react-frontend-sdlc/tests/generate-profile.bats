@@ -156,6 +156,31 @@ pget() { yaml_get "$PROFILE" "$1"; }
   [ "$(pget framework.package_manager)" = "npm" ]
 }
 
+@test "next-i18next beats react-i18next; bad packageManager falls back to lockfile" {
+  NEXTAPP="$BATS_TEST_TMPDIR/nextapp"
+  mkdir -p "$NEXTAPP"
+  cat >"$NEXTAPP/package.json" <<'JSON'
+{
+  "name": "next-app",
+  "packageManager": "pnpm bad: }garbage",
+  "dependencies": {
+    "next": "^14.0.0",
+    "next-i18next": "^15.0.0",
+    "react-i18next": "^14.0.0",
+    "i18next": "^23.0.0"
+  }
+}
+JSON
+  touch "$NEXTAPP/pnpm-lock.yaml"
+  run "$GENERATE" "$NEXTAPP"
+  [ "$status" -eq 0 ]
+  PROFILE="$NEXTAPP/.claude/react-sdlc.yml"
+  # next-i18next is the more specific i18n signal than react-i18next/i18next
+  [ "$(pget framework.i18n)" = "next-i18next" ]
+  # unrecognized packageManager text is dropped; the lockfile decides
+  [ "$(pget framework.package_manager)" = "pnpm" ]
+}
+
 @test "unknown flag: usage error" {
   run "$GENERATE" --bogus "$REPO"
   [ "$status" -eq 1 ]

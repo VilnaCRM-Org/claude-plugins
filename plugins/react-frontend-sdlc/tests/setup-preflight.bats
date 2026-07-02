@@ -58,8 +58,8 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
     package-manager node docker yaml-toolchain json-toolchain; do
     [[ "$output" == *"PASS: $check"* ]]
   done
-  # non-report mode prints the full detail (contrast: --report truncates it)
-  [[ "$output" == *"any of bun|pnpm|npm satisfies"* ]]
+  # detail stays pipe-free: record() rows are '|'-delimited for --report
+  [[ "$output" == *"any of bun, pnpm, npm satisfies"* ]]
   [[ "$output" == *"preflight OK"* ]]
   [[ "$output" == *"[react-sdlc]"* ]]
   [[ "$output" != *FAIL* ]]
@@ -74,6 +74,8 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
     [[ "$output" == *"$check"* ]]
   done
   [[ "$output" =~ package-manager[[:space:]]+PASS ]]
+  # the full detail survives the '|'-delimited row round-trip untruncated
+  [[ "$output" == *"any of bun, pnpm, npm satisfies"* ]]
   [[ "$output" =~ node[[:space:]]+PASS ]]
   [[ "$output" =~ docker[[:space:]]+PASS ]]
   [[ "$output" != *FAIL* ]]

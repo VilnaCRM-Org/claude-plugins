@@ -93,7 +93,10 @@ Identify the failing check and apply the fix at the root cause:
 
 ### Step 4: Re-run
 
-Re-run the `make.ci` target. Repeat Steps 2-4 until it exits `0`.
+Re-run the `make.ci` target. Repeat Steps 2-4 until it exits `0`, bounded at
+**max 5 iterations** (the same cap the `ci-fixer` agent enforces). On
+exhaustion, stop and escalate: report the still-failing checks, the fixes
+attempted, and the recommended next step instead of looping further.
 
 ## Alternative Commands
 

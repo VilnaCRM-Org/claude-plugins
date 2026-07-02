@@ -22,6 +22,7 @@ workflow runs unprompted:
 {
   "permissions": {
     "allow": [
+      "Bash(bmalph:*)",
       "Bash(make:*)",
       "Bash(bun:*)",
       "Bash(docker compose exec dev:*)",
@@ -32,8 +33,11 @@ workflow runs unprompted:
 }
 ```
 
-Five entries, matching how the plugin works:
+Six entries, matching how the plugin works:
 
+- `Bash(bmalph:*)` — the BMAD runner: `/fe-sdlc-setup` step 2 runs
+  `bmalph init`, and `/fe-sdlc-implement` drives the stage-3 Ralph loop
+  through `bmalph implement` and `bmalph run --driver claude-code`.
 - `Bash(make:*)` — every build/lint/test lane runs through a `make`
   target from the [profile](profile-schema.md) `make` map (the logical
   targets mapped by `make.lint_eslint`, `make.build`, `make.test_e2e`,
@@ -68,14 +72,15 @@ stack-specific tokens are filled from the profile.
 
 ### Why container-only
 
-The frontend toolchain — the bundler (RSBuild / Next / Vite), Jest,
-Playwright (E2E + visual), Stryker, Lighthouse, k6, memlab — runs inside
-Docker for every SDLC stage, reached through `make` targets or a direct
-`docker compose exec` into the dev service. The allowlist grants exactly
-those two surfaces plus the package manager and `git` / `gh`; it never
-grants a broad `Bash(*)`. So a non-interactive session can drive the full
-container toolchain and the VCS/PR flow, but cannot run arbitrary host
-binaries.
+The container-backed lanes — the bundler (RSBuild / Next / Vite), Jest,
+Playwright (E2E + visual), Stryker, Lighthouse, k6, memlab — run inside
+Docker, reached through `make` targets or a direct `docker compose exec`
+into the dev service. The package manager, `git`, and `gh` run host-side
+(the dependency operations and the VCS/PR flow described above). The
+allowlist grants exactly those two container surfaces plus the three
+host commands; it never grants a broad `Bash(*)`. So a non-interactive
+session can drive the full container toolchain and the VCS/PR flow, but
+cannot run arbitrary host binaries.
 
 ## `bypassPermissions`: Ralph-only opt-in
 

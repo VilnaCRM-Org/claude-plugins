@@ -252,6 +252,28 @@ fingerprint() {
 }
 
 # ============================================================================
+# security: a companion name with shell metacharacters must be rejected, never
+# interpolated into `bash -c` (CWE-78 command injection defense-in-depth).
+# ============================================================================
+
+@test "unsafe companion name is rejected (no shell injection), exit 1" {
+  local prof="$BATS_TEST_TMPDIR/evil.yml"
+  local canary="$BATS_TEST_TMPDIR/pwned"
+  # If this name were substituted into the template and run unchecked, the
+  # trailing `touch` would create $canary. The allowlist gate must block it.
+  write_profile "$prof" 'true {name}' "good; touch $canary" ""
+
+  run "$SCRIPT" "$prof"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"[react-sdlc][WARN] skipping companion with unsafe name: good; touch $canary"* ]]
+  # the injected command never ran
+  [ ! -e "$canary" ]
+  # surfaced as a failed companion (non-fatal to the caller, but non-zero here)
+  [[ "$output" == *"auto-install failed for 1 companion(s): skill:good; touch $canary"* ]]
+  [[ "$output" != *"companion skills step complete"* ]]
+}
+
+# ============================================================================
 # empty lists / missing profile — boundary behavior
 # ============================================================================
 

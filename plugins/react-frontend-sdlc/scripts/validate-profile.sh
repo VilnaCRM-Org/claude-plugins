@@ -5,8 +5,9 @@
 # Usage: validate-profile.sh [PROFILE_FILE]
 #   PROFILE_FILE defaults to <cwd>/.claude/react-sdlc.yml
 #
-# Checks: required keys, schema_version == 1, the feature-module list type
-# (a flat component library may declare it empty), make map completeness
+# Checks: required keys, schema_version == 1, list-typed keys (the required
+# feature-module list plus the optional list keys, empty lists legal; a flat
+# component library may declare modules empty), make map completeness
 # (null values are legal — capability absent, NFR-4), and the ADR-7
 # raise-only quality rule: score thresholds may only move up from the
 # shipped defaults, violation-count ceilings may only stay at 0.
@@ -96,6 +97,16 @@ check_ceiling() {
   fi
 }
 
+# Optional list key: MAY be absent, but a declared value must be a sequence
+# (a bare scalar reads back non-empty via yaml_get_list and would otherwise
+# pass silently, same trap as architecture.modules below).
+check_optional_list() {
+  local key=$1
+  if yaml_has "$PROFILE" "$key" && ! yaml_is_list "$PROFILE" "$key"; then
+    violation "key '$key' must be a list (sequence) when declared"
+  fi
+}
+
 # --- schema_version -------------------------------------------------------
 schema_version="$(yaml_get "$PROFILE" schema_version)"
 if [[ -z "$schema_version" ]]; then
@@ -119,6 +130,15 @@ require_nonnull architecture.source_root
 if ! yaml_is_list "$PROFILE" architecture.modules; then
   violation "key 'architecture.modules' must be a list (sequence) of feature-module directory names"
 fi
+
+# --- optional list keys ------------------------------------------------------
+# Absent is legal (the schema defaults apply), but a declared value must be
+# a sequence; an EMPTY list stays valid. companion.* is deliberately NOT
+# checked — the schema declares it non-validated.
+check_optional_list architecture.path_aliases
+check_optional_list ci.workflows
+check_optional_list ci.required_checks
+check_optional_list review.ai_review_agents
 
 # --- make map completeness (null = capability absent, NFR-4) ----------------
 MAKE_KEYS=(ci start start_prod build lint lint_eslint lint_tsc lint_md

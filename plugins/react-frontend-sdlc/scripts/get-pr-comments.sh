@@ -38,6 +38,8 @@ if [[ -n "$PR" && ! "$PR" =~ ^[0-9]+$ ]]; then
   die "--pr must be a number, got: $PR"
 fi
 command -v gh >/dev/null 2>&1 || die "gh CLI not found on PATH"
+command -v jq >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1 \
+  || die "need jq or python3 to process the gh GraphQL payload"
 
 if [[ -z "$PR" ]]; then
   PR="$(gh pr view --json number --jq .number 2>/dev/null)" \

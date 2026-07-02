@@ -105,39 +105,51 @@ BLOCK
 # which lines are real markers.
 #
 # Fence suppression is gated on FENCE_AWARE, set by fence_balance() below to
-# 1 only when the file's fence lines are BALANCED (an even count, every
-# opener closed). An UNCLOSED fence must not enable suppression: a stateful
+# 1 only when the file's fences are BALANCED (every opener closed by a
+# matching closer). An UNCLOSED fence must not enable suppression: a stateful
 # toggle would stay "inside the fence" through EOF and swallow the real
 # managed block we append at the end, so the next run would no longer see
 # that block and would append ANOTHER — a duplicate-block / non-idempotent
-# regression (NFR-3). With an odd fence count we fall back to plain
+# regression (NFR-3). With an unclosed fence we fall back to plain
 # whole-line marker matching (the pre-fence behaviour), which is safe and
 # idempotent; the documented-example case (Bug 4) always has a balanced
 # ``` pair, so it still gets the protection.
 AWK_FENCE_PRELUDE='
   function norm(l) { sub(/\r$/, "", l); return l }
-  # A fence opener/closer is a line whose only content (after CR strip and
-  # leading-space trim) is 3+ backticks or tildes, optionally followed by an
-  # info string (for an opener). Toggling on every such line treats marker
-  # lines between an open and close fence as plain content. When
-  # fence_aware is 0 the toggle is a no-op so every pass matches markers
+  # A fence opener is a line whose content (after CR strip and leading-space
+  # trim) starts with 3+ backticks or tildes, optionally followed by an info
+  # string. The closer must repeat the SAME delimiter at least as long, with
+  # nothing after it (CommonMark), so a shorter, longer-nested, or
+  # other-delimiter fence-like line inside an open fence is plain content
+  # and marker lines inside nested/longer fences stay suppressed. When
+  # fence_aware is 0 the tracking is a no-op so every pass matches markers
   # by whole line regardless of fences.
-  function fence_toggle(l,   t) {
+  function fence_run(t, ch,   n) { n = 0; while (substr(t, n + 1, 1) == ch) n++; return n }
+  function fence_toggle(l,   t, n) {
     if (!fence_aware) return 0
     t = norm(l); sub(/^[ \t]+/, "", t)
-    if (t ~ /^(```+|~~~+)/) { infence = !infence; return 1 }
+    if (!infence) {
+      if (t !~ /^(```+|~~~+)/) return 0
+      fence_ch = substr(t, 1, 1)
+      fence_len = fence_run(t, fence_ch)
+      infence = 1
+      return 1
+    }
+    if (substr(t, 1, 1) != fence_ch) return 0
+    n = fence_run(t, fence_ch)
+    if (n >= fence_len && substr(t, n + 1) ~ /^[ \t]*$/) { infence = 0; return 1 }
     return 0
   }
 '
 
-# fence_balance FILE — print 1 when the file has an even number of fenced
-# code-block delimiter lines (``` or ~~~ at column 0 after trim), else 0.
-# Only a balanced count is safe for fence-aware marker suppression.
+# fence_balance FILE — print 1 when every fence opener in the file is
+# closed by a matching closer (no fence left open at EOF), else 0. Only a
+# fully closed fence state is safe for fence-aware marker suppression. The
+# shared prelude drives the same opener/closer tracking as every pass.
 fence_balance() {
-  awk '
-    { t = $0; sub(/\r$/, "", t); sub(/^[ \t]+/, "", t)
-      if (t ~ /^(```+|~~~+)/) n++ }
-    END { print (n % 2 == 0) ? 1 : 0 }
+  awk -v fence_aware=1 "$AWK_FENCE_PRELUDE"'
+    { fence_toggle($0) }
+    END { print infence ? 0 : 1 }
   ' "$1"
 }
 
@@ -218,7 +230,7 @@ render_managed() {
   # later (which follows symlinks and was a TOCTOU: $file could be swapped for
   # a symlink between the guard and that chmod, letting an attacker pick the new
   # file's mode). CWE-367.
-  existing_mode="$(stat -c '%a' "$file" 2>/dev/null || true)"
+  existing_mode="$(stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file" 2>/dev/null || true)"
   cat "$file" >"$snap_file"
   # Compute fence balance ONCE from the snapshot and thread the same value
   # through every pass, so counting, pairing, and the rewrites all agree on
@@ -319,7 +331,7 @@ for name in CLAUDE.md AGENTS.md; do
     overall_changed=1
     log_info "$name: pending changes (--diff preview, file not written)"
     if (( file_exists )); then
-      diff -u --label "$file" --label "$file (pending)" "$snap_file" "$new_file" || true
+      diff -u -L "$file" -L "$file (pending)" "$snap_file" "$new_file" || true
     else
       log_info "$name does not exist; it would be created with the managed block"
     fi

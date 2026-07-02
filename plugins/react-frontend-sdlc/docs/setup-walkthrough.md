@@ -80,7 +80,8 @@ unchanged re-run it reports a no-op.
 | 6 Permissions | Allowlist entries merged into `.claude/settings.json` |
 | 7 Companion skills | Optional companions under the user config dir (never the repo tree) |
 
-The allowlist written in step 6 is:
+The allowlist written in step 6 is (shown with the `bun` form of the
+package-manager entry):
 
 ```json
 {
@@ -99,9 +100,10 @@ The allowlist written in step 6 is:
 These cover the container-only toolchain: Make drives every gate, the package
 manager manages dependencies, `docker compose exec dev` reaches into the dev
 container for single-test inner loops, and `git`/`gh` drive the PR. The
-`bun` entry names the reference SPA's manager; a repo on `pnpm` or `npm`
-simply does not exercise it, and generic tooling (`gh`, `git`) is invoked
-directly regardless. `bypassPermissions` is a Ralph-driver opt-in only —
+package-manager entry is filled from the profile's
+`framework.package_manager` — the block above shows the `bun` form; on a
+`pnpm` or `npm` repo `/fe-sdlc-setup` writes `Bash(pnpm:*)` / `Bash(npm:*)`
+instead. `bypassPermissions` is a Ralph-driver opt-in only —
 `/fe-sdlc-setup` never writes it and nothing in this plugin defaults to it.
 
 ## `--refresh` semantics

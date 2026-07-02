@@ -78,6 +78,35 @@ assert d["issue_comments"] == []
 print("filtered json OK")'
 }
 
+@test "--json: a deleted-user (null author) comment falls back to 'unknown' on both backends" {
+  # GraphQL returns author:null for deleted accounts; normalize must emit
+  # "unknown", not null, on the jq and python paths alike.
+  NULLAUTHOR='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"isResolved":false,"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":null,"body":"orphaned note","path":"src/modules/alpha/app.tsx","line":3,"url":"u1"}]}}]},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":null,"body":"ghost summary","url":"u2"}]}}}}}'
+  STUB_GH_OUTPUT="$NULLAUTHOR" run "$SCRIPT" --pr 7 --json
+  [ "$status" -eq 0 ]
+  echo "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["review_threads"][0]["comments"][0]["author"] == "unknown"
+assert d["issue_comments"][0]["author"] == "unknown"
+print("null-author fallback OK")'
+
+  dir="$BATS_TEST_TMPDIR/nojq-nullauthor-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname python3 cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  ln -sf "$STUBS/gh" "$dir/gh"
+  STUB_GH_OUTPUT="$NULLAUTHOR" PATH="$dir" run "$SCRIPT" --pr 7 --json
+  [ "$status" -eq 0 ]
+  echo "$output" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["review_threads"][0]["comments"][0]["author"] == "unknown"
+assert d["issue_comments"][0]["author"] == "unknown"
+print("null-author fallback OK")'
+}
+
 @test "python fallback path produces identical canonical JSON" {
   # sandbox PATH without jq: route everything through the python branch
   dir="$BATS_TEST_TMPDIR/nojq-bin"
@@ -95,6 +124,28 @@ import json, sys
 a = json.loads(sys.argv[1]); b = json.loads(sys.argv[2])
 assert a == b, "backends disagree"
 print("backends agree")' "$jq_out" "$py_out"
+}
+
+@test "python fallback honors --unresolved-only identically (no jq)" {
+  # the --unresolved-only tests above run with jq on PATH; the python
+  # normalize() filter branch (skip resolved threads, empty issue_comments)
+  # needs its own no-jq run.
+  dir="$BATS_TEST_TMPDIR/nojq-uo-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname python3 cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  ln -sf "$STUBS/gh" "$dir/gh"
+  jq_out="$("$SCRIPT" --pr 7 --json --unresolved-only)"
+  PATH="$dir" run "$SCRIPT" --pr 7 --json --unresolved-only
+  [ "$status" -eq 0 ]
+  python3 -c '
+import json, sys
+a = json.loads(sys.argv[1]); b = json.loads(sys.argv[2])
+assert a == b, "backends disagree"
+assert len(a["review_threads"]) == 1
+assert a["issue_comments"] == []
+print("unresolved-only backends agree")' "$jq_out" "$output"
 }
 
 @test "python human-render path (no jq, no --json) matches jq listing" {
@@ -181,6 +232,34 @@ EOF
   [[ "$output" == *"pagination is not supported"* ]]
 }
 
+@test "pagination guard fires for issue-comment and thread-comment pages too (both backends)" {
+  # the truncated fixture only sets reviewThreads.pageInfo.hasNextPage; the
+  # other two hasNextPage sources checked by has_next_page() — the
+  # issue-comments connection and a thread's own comments connection —
+  # need their own payloads.
+  ISSUE_PAGE='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]},"comments":{"pageInfo":{"hasNextPage":true},"nodes":[]}}}}}'
+  THREAD_PAGE='{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[{"isResolved":false,"comments":{"pageInfo":{"hasNextPage":true},"nodes":[]}}]},"comments":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}'
+  for payload in "$ISSUE_PAGE" "$THREAD_PAGE"; do
+    STUB_GH_OUTPUT="$payload" run "$SCRIPT" --pr 7
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"pagination is not supported"* ]]
+    [[ "$output" != *"unresolved threads:"* ]]
+  done
+
+  dir="$BATS_TEST_TMPDIR/nojq-pageflags-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname python3 cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  ln -sf "$STUBS/gh" "$dir/gh"
+  for payload in "$ISSUE_PAGE" "$THREAD_PAGE"; do
+    STUB_GH_OUTPUT="$payload" PATH="$dir" run "$SCRIPT" --pr 7
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"pagination is not supported"* ]]
+    [[ "$output" != *"unresolved threads:"* ]]
+  done
+}
+
 @test "gh exit 0 with non-JSON output: clean die naming the PR, no raw jq error (GPC-N3)" {
   # gh can exit 0 yet print an HTML proxy error page; the script must
   # diagnose it itself instead of surfacing a jq parse error (exit 5).
@@ -248,6 +327,24 @@ print("backends agree")' "$jq_out" "$py_out"
   run "$SCRIPT" --bogus
   [ "$status" -eq 1 ]
   [[ "$output" == *"unknown argument: --bogus"* ]]
+}
+
+@test "neither jq nor python3 on PATH: fails fast with a toolchain die, not a misleading non-JSON error" {
+  # Without the upfront check, a machine lacking both backends only failed
+  # inside raw_is_json (python3: command not found, stderr suppressed) and
+  # surfaced as 'returned non-JSON output' — blaming gh/network instead of
+  # the missing toolchain.
+  dir="$BATS_TEST_TMPDIR/notoolchain-bin"
+  mkdir -p "$dir"
+  for tool in bash git grep sed sort head dirname cat mktemp; do
+    src="$(command -v "$tool")" && ln -sf "$src" "$dir/$tool"
+  done
+  ln -sf "$STUBS/gh" "$dir/gh"
+  PATH="$dir" run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"[react-sdlc][ERROR]"* ]]
+  [[ "$output" == *"need jq or python3"* ]]
+  [[ "$output" != *"non-JSON"* ]]
 }
 
 # --- R2 regression: no-PR payloads, gh-resolved PR validation --------------

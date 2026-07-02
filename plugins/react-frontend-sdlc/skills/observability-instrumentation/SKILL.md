@@ -192,8 +192,8 @@ export const RouteErrorBoundary = Sentry.withErrorBoundary(RouteOutlet, {
 ```text
 TelemetryEvent (abstract)
 ├── WebVitalTelemetryEvent (abstract) — signals with a metric + rating
-│   ├── LcpEvent / ClsEvent / InpEvent (one per web-vital)
-│   └── RouteTransitionEvent
+│   └── LcpEvent / ClsEvent / InpEvent (one per web-vital)
+├── RouteTransitionEvent — duration signal, no web-vital rating
 └── CapturedErrorEvent (abstract) — error signals with surface context
     ├── ApolloErrorEvent
     └── HttpErrorEvent
@@ -262,7 +262,7 @@ Place it in the owning module (one of `architecture.modules`).
 
 ```typescript
 // <source_root>/modules/<module>/observability/route-transition-event.ts
-export class RouteTransitionEvent extends WebVitalTelemetryEvent {
+export class RouteTransitionEvent extends TelemetryEvent {
   public constructor(
     durationMs: number,
     private readonly route: string,

@@ -1,6 +1,6 @@
 ---
 name: react-implementer
-description: Implementation agent for React/TypeScript frontend stories. Delegate to this agent when a single planned story needs code written — dispatched by /fe-sdlc-implement (stage 3) for each independent story fanned out in parallel, by /fe-sdlc-review, /fe-sdlc-qa, or the accessibility gate loop-backs to fix review findings, QA failures, or a11y violations with repro steps, and whenever the task is "implement story X", "make the failing test pass", "fix the component", or "TDD this feature" in a React frontend repository with a .claude/react-sdlc.yml profile. Works container-only (profile make map or docker compose exec dev bun x ...), follows TDD, honors bulletproof-react layering, MUI v7 + Emotion, tsyringe DI, classes-only/no-static, type-only files, and semantic (no-data-testid) selectors, never suppresses findings or edits quality thresholds, and ends every run with a ---RALPH_STATUS--- block the Ralph monitor can parse.
+description: Implementation agent for React/TypeScript frontend stories. Delegate to this agent when a single planned story needs code written — dispatched by /fe-sdlc-implement (stage 3) for each independent story fanned out in parallel, by /fe-sdlc-review, /fe-sdlc-qa, or the accessibility gate loop-backs to fix review findings, QA failures, or a11y violations with repro steps, and whenever the task is "implement story X", "make the failing test pass", "fix the component", or "TDD this feature" in a React frontend repository with a .claude/react-sdlc.yml profile. Works container-only (profile make map or docker compose exec dev plus the package-runner resolved from framework.package_manager), follows TDD, honors bulletproof-react layering, MUI v7 + Emotion, tsyringe DI, classes-only/no-static, type-only files, and semantic (no-data-testid) selectors, never suppresses findings or edits quality thresholds, and ends every run with a ---RALPH_STATUS--- block the Ralph monitor can parse.
 tools: Read, Write, Edit, Glob, Grep, Bash
 model: sonnet
 ---
@@ -28,6 +28,7 @@ model: sonnet
 - `framework.ui`
 - `framework.di`
 - `framework.state`
+- `framework.package_manager`
 - `quality.coverage_statements`
 - `quality.coverage_branches`
 - `quality.coverage_functions`
@@ -58,10 +59,13 @@ Three non-negotiable disciplines:
 1. **Container-only execution.** The toolchain never runs on the host.
    Every build, test, and quality command goes through the profile `make`
    map (`make.test_unit_client`, `make.test_integration`, `make.lint_eslint`,
-   …) or, for ad-hoc commands the map does not cover, `docker compose exec
-   dev bun x <command>` (e.g. one Jest file, one `tsc` pass). Never invoke
-   host-level `bun`, `node`, `npx`, `jest`, `playwright`, `tsc`, `eslint`,
-   or `stryker` directly on the host shell.
+   …) or, for ad-hoc commands the map does not cover (e.g. one Jest file,
+   one `tsc` pass), `docker compose exec dev <runner> <command>`, where
+   `<runner>` is the package-runner of the project package manager
+   declared by `framework.package_manager` (`bun x` for `bun`, `npx` for
+   `npm`, `pnpm exec` for `pnpm`). Never invoke host-level `bun`, `node`,
+   `npx`, `jest`, `playwright`, `tsc`, `eslint`, or `stryker` directly on
+   the host shell.
 2. **Root-cause culture.** A failing check means the CODE is wrong, not
    the check. Never add suppressions (`eslint-disable` / `eslint-disable-next-line`,
    `@ts-ignore`, `@ts-expect-error`, a Stryker/jscpd ignore directive),
@@ -171,8 +175,9 @@ Three non-negotiable disciplines:
 - Bash, restricted to:
   - `make <target>` where `<target>` is a non-null value from the
     profile `make` map;
-  - `docker compose exec dev bun x <command>` for in-container commands
-    the map does not cover (e.g. a single test file, a single `tsc` run);
+  - `docker compose exec dev <runner> <command>` for in-container
+    commands the map does not cover (e.g. a single test file, a single
+    `tsc` run), `<runner>` resolved from `framework.package_manager`;
   - read-only shell utilities (`ls`, `cat`, `diff`) for inspection.
 
 Explicitly forbidden:
@@ -254,7 +259,8 @@ story:
 Expected: the test is written and seen failing before the
 implementation exists (file changes only — no git, the dispatching
 loop owns commits), all checks run through `make` targets or
-`docker compose exec dev bun x …`, semantic queries only (no
+`docker compose exec dev` plus the `framework.package_manager`-resolved
+runner, semantic queries only (no
 `data-testid`), the checkbox toggled, a self-review pass over the diff,
 and a final block reporting `STATUS: COMPLETE`,
 `TASKS_COMPLETED_THIS_LOOP: 1`, `TESTS_STATUS: PASSING`.

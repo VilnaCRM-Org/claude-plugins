@@ -43,12 +43,11 @@ flowchart TD
 
   feature --> hook
   feature --> child
+  hook --> provider
   hook --> repository
   hook --> store
-  repository --> provider
   provider --> repository
   repository --> api
-  child --> store
 ```
 
 Read the layers top to bottom:
@@ -116,7 +115,7 @@ matches its layout.
 - `module-allowed-folders` — module root may only contain `config`, `features`, `hooks`,
   `lib`, `store`, `types`, `utils`.
 - `feature-allowed-folders` — feature root may only contain `assets`, `components`,
-  `hooks`, `i18n`, `repositories`, `routes`, `stores`, `types`, `utils`.
+  `hooks`, `i18n`, `repositories`, `routes`, `types`, `utils`.
 - `feature-hooks-file-convention` — files inside `features/*/hooks/` must be `index.*` or
   `use-<kebab>.*`.
 
@@ -198,7 +197,7 @@ deep import past a module or repository boundary.
 
 A module root holds only `config`, `features`, `hooks`, `lib`, `store`, `types`, `utils`;
 a feature root holds only `assets`, `components`, `hooks`, `i18n`, `repositories`, `routes`,
-`stores`, `types`, `utils`. Each feature view pairs with a typed DTO in its `types/` folder
+`types`, `utils`. Each feature view pairs with a typed DTO in its `types/` folder
 — the DTO is the shape the repository returns, and the component never sees the raw API
 response.
 

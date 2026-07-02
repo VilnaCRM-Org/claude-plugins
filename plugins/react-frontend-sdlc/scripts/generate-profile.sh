@@ -110,8 +110,10 @@ has_dep() { [[ -n "$(pkg_dep "$1")" ]]; }
 
 # pkg_alias_keys — path-alias keys from tsconfig.paths.json (preferred) or
 # tsconfig.json compilerOptions.paths, one per line, trailing '/*' stripped.
+# JSONC parsing needs python3; without it aliases degrade to empty (NFR-4).
 pkg_alias_keys() {
   local f
+  command -v python3 >/dev/null 2>&1 || return 0
   for f in "$TARGET/tsconfig.paths.json" "$TARGET/tsconfig.json"; do
     [[ -f "$f" ]] || continue
     python3 - "$f" <<'PYEOF' && return 0
@@ -213,9 +215,14 @@ elif [[ -n "$(pkg_string '.exports' exports)$(pkg_string '.module' module)" ]]; 
   framework_bundler="library"
 fi
 
-# package_manager: the pinned packageManager field, else a lockfile signal.
+# package_manager: the pinned packageManager field when it names a supported
+# manager (anything else is untrusted repo text), else a lockfile signal.
 # Required non-null by the validator, so fall back to npm when nothing pins it.
-framework_pm="$(sanitize_inline "$(strip_pm "$(pkg_string '.packageManager' packageManager)")")"
+framework_pm="$(strip_pm "$(pkg_string '.packageManager' packageManager)")"
+case "$framework_pm" in
+  bun|pnpm|npm|yarn) ;;
+  *) framework_pm="" ;;
+esac
 if [[ -z "$framework_pm" ]]; then
   if [[ -f "$TARGET/bun.lock" || -f "$TARGET/bun.lockb" ]]; then framework_pm="bun"
   elif [[ -f "$TARGET/pnpm-lock.yaml" ]]; then framework_pm="pnpm"
@@ -228,8 +235,8 @@ fi
 framework_runtime="$(strip_constraint "$(pkg_string '.engines.node' engines.node)")"
 
 framework_i18n=""
-if has_dep react-i18next || has_dep i18next; then framework_i18n="react-i18next"
-elif has_dep next-i18next; then framework_i18n="next-i18next"
+if has_dep next-i18next; then framework_i18n="next-i18next"
+elif has_dep react-i18next || has_dep i18next; then framework_i18n="react-i18next"
 fi
 
 framework_graphql_mock=""
@@ -344,7 +351,6 @@ for sc in "$TARGET"/stryker.config.mjs "$TARGET"/stryker.conf.mjs \
     break
   fi
 done
-[[ -z "$mutation_msi" ]] && mutation_msi=2
 
 metrics_enforced="false"
 [[ -n "$make_lint_metrics" ]] && metrics_enforced="true"

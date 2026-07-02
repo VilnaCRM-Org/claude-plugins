@@ -282,3 +282,27 @@ FAIL_JSON='{"result":"found issues\nAI_REVIEW_VERDICT: FAIL"}'
   [ "$status" -eq 0 ]
   [[ "$output" == *"PASS on iteration 1"* ]]
 }
+
+@test "missing YAML toolchain: preflight error names the toolchain, not YAML syntax" {
+  # With a VALID profile present but no yq and no python3 on PATH,
+  # yaml_parses fails for want of a backend (its diagnostics are
+  # suppressed), so without the require_yaml_toolchain preflight the
+  # loop would misreport 'profile is not valid YAML'. Sandbox PATH holds
+  # only what the script needs before the preflight.
+  mkdir -p .claude
+  printf 'review:\n  ai_review_agents: [claude]\n' > .claude/react-sdlc.yml
+  local sandbox="$BATS_TEST_TMPDIR/sandbox-bin"
+  mkdir -p "$sandbox"
+  local tool src
+  for tool in bash dirname; do
+    src="$(command -v "$tool")"
+    ln -sf "$src" "$sandbox/$tool"
+  done
+  PATH="$sandbox" run "$LOOP"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no YAML toolchain"* ]]
+  [[ "$output" == *"install yq"* ]]
+  [[ "$output" == *PyYAML* ]]
+  [[ "$output" != *"profile is not valid YAML"* ]]
+  [ "$(calls_made)" -eq 0 ]
+}

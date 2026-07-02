@@ -61,6 +61,7 @@ else
   # shellcheck disable=SC2119  # profile_path's TARGET_REPO_DIR arg is optional
   profile="$(profile_path)"
   if [[ -f "$profile" ]]; then
+    require_yaml_toolchain
     # Guard the read with yaml_parses so a malformed profile fails with one
     # clean [react-sdlc] diagnostic naming the bad file, instead of letting
     # yaml_get_list's backend dump a raw ~30-line PyYAML traceback (or a yq

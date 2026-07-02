@@ -249,7 +249,7 @@ render_lens() {
         # Collapse the a11y-style sink tuple (wcag,location,surface) to one
         # row; but a wcag-less finding (fr-nfr / code-review) keys on its unique
         # id so two distinct findings at the same location are NOT merged away.
-        key = ($3 != "" ? $3 "|" $5 "|" $6 : "ID:" $2)
+        key = ($3 != "" ? $3 "|" $5 "|" $6 : ($2 != "" ? "ID:" $2 : "NOID:" $5 "|" $6 "|" $7))
         if (!seen[key]++) print rank "\t" $0
       }' | sort -t$'\t' -k1,1n -k3,3 -k6,6 | cut -f2- | tr '\t' '\037'
   )"
@@ -413,6 +413,7 @@ human_duration() {
   # Digit string only, and bounded (>12 digits is >31000 years — an absurd
   # crafted value; reject it rather than risk a (( )) wrap, NFR-4).
   [[ "$secs" =~ ^[0-9]+$ && ${#secs} -le 12 ]] || { printf 'n/a'; return; }
+  secs=$(( 10#$secs ))
   h=$(( secs / 3600 )); m=$(( (secs % 3600) / 60 )); s=$(( secs % 60 ))
   if (( h > 0 )); then
     out="$(printf '%dh %02dm %02ds' "$h" "$m" "$s")"
@@ -589,13 +590,17 @@ run_lens() {
   [[ -n "$cleanup" ]] && rm -f "$cleanup"
   [[ "$rc" -eq 0 ]] || die "malformed ledger (not JSON / wrong top-level type / missing lens): ${FILES[0]:-<stdin>}"
 
+  if [[ "$JSON_OUT" -eq 1 ]]; then
+    [[ -z "$tsv" ]] || printf '%s\n' "$tsv" | redact
+    exit 0
+  fi
+
   local body
   if ! body="$(printf '%s' "$tsv" | render_lens "$LENS" "${PR:-0}")"; then
     log_info "post-review-findings: ledger for lens '$LENS' has no open findings — skipping publish"
     exit 0
   fi
 
-  if [[ "$JSON_OUT" -eq 1 ]]; then printf '%s\n' "$tsv"; exit 0; fi
   if [[ "$DRY_RUN" -eq 1 ]]; then printf '%s\n' "$body"; exit 0; fi
 
   command -v gh >/dev/null 2>&1 || { log_info "post-review-findings: gh not on PATH — skipping publish"; exit 0; }
@@ -615,6 +620,7 @@ run_conclusion() {
     files=("${FILES[@]}")
   else
     local tmp; tmp="$(stdin_to_tmp)"; files=("$tmp")
+    trap 'rm -f "$tmp"' EXIT
   fi
 
   local body pr="${PR:-0}"

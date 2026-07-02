@@ -55,7 +55,7 @@ re-measured by script output, never by memory of what was handled.
   Both produce the canonical shape
   `{pr, review_threads: [{is_resolved, comments: [{author, body, path,
   line, url}]}], issue_comments}`.
-- For EACH unresolved thread, exactly one of two dispositions:
+- For EACH unresolved thread, exactly one of three dispositions:
   1. **Fix** — the comment is right: locate the code (Read/Glob/Grep),
      apply the fix with Edit, verify locally via the profile's
      `make.lint` and/or `make.test_unit_client` target (the one matching
@@ -66,6 +66,10 @@ re-measured by script output, never by memory of what was handled.
      addressed: post a reasoned reply via `gh` explaining WHY, citing
      `file:line` evidence from the current tree, then resolve the
      thread.
+  3. **Blocked** — neither a fix nor a reply was possible this pass
+     (e.g. a `gh` call still failing after its one retry — see Degrade
+     paths): record the thread as `blocked` in the report with the raw
+     error, leave it UNRESOLVED so it re-enters the next pass's set.
   Hard prohibition: never resolve a thread without a fix or a posted
   reply, never reply with bare acknowledgments ("done", "ack",
   "will fix"), never delete, hide, or minimize comments. Silent

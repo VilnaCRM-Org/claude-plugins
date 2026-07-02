@@ -24,7 +24,6 @@ description: Create a comprehensive frontend project documentation suite from sc
 - `architecture.path_aliases`
 - `make.ci`
 - `make.start`
-- `make.build`
 - `make.lint_md`
 - `make.format`
 - `make.test_unit_client`
@@ -33,14 +32,12 @@ description: Create a comprehensive frontend project documentation suite from sc
 - `make.test_load`
 - `make.lighthouse_desktop`
 - `make.lighthouse_mobile`
-- `make.storybook_build`
 - `quality.coverage_lines`
 - `quality.mutation_msi`
 - `quality.lighthouse_desktop`
 - `quality.lighthouse_mobile`
 - `capabilities.load_testing`
 - `capabilities.lighthouse`
-- `capabilities.visual_testing`
 - `capabilities.storybook`
 
 ## Overview
@@ -148,18 +145,18 @@ grep -E "^[a-zA-Z][a-zA-Z0-9_-]*:" Makefile | head -30
 Create a technology summary table sourced from the verified profile
 values:
 
-| Component        | Technology                  | Source                       |
-| ---------------- | --------------------------- | ---------------------------- |
-| Language         | TypeScript                  | `package.json`               |
-| Runtime          | Node                        | `framework.runtime`          |
-| Package manager  | Bun (deps only)             | `framework.package_manager`  |
-| UI + styling     | `framework.ui`              | Material UI v7 + Emotion     |
-| State            | `framework.state`           | Zustand                      |
-| DI container     | `framework.di`              | tsyringe                     |
-| Router           | `framework.router`          | React Router                 |
-| Bundler          | `framework.bundler`         | RSBuild (Rspack)             |
-| i18n             | `framework.i18n`            | react-i18next                |
-| GraphQL mock     | `framework.graphql_mock`    | Apollo Server (local dev)    |
+| Component        | Technology                  | Source                           |
+| ---------------- | --------------------------- | -------------------------------- |
+| Language         | TypeScript                  | `package.json`                   |
+| Runtime          | `framework.runtime`         | `.nvmrc` + `package.json`        |
+| Package manager  | `framework.package_manager` | lockfile + `package.json`        |
+| UI + styling     | `framework.ui`              | `package.json` dependencies      |
+| State            | `framework.state`           | `package.json` dependencies      |
+| DI container     | `framework.di`              | `package.json` dependencies      |
+| Router           | `framework.router`          | `package.json` dependencies      |
+| Bundler          | `framework.bundler`         | bundler config + `package.json`  |
+| i18n             | `framework.i18n`            | `package.json` dependencies      |
+| GraphQL mock     | `framework.graphql_mock`    | `package.json` dependencies      |
 
 ### Step 3: Create Documentation Files
 
@@ -306,12 +303,12 @@ accessibility-first UI, container-free render path, raise-only quality}
 
 ## Technology Stack
 
-| Component | Technology          | Source                   |
-| --------- | ------------------- | ------------------------ |
-| Language  | TypeScript          | package.json             |
-| UI        | {framework.ui}      | Material UI v7 + Emotion |
-| State     | {framework.state}   | Zustand                  |
-| Bundler   | {framework.bundler} | RSBuild (Rspack)         |
+| Component | Technology          | Source       |
+| --------- | ------------------- | ------------ |
+| Language  | TypeScript          | package.json |
+| UI        | {framework.ui}      | package.json |
+| State     | {framework.state}   | package.json |
+| Bundler   | {framework.bundler} | package.json |
 ```
 
 ### Getting Started (getting-started.md)

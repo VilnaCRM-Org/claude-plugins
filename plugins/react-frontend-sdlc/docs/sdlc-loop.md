@@ -21,10 +21,10 @@ user: /fe-sdlc "task text | issue URL"
         ├─ parallel react-implementer subagents (independent stories)
         ├─ artifact: fix-plan checkboxes + ---RALPH_STATUS--- (EXIT_SIGNAL)
         └─[circuit breaker open]──► ESCALATED report (never reset)                    ◄─┐
-  └─ stage 4 /fe-sdlc-review ── triage 18 verdicts → code-quality-reviewer +            │
+  └─ stage 4 /fe-sdlc-review ── triage 19 verdicts → code-quality-reviewer +            │
         fr-nfr-reviewer + accessibility-auditor (MANDATORY a11y gate) → fr-nfr-gate.sh; │
         loop <=5 until 0 new FR/NFR findings AND a11y gate clean AND quality PASS       │
-        artifact: review report (18/18 verdicts, findings/iteration)                    │
+        artifact: review report (19/19 verdicts, findings/iteration)                    │
   └─ stage 5 /fe-sdlc-qa ── qa-visual-tester (make.start_prod + Mockoon stack:          │
         Playwright E2E + visual regression + Lighthouse + axe-core a11y)                │
         artifact: QA report ──[FAIL + repro steps]── loop-back ──────────────────────────┘

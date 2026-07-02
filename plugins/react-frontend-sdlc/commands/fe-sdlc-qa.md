@@ -80,7 +80,13 @@ this command and its agent report, they never fix.
      `quality.lighthouse_desktop` / `quality.lighthouse_mobile`;
      axe-core passes only at zero violations. A capability that is
      `false`/absent (or whose `make.*` target is `null`) makes its lane
-     SKIPPED-with-note — never a silent pass, never a FAIL.
+     SKIPPED-with-note — never a silent pass, never a FAIL. The a11y
+     lane never skips straight to that: when the live axe-core run is
+     unavailable (`capabilities.dynamic_a11y_testing` false or
+     `make.a11y` null) it falls back to the static a11y lane when
+     `capabilities.accessibility_audit` is true; only with that flag
+     also false/absent is the lane SKIPPED-with-note — the documented
+     not-opted-in degrade, never an invented or relaxed threshold.
    - Every check records: the exact interaction issued (spec path +
      Playwright invocation, or lane command), expected behavior,
      observed behavior, verdict.
@@ -108,7 +114,7 @@ stack: make.start_prod = <target>, base URL = <url>
 ## Quality lanes
 | lane | target | gate | result | verdict |
 |---|---|---|---|---|
-| visual | make.test_visual | quality.visual_diffs <= 0 | <diff count> | PASS/FAIL/SKIPPED |
+| visual | make.test_visual | <= quality.visual_diffs | <diff count> | PASS/FAIL/SKIPPED |
 | lighthouse-desktop | make.lighthouse_desktop | >= quality.lighthouse_desktop | <score> | PASS/FAIL/SKIPPED |
 | lighthouse-mobile | make.lighthouse_mobile | >= quality.lighthouse_mobile | <score> | PASS/FAIL/SKIPPED |
 | a11y (axe-core) | make.a11y | 0 violations | <violation count> | PASS/FAIL/SKIPPED |

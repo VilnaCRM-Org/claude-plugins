@@ -39,19 +39,25 @@ The target mapped by `make.format` runs the project's Prettier pass (invoked thr
 - `SKIPPED: make.lint_metrics` when `make.lint_metrics` is `null` (a repo that ships no rust-code-analysis metrics gate).
 - `make.lint_eslint` may resolve to a different target name per repo (e.g. an ESLint target wired under `lint-next`); `make.format` may resolve to a check-only variant (`format-check`); `make.lint_deps` may resolve to a dependency-cruiser target under a different name. Always use the mapped target, never the bare tool name.
 
-**Qlty bootstrap (tooling absent)**: if the `make.format` run fails only because the `qlty` CLI is missing, install it once, put it on `PATH`, and re-run — do not skip the formatter or stage repo Qlty config:
+**Qlty bootstrap (tooling absent)**: if the `make.format` run fails only because the `qlty` CLI is missing, install it once, put it on `PATH`, and re-run — do not skip the formatter or stage repo Qlty config. Prefer a binary preinstalled by the host image; otherwise download the release artifact for the host platform and verify its published checksum before extracting — never fetch-and-execute a remote install script:
 
 ```bash # profile-example
 command -v qlty >/dev/null || {
-  installer="$(mktemp)" \
-    && curl -fsSL https://qlty.sh -o "$installer" \
-    && sh "$installer"
-  rm -f "$installer"
+  target="x86_64-unknown-linux-gnu" \
+    && release="https://github.com/qltysh/qlty/releases/latest/download" \
+    && dir="$(mktemp -d)" \
+    && curl -fsSL -o "$dir/qlty-$target.tar.xz" "$release/qlty-$target.tar.xz" \
+    && curl -fsSL -o "$dir/qlty-$target.tar.xz.sha256" "$release/qlty-$target.tar.xz.sha256" \
+    && (cd "$dir" && sha256sum --check "qlty-$target.tar.xz.sha256") \
+    && mkdir -p "$HOME/.qlty/bin" \
+    && tar -xJf "$dir/qlty-$target.tar.xz" -C "$HOME/.qlty/bin" \
+      --strip-components=1 "qlty-$target/qlty"
+  rm -rf "$dir"
 }
 export PATH="$HOME/.qlty/bin:$PATH"
 ```
 
-Inspect `"$installer"` before the `sh` step if you have not run it recently. Do not run `qlty init` or stage `.qlty/qlty.toml` unless the task explicitly asks for repository Qlty configuration.
+Substitute `target` for the host platform (e.g. `aarch64-apple-darwin`, whose `shasum -a 256 -c` replaces `sha256sum --check`). Do not run `qlty init` or stage `.qlty/qlty.toml` unless the task explicitly asks for repository Qlty configuration.
 
 ## Individual Checks
 

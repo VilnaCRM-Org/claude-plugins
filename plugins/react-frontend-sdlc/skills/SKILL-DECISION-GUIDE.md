@@ -18,7 +18,7 @@ never assume a single stack.
 
 - `make.ci`, `make.fr_nfr_gate`, `make.test_load`, `make.a11y`, `make.lint_deps`,
   `make.pr_comments`, `make.lighthouse_desktop`, `make.lighthouse_mobile`
-- `quality.coverage_lines`, `quality.mutation_msi`, `quality.depcruise_violations`,
+- `quality.coverage_statements`, `quality.mutation_msi`, `quality.depcruise_violations`,
   `quality.lighthouse_desktop`, `quality.lighthouse_mobile`
 - `capabilities.figma`, `capabilities.load_testing`, `capabilities.accessibility_audit`,
   `capabilities.dynamic_a11y_testing`, `capabilities.observability`
@@ -167,7 +167,7 @@ the hard-fail thresholds in `config/metrics-policy.json`.
 **Use**: [frontend-testing-workflow](frontend-testing-workflow/SKILL.md)
 
 Covers the client (jsdom) and server (node) unit environments, E2E, visual snapshot updates, the
-API-mock-backed E2E debugging path, and the `quality.coverage_lines` floor (default `100`,
+API-mock-backed E2E debugging path, and the `quality.coverage_statements` floor (default `100`,
 raise-only). Tests locate elements by user-facing semantics — never by a test-only `data-testid`.
 
 **NOT**: testing-workflow when you already know the specific suite.

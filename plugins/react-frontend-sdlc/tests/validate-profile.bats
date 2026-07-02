@@ -59,6 +59,32 @@ setup() {
   [[ "$output" == *"VIOLATION: key 'architecture.modules' must be a list"* ]]
 }
 
+@test "optional list keys: scalar rejected, absent and empty stay legal" {
+  python3 - "$PROFILES/valid.yml" "$BATS_TEST_TMPDIR/scalar-lists.yml" "$BATS_TEST_TMPDIR/optional-lists-ok.yml" <<'PYEOF'
+import sys, yaml
+p = yaml.safe_load(open(sys.argv[1]))
+p['architecture']['path_aliases'] = '@'
+p['ci']['workflows'] = 'CI'
+p['ci']['required_checks'] = 'static-testing'
+p['review']['ai_review_agents'] = 'claude'
+yaml.safe_dump(p, open(sys.argv[2], 'w'), sort_keys=False)
+p = yaml.safe_load(open(sys.argv[1]))
+p['architecture'].pop('path_aliases')
+p['ci']['workflows'] = []
+p['review'].pop('ai_review_agents')
+yaml.safe_dump(p, open(sys.argv[3], 'w'), sort_keys=False)
+PYEOF
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/scalar-lists.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"VIOLATION: key 'architecture.path_aliases' must be a list (sequence) when declared"* ]]
+  [[ "$output" == *"VIOLATION: key 'ci.workflows' must be a list (sequence) when declared"* ]]
+  [[ "$output" == *"VIOLATION: key 'ci.required_checks' must be a list (sequence) when declared"* ]]
+  [[ "$output" == *"VIOLATION: key 'review.ai_review_agents' must be a list (sequence) when declared"* ]]
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/optional-lists-ok.yml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"profile valid"* ]]
+}
+
 @test "raised ceiling: exit 1, names eslint_errors relaxed above default (ADR-7)" {
   run "$VALIDATOR" "$PROFILES/raised-ceiling.yml"
   [ "$status" -eq 1 ]

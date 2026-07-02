@@ -116,10 +116,19 @@ COMMENT|<comment url>|decline|<url>     # declined with reasoned comment
 The body hash comes from the comment's `bodyText`:
 
 ```bash
-body_hash_from_b64() {
-  printf '%s' "$1" | base64 --decode | sha256sum | awk '{ print $1 }'
+b64_decode() {
+  if printf '' | base64 --decode >/dev/null 2>&1; then base64 --decode; else base64 -D; fi
 }
-iso_time_epoch() { date -u -d "$1" +%s; }
+sha256_hex() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi
+}
+body_hash_from_b64() {
+  printf '%s' "$1" | b64_decode | sha256_hex | awk '{ print $1 }'
+}
+iso_time_epoch() {
+  date -u -d "$1" +%s 2>/dev/null ||
+    date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s
+}
 ```
 
 **Validation rules** — each `COMMENT` line must satisfy, against the comment's

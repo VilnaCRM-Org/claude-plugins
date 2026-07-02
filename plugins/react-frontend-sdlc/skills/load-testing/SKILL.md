@@ -171,8 +171,8 @@ const email = 'test@example.com';
 // Deterministic operations
 const operationIndex = __ITER % 3;
 
-// Dynamic, isolated test data
-const email = `test_${Date.now()}_${randomString(6)}@example.com`;
+// Deterministic, isolated test data - unique per VU and iteration
+const email = `test_vu${__VU}_iter${__ITER}@example.com`;
 
 // Proper cleanup
 export function teardown(data) {

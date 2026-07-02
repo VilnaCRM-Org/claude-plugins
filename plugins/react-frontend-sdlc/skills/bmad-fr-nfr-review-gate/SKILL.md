@@ -381,8 +381,9 @@ blocks PASS.
    refactors/fixes (route them to the `react-implementer` agent), rerun
    verification, and start the next gate iteration. A verification failure
    after a passing review is treated as another fix iteration, not completion.
-   Bound the loop with an explicit iteration counter, **max 5 iterations**; an
-   unbounded loop is acceptable only when intentionally chosen.
+   Bound the loop with an explicit iteration counter, **max 5 iterations**; on
+   exhaustion, stop, leave the gate failing, and report the remaining findings
+   and the recommended next step instead of iterating further.
 7. Fetch and address GitHub comments via the target mapped by
    `make.pr_comments` when a PR exists; when `make.pr_comments` is `null`, use
    `${CLAUDE_PLUGIN_ROOT}/scripts/get-pr-comments.sh`.

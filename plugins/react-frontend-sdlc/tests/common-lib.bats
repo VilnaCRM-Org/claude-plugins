@@ -183,6 +183,17 @@ setup() {
   [ "${#lines[@]}" -eq 2 ]
 }
 
+@test "yaml_get_list yields empty for a scalar under a list key on both backends" {
+  # framework.ui is a bare scalar; a list read must not leak it as one item.
+  SDLC_FORCE_PYTHON_YAML=1 run yaml_get_list "$VALID_PROFILE" framework.ui
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  # default backend: yq where installed, python fallback otherwise.
+  run yaml_get_list "$VALID_PROFILE" framework.ui
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
 @test "yaml_is_list is true only for sequences, false for scalars/absent" {
   SDLC_FORCE_PYTHON_YAML=1 run yaml_is_list "$VALID_PROFILE" architecture.modules
   [ "$status" -eq 0 ]
