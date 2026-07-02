@@ -1,0 +1,12 @@
+{
+  "lens": "fr-nfr",
+  "findings": [
+    {
+      "id": "FR-1-1",
+      "severity": "Medium",
+      "location": "src/modules/alpha/features/login/login-form.tsx:5",
+      "summary": "Acceptance criterion not covered by the change set",
+      "status": "open"
+    }
+  ]
+}

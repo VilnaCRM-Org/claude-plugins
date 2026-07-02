@@ -1,0 +1,25 @@
+{
+  "lens": "accessibility",
+  "findings": [
+    {
+      "id": "OPEN-1",
+      "severity": "Medium",
+      "wcag": "4.1.2",
+      "level": "A",
+      "location": "src/modules/alpha/features/render/render.tsx:30",
+      "surface": "Render",
+      "summary": "Custom control is missing an ARIA role",
+      "status": "open"
+    },
+    {
+      "id": "DROP-X",
+      "severity": "High",
+      "wcag": "2.4.7",
+      "level": "AA",
+      "location": "src/components/legacy/legacy.tsx:7",
+      "surface": "Legacy",
+      "summary": "NOT-REPRODUCED-DROPPED candidate",
+      "status": "dropped"
+    }
+  ]
+}

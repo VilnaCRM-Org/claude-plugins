@@ -7,7 +7,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ['php-backend-sdlc-v*']
+    tags: ['php-backend-sdlc-v*', 'react-frontend-sdlc-v*']
 
 # Least-privilege default token: jobs only read repo contents (checkout).
 # Any job needing more must opt in explicitly with its own permissions block.
@@ -101,7 +101,7 @@ jobs:
       - name: shellcheck plugin scripts
         run: |
           set -euo pipefail
-          mapfile -t files < <(find plugins/php-backend-sdlc/scripts -type f -name '*.sh')
+          mapfile -t files < <(find plugins -type f -path '*/scripts/*.sh')
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No shell scripts yet — pass"
             exit 0
@@ -118,7 +118,7 @@ jobs:
       - name: Run bats suites
         run: |
           set -euo pipefail
-          mapfile -t files < <(find plugins/php-backend-sdlc/tests -type f -name '*.bats')
+          mapfile -t files < <(find plugins -type f -path '*/tests/*.bats')
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No bats tests yet — pass"
             exit 0
@@ -134,7 +134,6 @@ jobs:
       - name: Check component frontmatter (ADR-11 skill glob)
         run: |
           set -euo pipefail
-          PLUGIN=plugins/php-backend-sdlc
           fail=0
 
           # ADR-2 toolchain: at least one YAML backend must exist, else the
@@ -184,22 +183,22 @@ jobs:
             done
           }
 
-          for f in "$PLUGIN"/commands/*.md; do
+          for f in plugins/*/commands/*.md; do
             [ -e "$f" ] || continue
             check_keys "$f" description argument-hint
           done
-          for f in "$PLUGIN"/agents/*.md; do
+          for f in plugins/*/agents/*.md; do
             [ -e "$f" ] || continue
             check_keys "$f" name description tools model
           done
           # Skills are matched as skills/*/SKILL.md ONLY (ADR-11): loose
           # meta-guide .md files at skills/ root are exempt and must NOT
           # have frontmatter.
-          for f in "$PLUGIN"/skills/*/SKILL.md; do
+          for f in plugins/*/skills/*/SKILL.md; do
             [ -e "$f" ] || continue
             check_keys "$f" name description
           done
-          for f in "$PLUGIN"/skills/*.md; do
+          for f in plugins/*/skills/*.md; do
             [ -e "$f" ] || continue
             if [ "$(head -n1 "$f")" = "---" ]; then
               echo "FAIL: meta-guide $f must not have frontmatter (ADR-11)"

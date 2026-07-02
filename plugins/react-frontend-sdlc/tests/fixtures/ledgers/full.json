@@ -1,0 +1,48 @@
+{
+  "lens": "accessibility",
+  "pr": 7,
+  "iterations": 3,
+  "started_at": "2026-06-14T10:00:00Z",
+  "ended_at": "2026-06-14T10:12:04Z",
+  "findings": [
+    {
+      "id": "A11Y-1",
+      "severity": "Critical",
+      "wcag": "1.1.1",
+      "level": "A",
+      "location": "src/modules/alpha/features/login/login-form.tsx:42",
+      "surface": "LoginForm",
+      "summary": "Image submit control exposes no accessible name",
+      "status": "open",
+      "auto_fixed": true,
+      "regression_test": "tests/a11y/login-form.spec.ts"
+    },
+    {
+      "id": "A11Y-2",
+      "severity": "High",
+      "wcag": "2.1.1",
+      "level": "A",
+      "location": "src/modules/beta/components/menu.tsx:10",
+      "surface": "Menu",
+      "summary": "Dropdown is not operable by keyboard alone",
+      "status": "open"
+    },
+    {
+      "id": "A11Y-3",
+      "severity": "Medium",
+      "wcag": "1.4.3",
+      "level": "AA",
+      "location": "src/components/ui-button/ui-button.tsx:3",
+      "surface": "UIButton",
+      "summary": "Text contrast below the 4.5:1 minimum",
+      "status": "open"
+    },
+    {
+      "id": "DROP-1",
+      "severity": "Low",
+      "location": "src/components/legacy/old-widget.tsx:1",
+      "summary": "Reported by axe but not reproduced",
+      "status": "dropped"
+    }
+  ]
+}
