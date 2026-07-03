@@ -85,6 +85,24 @@ PYEOF
   [[ "$output" == *"profile valid"* ]]
 }
 
+@test "package_manager: out-of-contract value rejected, yarn stays legal" {
+  python3 - "$PROFILES/valid.yml" "$BATS_TEST_TMPDIR/bad-pm.yml" "$BATS_TEST_TMPDIR/yarn-pm.yml" <<'PYEOF'
+import sys, yaml
+p = yaml.safe_load(open(sys.argv[1]))
+p['framework']['package_manager'] = 'deno'
+yaml.safe_dump(p, open(sys.argv[2], 'w'), sort_keys=False)
+p = yaml.safe_load(open(sys.argv[1]))
+p['framework']['package_manager'] = 'yarn'
+yaml.safe_dump(p, open(sys.argv[3], 'w'), sort_keys=False)
+PYEOF
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/bad-pm.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"VIOLATION: key 'framework.package_manager' value 'deno' not one of: bun npm pnpm yarn"* ]]
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/yarn-pm.yml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"profile valid"* ]]
+}
+
 @test "raised ceiling: exit 1, names eslint_errors relaxed above default (ADR-7)" {
   run "$VALIDATOR" "$PROFILES/raised-ceiling.yml"
   [ "$status" -eq 1 ]

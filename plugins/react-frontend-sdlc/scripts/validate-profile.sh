@@ -54,6 +54,21 @@ require_declared() {
   fi
 }
 
+# Key, when present, must be one of an allowlisted value set. A missing/null
+# value is left to require_nonnull so we do not double-report; this guards
+# only against an out-of-contract value (e.g. a package_manager the agent
+# runner mapping does not define), which is interpolated into agent commands.
+require_enum() {
+  local key=$1; shift
+  local val allowed
+  val="$(yaml_get "$PROFILE" "$key")"
+  [[ -z "$val" ]] && return 0
+  for allowed in "$@"; do
+    [[ "$val" == "$allowed" ]] && return 0
+  done
+  violation "key '$key' value '$val' not one of: $*"
+}
+
 # Thresholds are scores/counts: non-negative integers only.
 is_int() { [[ "$1" =~ ^[0-9]+$ ]]; }
 
@@ -120,6 +135,12 @@ require_nonnull project.name
 require_nonnull project.repo
 require_nonnull framework.ui
 require_nonnull framework.package_manager
+# Allowlist mirrors generate-profile.sh's supported set; each maps to a
+# documented package-runner in agents/react-implementer.md and
+# commands/fe-sdlc-implement.md (bun→bun x, npm→npx, pnpm→pnpm exec,
+# yarn→yarn exec). Reject anything outside it so a malformed value cannot
+# reach the `docker compose exec dev <runner>` interpolation.
+require_enum framework.package_manager bun npm pnpm yarn
 require_nonnull architecture.source_root
 
 # --- feature modules (declared list; MAY be empty for a flat library) ------

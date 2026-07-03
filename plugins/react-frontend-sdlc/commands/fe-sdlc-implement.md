@@ -59,7 +59,8 @@ story is done — or a safety mechanism stops it.
    pass) stays inside the dev container via the agent's sanctioned
    `docker compose exec dev <runner> <command>` escape hatch, where
    `<runner>` is the package-runner resolved from
-   `framework.package_manager` (`bun x`, `npx`, `pnpm dlx`) — never a
+   `framework.package_manager` (`bun x` for `bun`, `npx` for `npm`,
+   `pnpm exec` for `pnpm`, `yarn exec` for `yarn`) — never a
    substitute for a mapped target. A `make.<key>: null` entry means the
    capability is absent: record it and skip that check with a note
    (NFR-4) — never substitute a host command.

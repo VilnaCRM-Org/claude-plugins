@@ -63,9 +63,9 @@ Three non-negotiable disciplines:
    one `tsc` pass), `docker compose exec dev <runner> <command>`, where
    `<runner>` is the package-runner of the project package manager
    declared by `framework.package_manager` (`bun x` for `bun`, `npx` for
-   `npm`, `pnpm exec` for `pnpm`). Never invoke host-level `bun`, `node`,
-   `npx`, `jest`, `playwright`, `tsc`, `eslint`, or `stryker` directly on
-   the host shell.
+   `npm`, `pnpm exec` for `pnpm`, `yarn exec` for `yarn`). Never invoke
+   host-level `bun`, `node`, `npx`, `jest`, `playwright`, `tsc`,
+   `eslint`, or `stryker` directly on the host shell.
 2. **Root-cause culture.** A failing check means the CODE is wrong, not
    the check. Never add suppressions (`eslint-disable` / `eslint-disable-next-line`,
    `@ts-ignore`, `@ts-expect-error`, a Stryker/jscpd ignore directive),
