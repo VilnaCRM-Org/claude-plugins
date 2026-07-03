@@ -488,8 +488,8 @@ against gate definitions it supplies.
 (canonical floors: `quality.coverage_statements` 100,
 `quality.coverage_branches` 100, `quality.coverage_functions` 100,
 `quality.coverage_lines` 100, `quality.mutation_msi` seeded from
-`stryker.config.mjs` `break`, `quality.lighthouse_desktop` 0.95,
-`quality.lighthouse_mobile` 0.85; fixed ceilings: `quality.jscpd_clones` 0,
+`stryker.config.mjs` `break`, `quality.lighthouse_desktop` 95,
+`quality.lighthouse_mobile` 85; fixed ceilings: `quality.jscpd_clones` 0,
 `quality.eslint_errors` 0, `quality.eslint_warnings` 0, `quality.tsc_errors` 0,
 `quality.markdownlint_errors` 0, `quality.depcruise_violations` 0,
 `quality.visual_diffs` 0; `quality.metrics_enforced` stays `true` — the rca

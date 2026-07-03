@@ -93,10 +93,10 @@ make lighthouse-mobile    # make.lighthouse_mobile
 The Lighthouse category score is a **0..1 fraction**; the profile floors are the
 same number expressed as integer percent and are read **raise-only**:
 
-| Profile floor                | Shipped default | Fraction | As integer percent |
-| ---------------------------- | --------------- | -------- | ------------------ |
-| `quality.lighthouse_desktop` | `0.95`          | ≥ 0.95   | ≥ 95               |
-| `quality.lighthouse_mobile`  | `0.85`          | ≥ 0.85   | ≥ 85               |
+| Profile floor                | Shipped default | Passing Lighthouse score |
+| ---------------------------- | --------------- | ------------------------ |
+| `quality.lighthouse_desktop` | `95`            | ≥ 95 (0.95 minScore)     |
+| `quality.lighthouse_mobile`  | `85`            | ≥ 85 (0.85 minScore)     |
 
 Mobile is the binding budget: it runs throttled CPU/network, so a change that passes
 desktop can still sink the mobile floor. The **CI score is the one that counts** —

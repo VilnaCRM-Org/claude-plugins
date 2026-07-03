@@ -367,10 +367,15 @@ resolve_repo_slug() {
   origin="$(git remote get-url origin 2>/dev/null || true)"
   if [[ -n "$origin" ]]; then
     slug="$(printf '%s\n' "$origin" | sed -E 's#/+$##; s#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')"
-    # sed leaves the input untouched when the shape doesn't match; accept only a
-    # clean owner/name so a nonstandard remote falls through to the gh fallback
-    # instead of leaking an unparsed URL into GitHub API paths.
-    [[ "$slug" =~ ^[^/]+/[^/]+$ ]] || slug=""
+    # Trust the parsed slug only for a GitHub origin with a clean owner/name.
+    # The sed extracts owner/repo from ANY host, so a non-GitHub remote (e.g.
+    # git@gitlab.com:owner/repo.git) would otherwise aim GitHub API calls at a
+    # foreign slug; and an unmatched shape leaves the URL untouched. Either
+    # case falls through to the gh fallback, which resolves the correct GitHub
+    # repo/host (incl. GitHub Enterprise via GH_HOST).
+    if [[ "$origin" != *github.com* ]] || [[ ! "$slug" =~ ^[^/]+/[^/]+$ ]]; then
+      slug=""
+    fi
   fi
   if [[ -z "$slug" ]]; then
     slug="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || return 1

@@ -336,6 +336,22 @@ setup() {
   done
 }
 
+@test "resolve_repo_slug ignores a non-GitHub origin, falling through to gh" {
+  local repo="$BATS_TEST_TMPDIR/glrepo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  git -C "$repo" remote add origin "git@gitlab.com:evil/repo.git"
+  # gh stub returns a distinct slug; proves the gitlab origin was NOT parsed
+  # (else output would be evil/repo and aim GitHub API calls at the wrong host).
+  local ghbin="$BATS_TEST_TMPDIR/ghbin"
+  mkdir -p "$ghbin"
+  printf '#!/usr/bin/env bash\necho gh-org/gh-repo\n' > "$ghbin/gh"
+  chmod +x "$ghbin/gh"
+  PATH="$ghbin:$PATH" run bash -c "source '$LIB'; cd '$repo'; resolve_repo_slug"
+  [ "$status" -eq 0 ]
+  [ "$output" = "gh-org/gh-repo" ]
+}
+
 # --- sample profile fixtures ----------------------------------------------
 
 @test "fixture profiles: valid parses, invalid variants differ as labeled" {

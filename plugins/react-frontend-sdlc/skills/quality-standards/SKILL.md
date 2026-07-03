@@ -81,8 +81,8 @@ needed, never loosen.
 | Jest coverage      | statements/branches/functions/lines | `quality.coverage_statements` / `quality.coverage_branches` / `quality.coverage_functions` / `quality.coverage_lines` (floor, shipped `100` over `architecture.source_root`) | [frontend-testing-workflow](../frontend-testing-workflow/SKILL.md)                   |
 | Stryker            | MSI                                 | `quality.mutation_msi` (floor, default = `stryker.config.mjs` `break`, raise-only)                                                                                           | [frontend-testing-workflow](../frontend-testing-workflow/SKILL.md)                   |
 | Playwright visual  | Snapshot diffs                      | `quality.visual_diffs` (ceiling, fixed `0`)                                                                                                                                  | [frontend-testing-workflow](../frontend-testing-workflow/SKILL.md)                   |
-| Lighthouse desktop | Performance score                   | `quality.lighthouse_desktop` (floor, shipped `0.95`)                                                                                                                         | [frontend-performance-accessibility](../frontend-performance-accessibility/SKILL.md) |
-| Lighthouse mobile  | Performance score                   | `quality.lighthouse_mobile` (floor, shipped `0.85`)                                                                                                                          | [frontend-performance-accessibility](../frontend-performance-accessibility/SKILL.md) |
+| Lighthouse desktop | Performance score                   | `quality.lighthouse_desktop` (floor, shipped `95`)                                                                                                                           | [frontend-performance-accessibility](../frontend-performance-accessibility/SKILL.md) |
+| Lighthouse mobile  | Performance score                   | `quality.lighthouse_mobile` (floor, shipped `85`)                                                                                                                           | [frontend-performance-accessibility](../frontend-performance-accessibility/SKILL.md) |
 | Accessibility      | a11y findings                       | `0` via `make.a11y` (gated by `capabilities.accessibility_audit` / `capabilities.dynamic_a11y_testing`)                                                                      | [accessibility-audit](../accessibility-audit/SKILL.md)                               |
 
 Jest runs two separate environments (client `jsdom`, server `node`) plus an
@@ -296,7 +296,7 @@ jscpd: 0 clones                rust-code-analysis: 0 hard-fail violations
 dependency-cruiser: 0 violations
 Coverage: 100% statements / branches / functions / lines
 Mutation Score Indicator (MSI): >= break threshold   Visual: 0 diffs
-Lighthouse  desktop >= 0.95   mobile >= 0.85
+Lighthouse  desktop >= 95   mobile >= 85
 ```
 
 ## Verification Checklist

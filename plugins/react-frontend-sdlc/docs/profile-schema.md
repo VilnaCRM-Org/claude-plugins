@@ -139,8 +139,8 @@ never relax it:
 | `quality.depcruise_violations` | yes      | ceiling (fixed)         | `0`                                        |
 | `quality.metrics_enforced`     | yes      | bool (must stay `true`) | `true`                                     |
 | `quality.visual_diffs`         | yes      | ceiling (fixed)         | `0`                                        |
-| `quality.lighthouse_desktop`   | yes      | floor (raise-only)      | `0.95`                                     |
-| `quality.lighthouse_mobile`    | yes      | floor (raise-only)      | `0.85`                                     |
+| `quality.lighthouse_desktop`   | yes      | floor (raise-only)      | `95`                                       |
+| `quality.lighthouse_mobile`    | yes      | floor (raise-only)      | `85`                                       |
 
 `quality.mutation_msi` is seeded from the target repo's
 `stryker.config.mjs` `break` threshold and is raise-only thereafter: the
@@ -270,8 +270,8 @@ quality:                           # required; floors raise-only, ceilings fixed
   depcruise_violations: 0
   metrics_enforced: true           # rca hard-fail gate; config/metrics-policy.json
   visual_diffs: 0
-  lighthouse_desktop: 0.95
-  lighthouse_mobile: 0.85
+  lighthouse_desktop: 95
+  lighthouse_mobile: 85
 ci:
   provider: github-actions         # required; null = no CI (degrade)
   workflows: [static-testing, performance-testing, mutation-testing]

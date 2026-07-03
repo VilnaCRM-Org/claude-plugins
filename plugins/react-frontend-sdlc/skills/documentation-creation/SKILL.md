@@ -228,8 +228,8 @@ For each documentation file:
    quality bars, take values only from the profile `quality.*` keys —
    canonical defaults are 100% coverage (`quality.coverage_lines`),
    mutation MSI seeded from the repo's Stryker `break`
-   (`quality.mutation_msi`), and Lighthouse floors of 0.95 desktop
-   (`quality.lighthouse_desktop`) / 0.85 mobile
+   (`quality.mutation_msi`), and Lighthouse floors of 95 desktop
+   (`quality.lighthouse_desktop`) / 85 mobile
    (`quality.lighthouse_mobile`). Thresholds are raise-only: never
    document a bar lower than the shipped default
 

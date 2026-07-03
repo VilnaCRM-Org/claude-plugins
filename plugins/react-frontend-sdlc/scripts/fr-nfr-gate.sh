@@ -119,11 +119,9 @@ printf '%s\n' "$result"
 # Zero-test the findings count as a DIGIT STRING, never via bash arithmetic.
 # (( findings == 0 )) wraps any exact multiple of 2^64 to 0 (e.g.
 # 18446744073709551616 reads as 0), which would post a SUCCESS status for a
-# nonzero count — a silent gate escape. Strip leading zeros and compare to
-# the literal "0": the only value that means "no findings" (same wrap-safe
-# rule validate-profile.sh's num_gt enforces).
-findings_norm="${findings#"${findings%%[!0]*}"}"
-findings_norm="${findings_norm:-0}"
+# nonzero count — a silent gate escape. strip_zeros (lib/common.sh) is the one
+# shared, wrap-safe normalizer so every gate stays on the same verified path.
+findings_norm="$(strip_zeros "$findings")"
 if [[ "$findings_norm" == "0" ]]; then
   post_status success "zero new FR/NFR findings"
   log_info "FR/NFR gate: PASS — zero new findings"

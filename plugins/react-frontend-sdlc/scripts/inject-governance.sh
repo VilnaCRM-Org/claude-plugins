@@ -298,9 +298,20 @@ write_managed() {
   # DIRECTORY only — not the file — so a 0444 CLAUDE.md would otherwise be
   # silently overwritten with the governance block and exit 0, changing the
   # contract from "refuse" to "silent overwrite of a file the user locked".
-  # Check before creating the temp file so a refusal leaves no litter.
-  if [[ -e "$file" && ! -w "$file" ]]; then
-    die "refusing to overwrite read-only file: $file (it needs a managed-block update but is not writable; chmod +w it or remove it to regenerate)"
+  # Check before creating the temp file so a refusal leaves no litter. Inspect
+  # the mode BITS, not `-w` (effective access): a privileged run (root) reports
+  # -w true even on a 0444 file, silently bypassing the user's lock.
+  if [[ -e "$file" ]]; then
+    local perm
+    perm="$(stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file" 2>/dev/null || true)"
+    if [[ "$perm" =~ ^[0-7]+$ ]]; then
+      # refuse when no write bit is set anywhere (owner/group/other): 0222 mask.
+      (( (8#${perm} & 0222) == 0 )) && \
+        die "refusing to overwrite read-only file: $file (it needs a managed-block update but is not writable; chmod +w it or remove it to regenerate)"
+    elif [[ ! -w "$file" ]]; then
+      # mode unreadable (stat failed): fall back to effective-access check.
+      die "refusing to overwrite read-only file: $file (it needs a managed-block update but is not writable; chmod +w it or remove it to regenerate)"
+    fi
   fi
   out_file="$(mktemp "$TARGET/.sdlc-governance.XXXXXX")" \
     || die "cannot create temp file in $TARGET"

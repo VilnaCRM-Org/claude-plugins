@@ -203,13 +203,17 @@ route_gh() {
 # Dedup + severity order — FR-4
 # ---------------------------------------------------------------------------
 
-@test "dedup by (wcag,location,surface): the pair collapses to one row" {
+@test "dedup by (wcag,location,surface): the pair collapses to one row (first-seen wins)" {
   run "$SCRIPT" accessibility --file "$LEDGERS/dedup-pair.json" --pr 7 --dry-run
   [ "$status" -eq 0 ]
   # exactly one data row in the findings table (the | separator line is |---)
   data_rows="$(printf '%s\n' "$output" | grep -cE '^\| (Critical|High|Medium|Low) ')"
   [ "$data_rows" -eq 1 ]
-  # the second finding's distinct summary text is gone (collapsed away)
+  # dedup keeps the FIRST row seen for the sink — DUP-1 in ledger order — so
+  # DUP-1's summary survives and the later duplicate (DUP-2) collapses away.
+  # It is NOT a severity-ranked keep: rank only orders the post-dedup output,
+  # so the Critical DUP-2 does not win over the earlier High DUP-1.
+  [[ "$output" == *"Placeholder text contrast below the minimum"* ]]
   [[ "$output" != *"SECOND-FINDING-SAME-SINK"* ]]
 }
 

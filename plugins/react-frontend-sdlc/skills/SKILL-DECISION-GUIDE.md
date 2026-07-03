@@ -236,7 +236,7 @@ Embeds the layered Component → Hook → Repository → API flow, the module ca
 
 Runs the targets mapped by `make.lighthouse_desktop` and `make.lighthouse_mobile` and audits
 web-vitals plus the Lighthouse accessibility category against the `quality.lighthouse_desktop`
-(floor `0.95`) and `quality.lighthouse_mobile` (floor `0.85`) gates.
+(floor `95`) and `quality.lighthouse_mobile` (floor `85`) gates.
 
 **NOT**: load-testing (that targets traffic patterns, not render cost). For a deep WCAG /
 assistive-technology audit, use accessibility-audit.

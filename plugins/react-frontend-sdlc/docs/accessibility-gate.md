@@ -174,7 +174,7 @@ elsewhere. In particular:
   is not a licence to ship an unreviewed pixel diff.
 - The **Lighthouse floors** (`make.lighthouse_desktop` / `make.lighthouse_mobile`,
   gated by `capabilities.lighthouse`) still hold at `quality.lighthouse_desktop`
-  `0.95` and `quality.lighthouse_mobile` `0.85`. An accessible-by-default fix must
+  `95` and `quality.lighthouse_mobile` `85`. An accessible-by-default fix must
   stay within the performance budget; it does not get to regress the score.
 
 The audit loop states this explicitly: a WCAG match never waives the

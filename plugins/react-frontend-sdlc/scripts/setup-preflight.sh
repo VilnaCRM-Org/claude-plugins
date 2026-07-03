@@ -156,22 +156,23 @@ else
     "run 'bmalph doctor' and fix the reported issues, or re-run 'bmalph init'"
 fi
 
-# --- 7. JavaScript package manager (bun | pnpm | npm) --------------------------
+# --- 7. JavaScript package manager (bun | pnpm | npm | yarn) -------------------
 # The profile records framework.package_manager from package.json; preflight
 # only requires that AT LEAST ONE supported manager is on PATH. The consumer
-# repos diverge — pnpm, bun, or npm — so do NOT hard-require bun. Report which
+# repos diverge — pnpm, bun, npm, or yarn — so do NOT hard-require bun. The set
+# mirrors validate-profile.sh's framework.package_manager enum. Report which
 # managers are present so /fe-sdlc-setup can confirm the detected one is usable.
 pms_found=()
-for pm in bun pnpm npm; do
+for pm in bun pnpm npm yarn; do
   if command -v "$pm" >/dev/null 2>&1; then
     pms_found+=("$pm")
   fi
 done
 if (( ${#pms_found[@]} > 0 )); then
-  record PASS "package-manager" "available: ${pms_found[*]} (any of bun, pnpm, npm satisfies)" "-"
+  record PASS "package-manager" "available: ${pms_found[*]} (any of bun, pnpm, npm, yarn satisfies)" "-"
 else
-  record FAIL "package-manager" "none of bun, pnpm, or npm found on PATH" \
-    "install a JS package manager: bun (https://bun.sh), pnpm (https://pnpm.io), or npm (bundled with Node.js)"
+  record FAIL "package-manager" "none of bun, pnpm, npm, or yarn found on PATH" \
+    "install a JS package manager: bun (https://bun.sh), pnpm (https://pnpm.io), npm (bundled with Node.js), or yarn (https://yarnpkg.com)"
 fi
 
 # --- 8. Node.js >= 20.0.0 -----------------------------------------------------

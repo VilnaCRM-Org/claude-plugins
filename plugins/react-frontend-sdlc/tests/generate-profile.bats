@@ -68,7 +68,10 @@ pget() { yaml_get "$PROFILE" "$1"; }
   [[ "$output" == *CI* ]]
   [[ "$output" == *E2E* ]]
   [ "$(pget capabilities.load_testing)" = "true" ]
-  [ "$(pget capabilities.dynamic_a11y_testing)" = "false" ]
+  # dynamic_a11y pairs with make.start (bootable app), NOT make.a11y: the stub
+  # has a `start` target, so live-browser probing is possible even though
+  # make.a11y is null.
+  [ "$(pget capabilities.dynamic_a11y_testing)" = "true" ]
 }
 
 @test "stub repo: quality + capabilities (mutation_msi from stryker break, storybook)" {
@@ -168,6 +171,8 @@ JSON
   [ -z "$(pget ci.provider)" ]
   [ "$(pget review.coderabbit)" = "false" ]
   [ "$(pget capabilities.storybook)" = "false" ]
+  # no Makefile -> make.start null -> dynamic_a11y false (pairs with make.start)
+  [ "$(pget capabilities.dynamic_a11y_testing)" = "false" ]
   [ "$(pget schema_version)" = "1" ]
   # package_manager is required non-null by the validator, so with no
   # packageManager field and no lockfile it falls back to npm (never null)

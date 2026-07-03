@@ -21,6 +21,10 @@ marker_pairs() {
   echo "$(grep -cxF "$BEGIN" "$1" || true) $(grep -cxF "$END" "$1" || true)"
 }
 
+# stat_mode FILE — octal mode, portable across GNU (stat -c) and BSD/macOS
+# (stat -f), mirroring inject-governance.sh's own stat usage.
+stat_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
+
 @test "missing files are created holding exactly one block" {
   run "$INJECT" "$REPO"
   [ "$status" -eq 0 ]
@@ -187,8 +191,8 @@ EOF
   umask 022
   run "$INJECT" "$REPO"
   [ "$status" -eq 0 ]
-  [ "$(stat -c '%a' "$REPO/CLAUDE.md")" = "644" ]
-  [ "$(stat -c '%a' "$REPO/AGENTS.md")" = "644" ]
+  [ "$(stat_mode "$REPO/CLAUDE.md")" = "644" ]
+  [ "$(stat_mode "$REPO/AGENTS.md")" = "644" ]
 }
 
 @test "--diff previews without writing" {
@@ -398,7 +402,7 @@ EOF
   [[ "$output" == *"read-only"* ]]
   cmp "$BATS_TEST_TMPDIR/before.md" "$REPO/CLAUDE.md"
   ! grep -q 'react-frontend-sdlc:begin' "$REPO/CLAUDE.md"
-  [ "$(stat -c '%a' "$REPO/CLAUDE.md")" = "444" ]
+  [ "$(stat_mode "$REPO/CLAUDE.md")" = "444" ]
   # no temp litter left behind by the refused write
   [ -z "$(ls -A "$REPO" | grep sdlc-governance || true)" ]
 }

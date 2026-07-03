@@ -48,9 +48,9 @@ issue, re-checks `readiness.md`, re-runs the review/a11y gate, re-runs
 | 1   | issue       | GitHub issue URL exists with testable AC + `react-frontend-sdlc` label           | 5 iterations                                                               |
 | 2   | plan        | `specs/<slug>/` chain complete, readiness PASS                                   | 5 iterations                                                               |
 | 3   | implement   | Ralph `EXIT_SIGNAL` success, all stories done                                    | 5 iterations + circuit breaker                                             |
-| 4   | review      | zero new findings in last gate iteration AND a11y gate clean                     | 5 iterations                                                               |
+| 4   | review      | zero new findings in last gate iteration AND a11y gate clean AND quality PASS    | 5 iterations                                                               |
 | 5   | qa          | QA verdict PASS — visual + E2E + Lighthouse + a11y (FAIL routes back to stage 3) | 5 iterations                                                               |
-| 6   | finish-pr   | CI green + 0 unresolved AI review comments                                       | 5 iterations (two independent counters: CI fix, comment resolution)        |
+| 6   | finish-pr   | CI green (or skip-with-note) + 0 unresolved AI review comments                   | 5 iterations (two independent counters: CI fix, comment resolution)        |
 
 ## Loop-backs
 
@@ -133,8 +133,9 @@ resumes at stage 3 (loop-back) while stage 3 budget remains.
 
 ## Terminal states
 
-- **SUCCESS** — stage 6's exit condition met (CI green + zero unresolved
-  AI review comments); the run report links the issue, the specs chain,
+- **SUCCESS** — stage 6's exit condition met (CI green, or skip-with-note when
+  CI is absent, + zero unresolved AI review comments); the run report links the
+  issue, the specs chain,
   and the PR.
 - **ESCALATED** — a guard breached, Ralph's circuit breaker tripped
   (never reset by the plugin), or setup-check failed. The run report

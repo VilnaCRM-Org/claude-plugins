@@ -116,8 +116,8 @@ make lint           # read-only aggregate lint gate
 | --------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ----------------------- |
 | `quality.coverage_statements` / `quality.coverage_branches` / `quality.coverage_functions` / `quality.coverage_lines` | 100                          | floor (raise-only)      |
 | `quality.mutation_msi`                                                                                                | `stryker.config.mjs` `break` | floor (raise-only)      |
-| `quality.lighthouse_desktop`                                                                                          | 0.95                         | floor (raise-only)      |
-| `quality.lighthouse_mobile`                                                                                           | 0.85                         | floor (raise-only)      |
+| `quality.lighthouse_desktop`                                                                                          | 95                           | floor (raise-only)      |
+| `quality.lighthouse_mobile`                                                                                           | 85                           | floor (raise-only)      |
 | `quality.jscpd_clones`                                                                                                | 0                            | ceiling (fixed)         |
 | `quality.eslint_errors` / `quality.eslint_warnings`                                                                   | 0                            | ceiling (fixed)         |
 | `quality.tsc_errors`                                                                                                  | 0                            | ceiling (fixed)         |

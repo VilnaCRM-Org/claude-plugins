@@ -370,7 +370,13 @@ cap_storybook="false"
 { [[ -n "$make_storybook" ]] || has_dep storybook || has_dep @storybook/react; } && cap_storybook="true"
 cap_load="false";         [[ -n "$make_test_load" ]] && cap_load="true"
 cap_memleak="false";      [[ -n "$make_test_memory_leak" ]] && cap_memleak="true"
-cap_dynamic_a11y="false"; [[ -n "$make_a11y" ]] && cap_dynamic_a11y="true"
+# dynamic_a11y gates live-browser probing, which needs a bootable app dev
+# server, so it pairs with make.start the way load_testing pairs with
+# make.test_load (docs/profile-schema.md, docs/degrade-matrix.md). It must NOT
+# key off make.a11y: that ships null by default (the plugin substitutes its
+# bundled a11y lane), which would wrongly disable dynamic probing on a repo
+# that boots fine.
+cap_dynamic_a11y="false"; [[ -n "$make_start" ]] && cap_dynamic_a11y="true"
 
 # --- ci -----------------------------------------------------------------------
 

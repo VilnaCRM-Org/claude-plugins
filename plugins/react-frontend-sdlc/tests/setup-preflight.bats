@@ -59,7 +59,7 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
     [[ "$output" == *"PASS: $check"* ]]
   done
   # detail stays pipe-free: record() rows are '|'-delimited for --report
-  [[ "$output" == *"any of bun, pnpm, npm satisfies"* ]]
+  [[ "$output" == *"any of bun, pnpm, npm, yarn satisfies"* ]]
   [[ "$output" == *"preflight OK"* ]]
   [[ "$output" == *"[react-sdlc]"* ]]
   [[ "$output" != *FAIL* ]]
@@ -75,7 +75,7 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
   done
   [[ "$output" =~ package-manager[[:space:]]+PASS ]]
   # the full detail survives the '|'-delimited row round-trip untruncated
-  [[ "$output" == *"any of bun, pnpm, npm satisfies"* ]]
+  [[ "$output" == *"any of bun, pnpm, npm, yarn satisfies"* ]]
   [[ "$output" =~ node[[:space:]]+PASS ]]
   [[ "$output" =~ docker[[:space:]]+PASS ]]
   [[ "$output" != *FAIL* ]]
@@ -179,17 +179,32 @@ SCRIPT_DEPS="bash git grep sort head dirname env"
   [[ "$output" != *package-manager* ]]
 }
 
-@test "no package manager (bun|pnpm|npm absent): FAIL with install remediation" {
-  # sandbox lacks bun, pnpm, and npm; checks 1-6 pass, package-manager FAILs
+@test "no package manager (bun|pnpm|npm|yarn absent): FAIL with install remediation" {
+  # sandbox lacks bun, pnpm, npm, and yarn; checks 1-6 pass, package-manager FAILs
   # shellcheck disable=SC2086
   sandbox="$(sandbox_path $SCRIPT_DEPS claude gh bmalph)"
   PATH="$sandbox" run "$PREFLIGHT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL: package-manager"* ]]
-  [[ "$output" == *"none of bun, pnpm, or npm found on PATH"* ]]
+  [[ "$output" == *"none of bun, pnpm, npm, or yarn found on PATH"* ]]
   [[ "$output" == *"https://bun.sh"* ]]
   # first-FAIL abort: yaml-toolchain (later in order) must not have run
   [[ "$output" != *yaml-toolchain* ]]
+}
+
+@test "yarn alone satisfies the package-manager check (supported toolchain)" {
+  # yarn is a valid framework.package_manager (validate-profile enum), so a
+  # yarn-only host must pass the package-manager check (checks 1-6 pass via
+  # stubs; a later check may abort, but package-manager is already PASS).
+  local ybin="$BATS_TEST_TMPDIR/ybin"
+  mkdir -p "$ybin"
+  printf '#!/usr/bin/env bash\necho 1.22.22\n' > "$ybin/yarn"
+  chmod +x "$ybin/yarn"
+  # shellcheck disable=SC2086
+  sandbox="$(sandbox_path $SCRIPT_DEPS claude gh bmalph)"
+  PATH="$ybin:$sandbox" run "$PREFLIGHT"
+  [[ "$output" == *"PASS: package-manager"* ]]
+  [[ "$output" == *"yarn"* ]]
 }
 
 @test "under-version node: FAIL citing the Node floor" {

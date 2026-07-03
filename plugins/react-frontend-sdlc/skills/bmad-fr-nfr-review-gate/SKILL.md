@@ -212,12 +212,12 @@ finding disappear.
 | Jest coverage | `make.test_unit_client` / `make.test_unit_server` / `make.test_integration` | `quality.coverage_statements` / `quality.coverage_branches` / `quality.coverage_functions` / `quality.coverage_lines` (floor `100`) | always | [frontend-testing-workflow](../frontend-testing-workflow/SKILL.md) |
 | Mutation (Stryker MSI) | `make.test_mutation` + `make.merge_mutation_reports` | `quality.mutation_msi` (floor = `stryker.config.mjs` `break`, raise-only) | `capabilities.mutation_testing` | [frontend-testing-workflow](../frontend-testing-workflow/SKILL.md) |
 | Visual regression | `make.test_visual` | `quality.visual_diffs` (ceiling `0`) | `capabilities.visual_testing` | [frontend-testing-workflow](../frontend-testing-workflow/SKILL.md) |
-| Lighthouse desktop | `make.lighthouse_desktop` | `quality.lighthouse_desktop` (floor `0.95`, i.e. 95%) | `capabilities.lighthouse` | [frontend-performance-accessibility](../frontend-performance-accessibility/SKILL.md) |
-| Lighthouse mobile | `make.lighthouse_mobile` | `quality.lighthouse_mobile` (floor `0.85`, i.e. 85%) | `capabilities.lighthouse` | [frontend-performance-accessibility](../frontend-performance-accessibility/SKILL.md) |
+| Lighthouse desktop | `make.lighthouse_desktop` | `quality.lighthouse_desktop` (floor `95`, i.e. 0.95 minScore) | `capabilities.lighthouse` | [frontend-performance-accessibility](../frontend-performance-accessibility/SKILL.md) |
+| Lighthouse mobile | `make.lighthouse_mobile` | `quality.lighthouse_mobile` (floor `85`, i.e. 0.85 minScore) | `capabilities.lighthouse` | [frontend-performance-accessibility](../frontend-performance-accessibility/SKILL.md) |
 | Accessibility (WCAG 2.2 AA) | `make.a11y` | `0` findings | `capabilities.accessibility_audit` / `capabilities.dynamic_a11y_testing` | [accessibility-audit](../accessibility-audit/SKILL.md) |
 
-Lighthouse scores are read as an integer percent of the 0–1 floor (`0.95` =
-desktop 95, `0.85` = mobile 85); a row passes only when the audited score sits
+Lighthouse floors are stored as integer percents (`95` desktop = 0.95 minScore,
+`85` mobile = 0.85 minScore); a row passes only when the audited score sits
 at or above the floor. The ESLint dimension also enforces the repository's
 `no-restricted-syntax` conventions — classes-with-instance-methods (no
 `static`, no free functions) outside React components, type-only files, and no
