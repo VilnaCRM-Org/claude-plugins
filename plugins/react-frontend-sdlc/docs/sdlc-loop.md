@@ -29,7 +29,7 @@ user: /fe-sdlc "task text | issue URL"
         Playwright E2E + visual regression + Lighthouse + axe-core a11y)                │
         artifact: QA report ──[FAIL + repro steps]── loop-back ──────────────────────────┘
   └─ stage 6 /fe-sdlc-finish-pr ── gh pr create/edit ─► artifact: PR URL
-        ├─ ci-fixer loop <=5 (counter A) ──► checks green (or skip-with-report)
+        ├─ ci-fixer loop <=5 (counter A) ──► checks green (or skip-with-note)
         ├─ pr-comment-resolver loop <=5 (counter B, get-pr-comments.sh) ──► 0 unresolved
         │     └─[no reviewer app]── ai-review-loop.sh findings as the comment source
         └─ exit: SUCCESS run report (issue, specs, PR, reports linked)
@@ -144,5 +144,5 @@ Capability gaps — no CI (`ci.provider: null`), no reviewer app, a `null`
 `make.*` target, or a `false` capability flag such as
 `capabilities.visual_testing`, `capabilities.lighthouse`, or
 `capabilities.dynamic_a11y_testing` — do NOT escalate. They degrade the
-dependent lane with a skip-with-report note; see the
+dependent lane with a skip-with-note; see the
 [degrade matrix](degrade-matrix.md).

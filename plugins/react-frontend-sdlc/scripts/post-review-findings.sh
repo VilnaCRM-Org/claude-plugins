@@ -249,7 +249,11 @@ render_lens() {
         # Collapse the a11y-style sink tuple (wcag,location,surface) to one
         # row; but a wcag-less finding (fr-nfr / code-review) keys on its unique
         # id so two distinct findings at the same location are NOT merged away.
-        key = ($3 != "" ? $3 "|" $5 "|" $6 : ($2 != "" ? "ID:" $2 : "NOID:" $5 "|" $6 "|" $7))
+        # Fold status ($8) into the key so a dropped row cannot dedup away an
+        # open row with the same tuple (the open/dropped split happens AFTER
+        # this pass, so an earlier dropped duplicate would otherwise hide a
+        # publishable finding).
+        key = ($3 != "" ? $3 "|" $5 "|" $6 : ($2 != "" ? "ID:" $2 : "NOID:" $5 "|" $6 "|" $7)) "|" tolower($8)
         if (!seen[key]++) print rank "\t" $0
       }' | sort -t$'\t' -k1,1n -k3,3 -k6,6 | cut -f2- | tr '\t' '\037'
   )"

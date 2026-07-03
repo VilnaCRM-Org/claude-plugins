@@ -198,9 +198,17 @@ check_ceiling quality.visual_diffs 0
 # Both keys must be declared; an explicit null ci.provider means "no CI" and
 # triggers the degrade path (NFR-4) downstream, so it is legal here.
 # quality.metrics_enforced is the rust-code-analysis hard-fail toggle (bool):
-# its declaration is required so the metrics gate is never silently dropped.
+# the schema mandates it stay `true` (docs/profile-schema.md). A metrics-less
+# repo degrades at the LANE level (make.lint_metrics: null), never by flipping
+# this policy flag, so a `false`/absent value would silently disable the
+# raise-only metrics gate (ADR-7) — reject anything but true.
 require_declared ci.provider
-require_declared quality.metrics_enforced
+metrics_enforced="$(yaml_get "$PROFILE" quality.metrics_enforced)"
+if [[ -z "$metrics_enforced" ]]; then
+  violation "required key 'quality.metrics_enforced' missing or null"
+elif [[ "$metrics_enforced" != "true" ]]; then
+  violation "key 'quality.metrics_enforced' value '$metrics_enforced' must be true (the rust-code-analysis hard-fail gate may not be disabled; ADR-7)"
+fi
 
 # --- verdict ----------------------------------------------------------------
 if (( violations > 0 )); then

@@ -101,7 +101,13 @@ check_version() {
 # --is-inside-work-tree` exits 0 while printing `false` inside a bare
 # repo or a normal repo's .git/ dir — locations with no work tree where
 # /fe-sdlc-setup cannot operate.
-if [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+# Check git presence first: without it `git rev-parse` errs to empty and the
+# generic branch below would misdiagnose a missing binary as a work-tree
+# problem, sending first-time environments to the wrong remediation.
+if ! command -v git >/dev/null 2>&1; then
+  record FAIL "git-repo" "git is not installed" \
+    "install git: https://git-scm.com/downloads"
+elif [[ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
   record PASS "git-repo" "inside a git work tree" "-"
 else
   record FAIL "git-repo" "current directory is not inside a git work tree (bare repo, .git/ dir, or no repository)" \

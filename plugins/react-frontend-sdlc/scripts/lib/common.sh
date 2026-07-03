@@ -108,8 +108,25 @@ resolve_plugin_root() {
 
 # --- YAML access (ADR-2: yq with python3+PyYAML fallback) ----------------
 
+# have_yq — true only for a mikefarah-compatible yq. Presence on PATH is not
+# enough: a jq-wrapper `yq` (kislyuk) parses YAML but returns jq-shaped output
+# that every query below misreads (e.g. `type` yields "array" not !!seq, and
+# booleans stringify differently), silently corrupting reads. Probe the exact
+# mikefarah-v4 semantics we depend on (`.a | type` == !!seq) once, cache the
+# verdict, and fall back to the python3+PyYAML backend on any mismatch.
 have_yq() {
-  [[ "${SDLC_FORCE_PYTHON_YAML:-0}" != "1" ]] && command -v yq >/dev/null 2>&1
+  [[ "${SDLC_FORCE_PYTHON_YAML:-0}" == "1" ]] && return 1
+  case "${_SDLC_YQ_OK:-}" in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+  if command -v yq >/dev/null 2>&1 \
+     && [[ "$(printf 'a: [1]\n' | yq '.a | type' 2>/dev/null)" == "!!seq" ]]; then
+    _SDLC_YQ_OK=1
+    return 0
+  fi
+  _SDLC_YQ_OK=0
+  return 1
 }
 
 # Preflight helper: at least one YAML backend must be present.
@@ -335,4 +352,29 @@ profile_require() {
     die "profile: required key '$key' missing or empty in $file"
   fi
   printf '%s\n' "$val"
+}
+
+# --- repository resolution ------------------------------------------------
+
+# resolve_repo_slug — print the current repo's owner/name. Prefers the origin
+# remote URL (SSH or HTTPS, with or without a .git suffix); falls back to
+# `gh repo view` for CI checkouts and forks that may lack an 'origin' remote.
+# Returns non-zero with no output when neither source resolves, so each caller
+# can die with its own message. Shared so fr-nfr-gate.sh and get-pr-comments.sh
+# resolve the slug identically and fixes apply to every gate at once.
+resolve_repo_slug() {
+  local origin slug=""
+  origin="$(git remote get-url origin 2>/dev/null || true)"
+  if [[ -n "$origin" ]]; then
+    slug="$(printf '%s\n' "$origin" | sed -E 's#/+$##; s#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')"
+    # sed leaves the input untouched when the shape doesn't match; accept only a
+    # clean owner/name so a nonstandard remote falls through to the gh fallback
+    # instead of leaking an unparsed URL into GitHub API paths.
+    [[ "$slug" =~ ^[^/]+/[^/]+$ ]] || slug=""
+  fi
+  if [[ -z "$slug" ]]; then
+    slug="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || return 1
+  fi
+  [[ -n "$slug" ]] || return 1
+  printf '%s\n' "$slug"
 }

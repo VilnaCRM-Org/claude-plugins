@@ -344,7 +344,9 @@ mutation_msi=2
 for sc in "$TARGET"/stryker.config.mjs "$TARGET"/stryker.conf.mjs \
           "$TARGET"/stryker.config.js "$TARGET"/stryker.conf.json; do
   [[ -f "$sc" ]] || continue
-  brk="$(grep -oE 'break[[:space:]]*:[[:space:]]*[0-9]+' "$sc" | head -1 \
+  # Optional punct after `break` so a quoted key ("break": / 'break':) in a
+  # JSON/JS config matches too, not just the bare `break:` of an .mjs object.
+  brk="$(grep -oE 'break[[:punct:]]?[[:space:]]*:[[:space:]]*[0-9]+' "$sc" | head -1 \
          | grep -oE '[0-9]+' || true)"
   if [[ -n "$brk" ]]; then
     mutation_msi="$(int_part "$brk")"
@@ -352,8 +354,12 @@ for sc in "$TARGET"/stryker.config.mjs "$TARGET"/stryker.conf.mjs \
   fi
 done
 
-metrics_enforced="false"
-[[ -n "$make_lint_metrics" ]] && metrics_enforced="true"
+# The rca hard-fail policy flag is a standing commitment that stays true
+# regardless of whether a lint-metrics make target exists: a metrics-less repo
+# degrades at the lane level (make.lint_metrics: null), never by disabling the
+# policy (docs/degrade-matrix.md, docs/profile-schema.md). validate-profile.sh
+# rejects any other value.
+metrics_enforced="true"
 
 # --- capabilities -------------------------------------------------------------
 

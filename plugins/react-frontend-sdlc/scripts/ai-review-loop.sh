@@ -72,6 +72,14 @@ else
     # validate-profile.sh and get-pr-comments.sh already carry.
     yaml_parses "$profile" \
       || die "profile is not valid YAML: $profile (fix the syntax or regenerate it with /fe-sdlc-setup, or pass --agents to bypass the profile)"
+    # A schema-invalid scalar (e.g. `ai_review_agents: claude`) reads back as an
+    # empty list via yaml_get_list and would silently fall through to the
+    # default 'claude', masking a misconfigured review matrix. Reject a declared
+    # non-list here so standalone runs surface the error instead of degrading.
+    if yaml_has "$profile" review.ai_review_agents \
+       && ! yaml_is_list "$profile" review.ai_review_agents; then
+      die "review.ai_review_agents must be a YAML list, not a scalar/mapping: $profile (e.g. 'ai_review_agents: [claude]', or pass --agents to bypass the profile)"
+    fi
     mapfile -t agents < <(yaml_get_list "$profile" review.ai_review_agents)
   fi
 fi

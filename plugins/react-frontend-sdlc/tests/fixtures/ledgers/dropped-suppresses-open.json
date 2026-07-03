@@ -1,0 +1,25 @@
+{
+  "lens": "accessibility",
+  "findings": [
+    {
+      "id": "DROP-FIRST",
+      "severity": "High",
+      "wcag": "1.4.3",
+      "level": "AA",
+      "location": "src/modules/alpha/features/search/search-box.tsx:88",
+      "surface": "SearchBox",
+      "summary": "NOT-REPRODUCED dropped candidate, same sink as the open one",
+      "status": "dropped"
+    },
+    {
+      "id": "OPEN-SECOND",
+      "severity": "Critical",
+      "wcag": "1.4.3",
+      "level": "AA",
+      "location": "src/modules/alpha/features/search/search-box.tsx:88",
+      "surface": "SearchBox",
+      "summary": "PUBLISHABLE-OPEN-FINDING must reach the table",
+      "status": "open"
+    }
+  ]
+}

@@ -353,6 +353,42 @@ EOF
   grep -q 'Skill-triage gate' "$REPO/CLAUDE.md"
 }
 
+@test "stale fence delimiters INSIDE a managed block are fully replaced, none leak out" {
+  # A manually-edited/corrupted managed block that contains its own code fence:
+  # the replacement pass must suppress the fence lines while inblock, not print
+  # them ahead of the inblock guard, or stale ~~~ delimiters survive and the
+  # document is left malformed.
+  cat > "$REPO/CLAUDE.md" <<EOF
+# Top heading
+
+$BEGIN
+old governance intro
+~~~
+STALE-FENCED-BODY inside the managed block
+~~~
+trailing stale line
+$END
+
+## After
+EOF
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  ! grep -q 'STALE-FENCED-BODY' "$REPO/CLAUDE.md"
+  # the stale in-block fence delimiters are gone entirely (the bug left them behind)
+  [ "$(grep -cxF '~~~' "$REPO/CLAUDE.md")" -eq 0 ]
+  [ "$(marker_pairs "$REPO/CLAUDE.md")" = "1 1" ]
+  grep -q 'Skill-triage gate' "$REPO/CLAUDE.md"
+  # user content outside the block survives, position preserved
+  [ "$(head -n 1 "$REPO/CLAUDE.md")" = "# Top heading" ]
+  [ "$(tail -n 1 "$REPO/CLAUDE.md")" = "## After" ]
+  # and it is idempotent: a second run is a byte-stable no-op
+  git -C "$REPO" add -A
+  git -C "$REPO" -c user.email=t@t -c user.name=t commit -qm snap
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  git -C "$REPO" diff --quiet
+}
+
 @test "R2 Bug 5: a read-only (0444) managed file needing a change is refused, unmodified" {
   printf 'user content, no markers\n' > "$REPO/CLAUDE.md"
   chmod 0444 "$REPO/CLAUDE.md"

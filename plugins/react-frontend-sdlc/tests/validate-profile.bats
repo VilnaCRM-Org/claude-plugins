@@ -126,6 +126,24 @@ PYEOF
   [[ "$output" == *"VIOLATION: required key 'ci.provider' not declared"* ]]
 }
 
+@test "quality.metrics_enforced must be true: false and null both rejected (ADR-7)" {
+  python3 - "$PROFILES/valid.yml" "$BATS_TEST_TMPDIR/metrics-false.yml" "$BATS_TEST_TMPDIR/metrics-null.yml" <<'PYEOF'
+import sys, yaml
+p = yaml.safe_load(open(sys.argv[1]))
+p['quality']['metrics_enforced'] = False
+yaml.safe_dump(p, open(sys.argv[2], 'w'), sort_keys=False)
+p = yaml.safe_load(open(sys.argv[1]))
+p['quality']['metrics_enforced'] = None
+yaml.safe_dump(p, open(sys.argv[3], 'w'), sort_keys=False)
+PYEOF
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/metrics-false.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"VIOLATION: key 'quality.metrics_enforced' value 'false' must be true"* ]]
+  run "$VALIDATOR" "$BATS_TEST_TMPDIR/metrics-null.yml"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"VIOLATION: required key 'quality.metrics_enforced' missing or null"* ]]
+}
+
 @test "all violations reported, not just the first" {
   python3 - "$PROFILES/valid.yml" "$BATS_TEST_TMPDIR/multi.yml" <<'PYEOF'
 import sys, yaml

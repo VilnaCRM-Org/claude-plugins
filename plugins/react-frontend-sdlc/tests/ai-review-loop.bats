@@ -204,6 +204,27 @@ FAIL_JSON='{"result":"found issues\nAI_REVIEW_VERDICT: FAIL"}'
   [ "$(calls_made)" -eq 0 ]
 }
 
+@test "profile review.ai_review_agents as a scalar is rejected, never a silent claude default" {
+  # A schema-invalid scalar reads back as an empty list via yaml_get_list and
+  # would otherwise fall through to the default 'claude', masking the
+  # misconfiguration. The yaml_is_list guard must surface it instead.
+  mkdir -p .claude
+  printf 'review:\n  ai_review_agents: claude\n' > .claude/react-sdlc.yml
+  STUB_CLAUDE_LOG="$CALLS" run "$LOOP"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"review.ai_review_agents must be a YAML list"* ]]
+  [ "$(calls_made)" -eq 0 ]
+}
+
+@test "profile review.ai_review_agents scalar rejected under forced python backend too" {
+  mkdir -p .claude
+  printf 'review:\n  ai_review_agents: claude\n' > .claude/react-sdlc.yml
+  SDLC_FORCE_PYTHON_YAML=1 STUB_CLAUDE_LOG="$CALLS" run "$LOOP"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"review.ai_review_agents must be a YAML list"* ]]
+  [ "$(calls_made)" -eq 0 ]
+}
+
 @test "--diff-base lands in the default review prompt" {
   STUB_CLAUDE_OUTPUT="$PASS_JSON" STUB_CLAUDE_LOG="$CALLS" \
     run "$LOOP" --diff-base origin/release

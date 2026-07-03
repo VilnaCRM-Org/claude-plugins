@@ -82,6 +82,20 @@ pget() { yaml_get "$PROFILE" "$1"; }
   [ "$(pget capabilities.mutation_testing)" = "true" ]
 }
 
+@test "mutation_msi read from a stryker.conf.json with a QUOTED break key" {
+  # A JSON Stryker config writes "break": <n> (quoted); the detector must match
+  # the quoted key, not only the bare break: of an .mjs object literal.
+  rm -f "$REPO"/stryker.config.mjs "$REPO"/stryker.conf.mjs "$REPO"/stryker.config.js
+  cat > "$REPO/stryker.conf.json" <<'JSON'
+{
+  "thresholds": { "high": 90, "low": 80, "break": 72 }
+}
+JSON
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  [ "$(pget quality.mutation_msi)" = "72" ]
+}
+
 @test "generated profile passes validate-profile.sh (FR-17 AC)" {
   run "$GENERATE" "$REPO"
   [ "$status" -eq 0 ]
@@ -134,7 +148,11 @@ pget() { yaml_get "$PROFILE" "$1"; }
   [ "$status" -eq 0 ]
   # no Makefile target and no test-load dep signal -> capability off
   [ "$(pget capabilities.load_testing)" = "false" ]
-  [ "$(pget quality.metrics_enforced)" = "false" ]
+  # metrics_enforced is a standing policy flag, not a capability: it stays true
+  # even with no lint-metrics target (the lane degrades via make.lint_metrics:
+  # null). validate-profile.sh rejects any other value (profile-schema.md,
+  # degrade-matrix.md).
+  [ "$(pget quality.metrics_enforced)" = "true" ]
   # storybook still true: @storybook/react dep is an independent signal
   [ "$(pget capabilities.storybook)" = "true" ]
 }

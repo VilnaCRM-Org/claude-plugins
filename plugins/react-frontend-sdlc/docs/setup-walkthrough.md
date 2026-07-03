@@ -49,7 +49,7 @@ The command runs the following in order, aborting on the first hard failure.
 5. **Inject governance blocks** — runs `scripts/inject-governance.sh`, which
    maintains the managed `<!-- react-frontend-sdlc:begin/end -->` block in
    `CLAUDE.md` and `AGENTS.md`. Content outside the markers is never modified.
-6. **Permissions allowlist** — merges the five allowlist entries into
+6. **Permissions allowlist** — merges the six allowlist entries into
    `.claude/settings.json` so plugin-spawned
    `claude -p … --permission-mode acceptEdits` sessions run the container-only
    workflow without interactive prompts. Existing settings are preserved
@@ -87,6 +87,7 @@ package-manager entry):
 {
   "permissions": {
     "allow": [
+      "Bash(bmalph:*)",
       "Bash(make:*)",
       "Bash(bun:*)",
       "Bash(docker compose exec dev:*)",
@@ -97,9 +98,10 @@ package-manager entry):
 }
 ```
 
-These cover the container-only toolchain: Make drives every gate, the package
-manager manages dependencies, `docker compose exec dev` reaches into the dev
-container for single-test inner loops, and `git`/`gh` drive the PR. The
+These cover the container-only toolchain: `bmalph` runs the BMAD planning and
+Ralph loop (step 2 and `/fe-sdlc-implement`), Make drives every gate, the
+package manager manages dependencies, `docker compose exec dev` reaches into the
+dev container for single-test inner loops, and `git`/`gh` drive the PR. The
 package-manager entry is filled from the profile's
 `framework.package_manager` — the block above shows the `bun` form; on a
 `pnpm` or `npm` repo `/fe-sdlc-setup` writes `Bash(pnpm:*)` / `Bash(npm:*)`
@@ -185,7 +187,7 @@ degrades to a warning, is never retried, and never counts against
 
 Setup is complete when `setup-preflight.sh` exits 0, `validate-profile.sh`
 exits 0, the governance block exists in `CLAUDE.md` and `AGENTS.md`, and
-`.claude/settings.json` carries the five allowlist entries. The companion-skills
+`.claude/settings.json` carries the six allowlist entries. The companion-skills
 install is best-effort and intentionally outside the exit condition — its
 failure degrades to a warning and never blocks setup. After that the repository
 is ready for `/fe-sdlc` and the per-stage commands.

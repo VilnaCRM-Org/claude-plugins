@@ -313,6 +313,29 @@ setup() {
   [[ "$output" == *"project.owner_team"* ]]
 }
 
+# --- repository resolution ------------------------------------------------
+
+@test "resolve_repo_slug normalizes ssh, https, .git suffix, and trailing slash" {
+  local repo="$BATS_TEST_TMPDIR/slugrepo"
+  mkdir -p "$repo"
+  git -C "$repo" init -q
+  # Each origin form must resolve to a clean owner/name, never a leaked URL;
+  # the trailing-slash case is the one the raw sed left unparsed before.
+  for case in \
+    'git@github.com:org/repo.git|org/repo' \
+    'https://github.com/org/repo.git|org/repo' \
+    'https://github.com/org/repo|org/repo' \
+    'https://github.com/org/repo/|org/repo' \
+    'ssh://git@github.com/acme/widgets.git|acme/widgets'; do
+    local url="${case%%|*}" want="${case##*|}"
+    git -C "$repo" remote remove origin 2>/dev/null || true
+    git -C "$repo" remote add origin "$url"
+    run bash -c "source '$LIB'; cd '$repo'; resolve_repo_slug"
+    [ "$status" -eq 0 ]
+    [ "$output" = "$want" ]
+  done
+}
+
 # --- sample profile fixtures ----------------------------------------------
 
 @test "fixture profiles: valid parses, invalid variants differ as labeled" {

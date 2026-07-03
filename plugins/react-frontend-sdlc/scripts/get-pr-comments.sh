@@ -56,16 +56,10 @@ if [[ ! "$PR" =~ ^[0-9]+$ ]]; then
   die "resolved PR number is not numeric: '$PR' (gh pr view returned an unexpected value; pass --pr <n>)"
 fi
 
-# owner/name from the origin remote; gh repo view as fallback.
-origin="$(git remote get-url origin 2>/dev/null || true)"
-repo_slug=""
-if [[ -n "$origin" ]]; then
-  repo_slug="$(printf '%s\n' "$origin" | sed -E 's#\.git$##; s#^.*[:/]([^/]+/[^/]+)$#\1#')"
-fi
-if [[ -z "$repo_slug" ]]; then
-  repo_slug="$(gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" \
-    || die "cannot resolve repository (no origin remote and gh repo view failed)"
-fi
+# owner/name from the origin remote; gh repo view as fallback. Shared with
+# fr-nfr-gate.sh via resolve_repo_slug (lib/common.sh).
+repo_slug="$(resolve_repo_slug)" \
+  || die "cannot resolve repository (no origin remote and gh repo view failed)"
 OWNER="${repo_slug%%/*}"
 NAME="${repo_slug##*/}"
 

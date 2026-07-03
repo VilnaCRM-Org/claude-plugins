@@ -246,7 +246,7 @@ render_managed() {
     # Fence-aware so a documented marker inside a code fence is left as
     # content and never opens a managed region (FR-2).
     awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" -v fence_aware="$fence_aware" "$AWK_FENCE_PRELUDE"'
-      fence_toggle($0) { print; next }
+      fence_toggle($0) { if (!inblock) print; next }
       !infence && norm($0) == begin && !inblock { inblock = 1; if (!placed) { print "\x01MANAGED-BLOCK\x01"; placed = 1 }; next }
       inblock { if (!infence && norm($0) == end) inblock = 0; next }
       { print }

@@ -239,6 +239,18 @@ route_gh() {
   [ "$drop_hdr" -lt "$drop_line" ]
 }
 
+@test "regression: an earlier dropped finding does NOT dedup away an open finding at the same sink (status in key)" {
+  # DROP-FIRST (dropped) precedes OPEN-SECOND (open) sharing wcag|location|surface.
+  # Dedup runs before the open/dropped split, so without status in the key the
+  # dropped row would suppress the publishable open one — it must survive.
+  run "$SCRIPT" accessibility --file "$LEDGERS/dropped-suppresses-open.json" --pr 7 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PUBLISHABLE-OPEN-FINDING"* ]]
+  open_line="$(printf '%s\n' "$output" | grep -n 'PUBLISHABLE-OPEN-FINDING' | cut -d: -f1)"
+  drop_hdr="$(printf '%s\n'  "$output" | grep -n 'Dropped / not reproduced' | cut -d: -f1)"
+  [ "$open_line" -lt "$drop_hdr" ]
+}
+
 # ---------------------------------------------------------------------------
 # Redaction — FR-7 / NFR-5
 # ---------------------------------------------------------------------------
