@@ -52,7 +52,9 @@ command -v qlty >/dev/null || {
     && mkdir -p "$HOME/.qlty/bin" \
     && tar -xJf "$dir/qlty-$target.tar.xz" -C "$HOME/.qlty/bin" \
       --strip-components=1 "qlty-$target/qlty"
-  rm -rf "$dir"
+  rc=$?
+  [ -n "${dir:-}" ] && rm -rf "$dir"
+  [ "$rc" -eq 0 ] || exit "$rc"   # fail loudly here, not with a later "qlty: not found"
 }
 export PATH="$HOME/.qlty/bin:$PATH"
 ```

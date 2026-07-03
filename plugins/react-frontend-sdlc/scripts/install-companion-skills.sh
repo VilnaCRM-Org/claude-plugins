@@ -67,8 +67,12 @@ present() {
 # Returns non-zero on any failure (missing tool, non-zero installer exit).
 run_install() {
   local name=$1 cmd
-  [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || { log_warn "skipping companion with unsafe name: $name"; return 1; }
   if [[ "$install_command" == *"{name}"* ]]; then
+    # {name} is interpolated into a string run via `bash -c`, so an unsafe
+    # name is a command-injection vector — reject it. The allowlist is scoped
+    # to this branch only: `plugin` mode passes $name as a proper argv arg,
+    # and report-only/manual modes never execute it.
+    [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || { log_warn "skipping companion with unsafe name: $name"; return 1; }
     cmd="${install_command//\{name\}/$name}"
     bash -c "$cmd"
   elif [[ "$install_command" == "plugin" ]]; then
