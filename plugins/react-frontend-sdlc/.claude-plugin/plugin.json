@@ -1,0 +1,26 @@
+{
+  "name": "react-frontend-sdlc",
+  "version": "0.1.0",
+  "description": "Full-SDLC automation for React/TypeScript frontend engineering: GitHub issue creation, BMAD-method planning, bmalph/Ralph autonomous implementation with Claude CLI, multi-skill code review with BMAD FR/NFR gate plus a mandatory accessibility gate, visual/E2E/Lighthouse QA verification, CI auto-fix, and AI review comment resolution — looping until the PR is fully finished.",
+  "author": {
+    "name": "VilnaCRM",
+    "url": "https://github.com/VilnaCRM-Org"
+  },
+  "homepage": "https://github.com/VilnaCRM-Org/claude-plugins/tree/main/plugins/react-frontend-sdlc",
+  "repository": "https://github.com/VilnaCRM-Org/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "react",
+    "typescript",
+    "frontend",
+    "sdlc",
+    "bmad",
+    "ralph",
+    "automation",
+    "code-review",
+    "accessibility",
+    "qa",
+    "ci",
+    "github"
+  ]
+}

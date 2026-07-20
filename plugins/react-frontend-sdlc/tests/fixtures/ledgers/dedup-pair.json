@@ -1,0 +1,25 @@
+{
+  "lens": "accessibility",
+  "findings": [
+    {
+      "id": "DUP-1",
+      "severity": "High",
+      "wcag": "1.4.3",
+      "level": "AA",
+      "location": "src/modules/alpha/features/search/search-box.tsx:88",
+      "surface": "SearchBox",
+      "summary": "Placeholder text contrast below the minimum",
+      "status": "open"
+    },
+    {
+      "id": "DUP-2",
+      "severity": "Critical",
+      "wcag": "1.4.3",
+      "level": "AA",
+      "location": "src/modules/alpha/features/search/search-box.tsx:88",
+      "surface": "SearchBox",
+      "summary": "SECOND-FINDING-SAME-SINK distinct summary text",
+      "status": "open"
+    }
+  ]
+}

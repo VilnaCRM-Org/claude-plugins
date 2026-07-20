@@ -1,0 +1,40 @@
+{
+  "lens": "code-review",
+  "findings": [
+    {
+      "id": "LOW-1",
+      "severity": "Low",
+      "location": "src/utils/str.ts:3",
+      "summary": "Prefer a named constant here",
+      "status": "open"
+    },
+    {
+      "id": "CRIT-1",
+      "severity": "Critical",
+      "location": "src/modules/alpha/features/payment/charge.ts:21",
+      "summary": "Unchecked refund amount sign",
+      "status": "open"
+    },
+    {
+      "id": "MED-1",
+      "severity": "Medium",
+      "location": "src/modules/alpha/features/cart/cart.ts:9",
+      "summary": "Race on cart total recompute",
+      "status": "open"
+    },
+    {
+      "id": "DROPPED-1",
+      "severity": "Critical",
+      "location": "src/components/legacy/thing.tsx:1",
+      "summary": "STALE-DECLINED-THREAD must not sit above an open row",
+      "status": "dropped"
+    },
+    {
+      "id": "HIGH-1",
+      "severity": "High",
+      "location": "src/modules/alpha/features/auth/token.ts:14",
+      "summary": "Token TTL not enforced",
+      "status": "open"
+    }
+  ]
+}

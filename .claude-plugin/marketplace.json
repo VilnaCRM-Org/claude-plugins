@@ -16,6 +16,16 @@
       },
       "category": "development",
       "source": "./plugins/php-backend-sdlc"
+    },
+    {
+      "name": "react-frontend-sdlc",
+      "description": "Full-SDLC automation for React/TypeScript frontend engineering: GitHub issue creation, BMAD-method planning, bmalph/Ralph autonomous implementation with Claude CLI, multi-skill code review with BMAD FR/NFR gate plus a mandatory accessibility gate, visual/E2E/Lighthouse QA verification, CI auto-fix, and AI review comment resolution — looping until the PR is fully finished.",
+      "author": {
+        "name": "VilnaCRM",
+        "url": "https://github.com/VilnaCRM-Org"
+      },
+      "category": "development",
+      "source": "./plugins/react-frontend-sdlc"
     }
   ]
 }
