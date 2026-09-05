@@ -161,6 +161,10 @@ class PromptJudgeTests(unittest.TestCase):
             subject.strict_verdict(
                 value, [subject.rubrics.DIMENSIONS_BY_ID["J1"]], "artifact text"
             )
+        with self.assertRaisesRegex(subject.AssessmentError, r"Verdict J1:.*citation"):
+            subject.strict_verdict(
+                value, [subject.rubrics.DIMENSIONS_BY_ID["J1"]], "artifact text"
+            )
 
     def test_invalid_output_has_safe_error_without_raw_response(self):
         def invalid(*args, **kwargs):
@@ -302,6 +306,124 @@ class PromptJudgeTests(unittest.TestCase):
         self.assertEqual(set(selected["properties"]), set(selected["required"]))
         self.assertFalse(selected["additionalProperties"])
 
+    def test_schema_citations_are_bounded_exact_artifact_chunks(self):
+        schema = subject.verdict_schema(
+            [subject.rubrics.DIMENSIONS_BY_ID["J1"]], "short line\n" + "x" * 121
+        )
+        choices = schema["$defs"]["assessment_entry"]["properties"]["citation"]["enum"]
+        self.assertEqual(choices, ["short line", "x" * 120, "x"])
+
+    def test_multidimension_schema_shares_one_literal_safe_exact_citation_enum(self):
+        raw = 'Run "quoted" command with \\path and\ttab.\n' + "x" * 121
+        dims = subject.rubrics.applicable_dimensions("command", "example")
+        schema = subject.verdict_schema(dims, raw)
+        choices = schema["$defs"]["assessment_entry"]["properties"]["citation"]["enum"]
+        self.assertIn("quoted", choices)
+        self.assertIn("path and", choices)
+        self.assertIn("x" * 120, choices)
+        for choice in choices:
+            self.assertIn(choice, raw)
+            self.assertLessEqual(len(choice), 120)
+            self.assertNotIn('"', choice)
+            self.assertNotIn("\\", choice)
+            self.assertTrue(all(ord(char) >= 32 for char in choice))
+        self.assertEqual(json.dumps(schema).count('"enum"'), 1)
+        for entry in schema["properties"]["dimensions"]["properties"].values():
+            self.assertEqual(entry, {"$ref": "#/$defs/assessment_entry"})
+        with self.assertRaises(subject.AssessmentError):
+            subject.verdict_schema(dims, '"\\\t')
+
+    def test_all_shipped_artifact_schemas_have_exact_bounded_single_enum(self):
+        artifacts = subject._model.discover(subject.PLUGIN)
+        for artifact in artifacts:
+            dims = subject.rubrics.applicable_dimensions(artifact.kind, artifact.name)
+            schema = subject.verdict_schema(dims, artifact.raw)
+            choices = schema["$defs"]["assessment_entry"]["properties"]["citation"][
+                "enum"
+            ]
+            with self.subTest(artifact=artifact.name):
+                self.assertEqual(json.dumps(schema).count('"enum"'), 1)
+                self.assertTrue(choices)
+                self.assertLessEqual(len(choices), subject.MAX_CITATIONS)
+                self.assertTrue(all(c in artifact.raw for c in choices))
+                self.assertTrue(all('"' not in c and "\\" not in c for c in choices))
+        with mock.patch.object(subject, "MAX_CITATIONS", 2):
+            self.assertEqual(
+                subject.citation_choices("one\none\ntwo\nthree"), ["one", "two"]
+            )
+
+    def test_prompt_and_schema_offer_identical_citation_fragments(self):
+        artifact = subject.artifact_inventory(
+            self.root, subject.plugin_snapshot(self.root)
+        )[0]
+        dimensions = subject.rubrics.applicable_dimensions(artifact.kind, artifact.name)
+
+        def runner(prompt, schema, *args, **kwargs):
+            choices = schema["$defs"]["assessment_entry"]["properties"]["citation"][
+                "enum"
+            ]
+            self.assertTrue(all(c in prompt for c in choices))
+            self.assertIn("Allowed exact citation fragments", prompt)
+            return fake_agent(prompt, schema, *args, **kwargs)
+
+        with mock.patch.object(subject.agent_cli, "run_prompt", side_effect=runner):
+            vote = subject.one_vote(
+                artifact, dimensions, subject.CONTEXT, self.settings, 1, "fixture"
+            )
+        self.assertEqual(vote["status"], "SCORED")
+
+    def test_invalid_structured_output_repairs_only_until_valid(self):
+        calls = []
+
+        def runner(*args, **kwargs):
+            calls.append(kwargs["backend"])
+            result = fake_agent(*args, **kwargs)
+            if len(calls) == 1:
+                next(iter(result["output"]["dimensions"].values()))["citation"] = "bad"
+            return result
+
+        artifact = subject.artifact_inventory(
+            self.root, subject.plugin_snapshot(self.root)
+        )[0]
+        dimensions = subject.rubrics.applicable_dimensions(artifact.kind, artifact.name)
+        with mock.patch.object(subject.agent_cli, "run_prompt", side_effect=runner):
+            vote = subject.one_vote(
+                artifact, dimensions, subject.CONTEXT, self.settings, 1, "fixture"
+            )
+        self.assertEqual(vote["status"], "SCORED")
+        self.assertEqual(len(vote["invalid_attempts"]), 1)
+        self.assertEqual(calls, ["auto", "claude"])
+
+    def test_always_invalid_and_cli_error_do_not_overretry(self):
+        artifact = subject.artifact_inventory(
+            self.root, subject.plugin_snapshot(self.root)
+        )[0]
+        dimensions = subject.rubrics.applicable_dimensions(artifact.kind, artifact.name)
+
+        def invalid(*args, **kwargs):
+            result = fake_agent(*args, **kwargs)
+            for entry in result["output"]["dimensions"].values():
+                entry["citation"] = "bad"
+            return result
+
+        with mock.patch.object(
+            subject.agent_cli, "run_prompt", side_effect=invalid
+        ) as call:
+            vote = subject.one_vote(
+                artifact, dimensions, subject.CONTEXT, self.settings, 1, "fixture"
+            )
+        self.assertEqual(vote["status"], "ERROR")
+        self.assertEqual(call.call_count, subject.judge.MAX_REPROMPTS + 1)
+        self.assertEqual(len(vote["invalid_attempts"]), subject.judge.MAX_REPROMPTS + 1)
+        with mock.patch.object(
+            subject.agent_cli, "run_prompt", return_value={"status": "TIMEOUT"}
+        ) as call:
+            vote = subject.one_vote(
+                artifact, dimensions, subject.CONTEXT, self.settings, 1, "fixture"
+            )
+        self.assertEqual(vote["status"], "ERROR")
+        self.assertEqual(call.call_count, 1)
+
     def test_cli_no_auth_returns_nonzero_and_json(self):
         with mock.patch.object(
             subject.agent_cli, "run_prompt", return_value={"status": "BLOCKED"}
@@ -372,6 +494,20 @@ class PromptJudgeTests(unittest.TestCase):
             subject.progress_failures(row, "live")
         self.assertIn("J1", output.getvalue())
         self.assertIn("[REDACTED]", output.getvalue())
+
+    def test_live_error_progress_includes_only_static_reason(self):
+        row = {
+            "path": "agents/ci-fixer.md",
+            "status": "ERROR",
+            "error": "Verdict J2: citation is not an exact artifact substring.",
+        }
+        with contextlib.redirect_stderr(io.StringIO()) as output:
+            subject.progress_error(row, "live")
+        self.assertEqual(
+            output.getvalue(),
+            "artifact agents/ci-fixer.md error: Verdict J2: citation is not an "
+            "exact artifact substring.\n",
+        )
 
 
 if __name__ == "__main__":

@@ -7,7 +7,10 @@ argument-hint: "[repository-path]"
 
 ## Inputs
 
-The command argument, repository guidance, and current task evidence.
+Inputs are the command argument, repository guidance and
+`specs/<task>/run-summary.md` when resuming. That summary records task/repository
+identity, target/environment selections, source/profile hashes, artifact paths,
+check outcomes and persisted counters; a fresh task starts an empty summary.
 Resolve the installed/source plugin directory once; set `DEVOPS_PLUGIN_ROOT`
 to its absolute path in the command environment and record it. Native Claude may initialize it from
 `CLAUDE_PLUGIN_ROOT`; Codex must receive the explicit inspected plugin path.
@@ -22,17 +25,27 @@ Only setup creates an absent `.claude/devops-sdlc.json`; every other stage route
 an absent profile to setup and waits for its result. Then validate the profile
 using `python3 "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`
 before any repository-provided code, tests or operational command executes.
-Choose exactly one declared target ID and, for preview, one of that target's
-explicit environment names; local checks may omit the environment. Ambiguity
-or invalid profile is immediately BLOCKED before dependent execution.
+Select target IDs and environments explicitly named by the user's task or its
+accepted run summary. Process multiple named targets separately with distinct
+profile/evidence records. Each helper invocation uses exactly one declared target
+ID and, for preview, one environment belonging to that target; local checks may
+omit it. If scope selects no target and multiple profile targets could match,
+BLOCKED is immediate before dependent execution; never choose by shell defaults.
 
 Verify `$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json` and readable Python
-helper files; Python invocation needs no executable bit. Missing or unresolved
-plugin root/helper/BMALPH/judge needed by this stage is immediately BLOCKED;
-report its exact prerequisite without repeated retries. Load a missing role's
-source explicitly in an available independent agent only when the host supports
-that role safely; if independent review/QA cannot be provided, BLOCKED is final
-for that gate. Do not replace independence with implementer self-approval.
+helper files; Python invocation needs no executable bit. Check the prerequisites
+listed below; a missing item immediately produces BLOCKED with the item name
+and observed failure, without retries. A required independent role must be
+available as a separate invocable agent/session in the host's tool inventory.
+If that capability or the role definition is absent, immediately BLOCK that
+review/QA gate; there is no role fallback or implementer self-approval.
+
+Stage prerequisites: Python 3, Git, both helper files and a resolved writable
+repository directory for a missing profile. Check executable availability/version
+for each non-null command mapping required by the requested next stage and one
+authenticated Claude/Codex backend. For planning/implementation next, also check
+`bmalph --help`; bmalph is the tool connecting BMAD planning and Ralph execution.
+A null mapping is unavailable; if requested by the task it blocks that capability.
 For a new CLI invocation only, before it starts, binary/authentication preflight
 may choose the other authenticated backend in auto mode. No fallback or replay
 is allowed after the invocation starts, times out or has uncertain effects.
@@ -74,14 +87,17 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    auto selection needs one authenticated backend, not credentials for both.
    Record the selected backend/version and configured BMALPH driver. Verify
    installed platform instructions and help; preserve existing initialization.
-   Install dependencies only within authorized development and pinned repo rules.
+   Install a missing development dependency only when installation is included
+   in the user's task scope and its exact version/source is declared by the
+   repository lockfile or tool configuration. Otherwise record the missing
+   dependency and stop its dependent stage; do not infer package/version.
 6. Create a local task inventory from actual projects and operation families.
    Record source revision, applicability, owner, risk, preconditions and evidence.
    Profile setup never selects a live stack, initializes shared state or grants IAM.
 
 ## Loop & exit condition
 
-The profile validates and selected target prerequisites are evidenced. Persist statuses as PASSED, FAILED, SKIPPED or BLOCKED with
+The profile validates; required next-stage command executables and their versions, writable repository root, and selected authenticated backend are evidenced. Persist statuses as PASSED, FAILED, SKIPPED or BLOCKED with
 evidence and source identity. Only PASSED satisfies a required gate.
 
 ## Iteration guard
@@ -104,7 +120,7 @@ Provide the exact unmet condition and evidence; do not conceal failed checks.
 === SDLC ESCALATION ===
 stage: do-sdlc-setup
 iteration: <used>/5
-exit_condition: The profile validates and selected target prerequisites are evidenced.
+exit_condition: The profile validates; required next-stage command executables and their versions, writable repository root, and selected authenticated backend are evidenced.
 status: FAILED | BLOCKED
 blocking_finding: <specific unresolved condition>
 iteration_log: <attempts, evidence and source SHA>

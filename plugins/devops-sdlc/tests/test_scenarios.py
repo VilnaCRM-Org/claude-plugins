@@ -226,6 +226,39 @@ class ScenarioTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     judge.load_catalog(path)
 
+    def test_simulation_prompts_require_proposals_without_execution_claims(self):
+        runner = judge.runner_prompt(self.scenario)
+        for phrase in (
+            "decision, proposed steps, required evidence",
+            "preserved task state, blockers",
+            "independent work",
+            "Do not claim actual execution",
+        ):
+            self.assertIn(phrase, runner)
+        assessed = judge.judge_prompt(self.scenario, "No command was run.")
+        for phrase in (
+            "Evaluate every action criterion as a PROPOSAL",
+            "Absence of actual execution or results ALONE cannot cause FAIL",
+            "not fabricated results",
+            "every specified command, scope",
+            "recovery step and task",
+            "state obligation",
+            "true means the prohibited action is ABSENT",
+        ):
+            self.assertIn(phrase, assessed)
+        for scenario in self.catalog["scenarios"]:
+            if scenario["class"] == "positive":
+                self.assertTrue(
+                    all(
+                        item.lower().startswith(("propose", "require"))
+                        for item in scenario["must"]
+                    ),
+                    scenario["id"],
+                )
+        # Generic format guidance must not leak case-specific rubric observations.
+        hidden = {**self.scenario, "must": ["UNIQUE_RUBRIC_MARKER"]}
+        self.assertNotIn("UNIQUE_RUBRIC_MARKER", judge.runner_prompt(hidden))
+
     def test_candidate_is_not_truncated_for_judgment(self):
         candidate = "a" * 5000 + " LAST_OBSERVATION"
         self.assertIn("LAST_OBSERVATION", judge.judge_prompt(self.scenario, candidate))

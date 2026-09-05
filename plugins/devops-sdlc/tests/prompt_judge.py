@@ -36,6 +36,7 @@ VOTES = 3
 EXPECTED_ARTIFACTS = 31
 MAX_FILES = 500
 MAX_FILE_BYTES = 2_000_000
+MAX_CITATIONS = 512
 SKIPPED_DIRECTORIES = {"__pycache__", ".pytest_cache", ".ruff_cache"}
 CONTEXT = (
     "Scope: a reusable DevOps infrastructure plugin for Terraform/Terraspace and "
@@ -118,7 +119,25 @@ def validate_settings(settings: Settings, mode: str) -> None:
     rubric_dimensions(settings)
 
 
-def verdict_schema(dimensions: list[rubrics.Dimension]) -> dict:
+def citation_choices(artifact_raw: str) -> list[str]:
+    choices = []
+    for line in artifact_raw.splitlines():
+        # Codex strict schemas reject escaped quote literals in enum strings.
+        # Split, never rewrite: every permitted fragment remains exact source text.
+        for literal in re.split(r'["\\\x00-\x1f]', line):
+            for start in range(0, len(literal), 120):
+                chunk = literal[start : start + 120]
+                if chunk.strip() and chunk not in choices:
+                    choices.append(chunk)
+                    if len(choices) == MAX_CITATIONS:
+                        return choices
+    return choices
+
+
+def verdict_schema(dimensions: list[rubrics.Dimension], artifact_raw: str = "") -> dict:
+    choices = citation_choices(artifact_raw)
+    if artifact_raw and not choices:
+        raise AssessmentError("Artifact has no literal-safe exact citation fragments.")
     entry = {
         "type": "object",
         "additionalProperties": False,
@@ -126,19 +145,27 @@ def verdict_schema(dimensions: list[rubrics.Dimension]) -> dict:
         "properties": {
             "score": {"type": "integer", "minimum": 1, "maximum": 5},
             "evidence": {"type": "string", "minLength": 1, "maxLength": 240},
-            "citation": {"type": "string", "minLength": 1, "maxLength": 120},
+            "citation": (
+                {"type": "string", "enum": choices}
+                if artifact_raw
+                else {"type": "string", "minLength": 1, "maxLength": 120}
+            ),
         },
     }
     return {
         "type": "object",
         "additionalProperties": False,
         "required": ["dimensions"],
+        "$defs": {"assessment_entry": entry},
         "properties": {
             "dimensions": {
                 "type": "object",
                 "additionalProperties": False,
                 "required": [dimension.id for dimension in dimensions],
-                "properties": {dimension.id: entry for dimension in dimensions},
+                "properties": {
+                    dimension.id: {"$ref": "#/$defs/assessment_entry"}
+                    for dimension in dimensions
+                },
             }
         },
     }
@@ -153,8 +180,11 @@ def strict_verdict(
         judge.validate_verdict(value, dimensions)
     except judge.JudgeError as exc:
         raise AssessmentError("Verdict failed shared rubric validation.") from exc
-    for entry in value["dimensions"].values():
-        validate_entry(entry, artifact_raw)
+    for dimension in dimensions:
+        try:
+            validate_entry(value["dimensions"][dimension.id], artifact_raw)
+        except AssessmentError as exc:
+            raise AssessmentError(f"Verdict {dimension.id}: {exc}") from exc
     return value
 
 
@@ -242,9 +272,7 @@ def one_vote(
     number: int,
     mode: str,
 ) -> dict:
-    citation_lines = [
-        line for line in artifact.raw.splitlines() if line and len(line) <= 120
-    ]
+    citation_lines = citation_choices(artifact.raw)
     prompt = (
         judge.build_prompt(artifact, dimensions, context)
         + "\n\n"
@@ -253,50 +281,85 @@ def one_vote(
             " citation is a non-empty single-line substring copied from ARTIFACT."
             " Never cite CONTEXT, a rubric, a link target, or a paraphrase."
             " Limit citation to 120 characters and verify it occurs in ARTIFACT."
-            "evidence must be single-line and at most 240 characters."
+            " evidence must be single-line and at most 240 characters."
         )
-        + "\nAllowed exact citation lines (copy one verbatim):\n"
+        + "\nAllowed exact citation fragments (copy one verbatim):\n"
         + "\n".join(citation_lines)
     )
-    with tempfile.TemporaryDirectory(prefix="devops-prompt-judge-") as directory:
-        result = agent_cli.run_prompt(
-            prompt,
-            verdict_schema(dimensions),
-            Path(directory),
-            backend=settings.backend,
-            prefer=settings.prefer,
-            model=settings.model,
-            plugin_root=None,
-            timeout=settings.timeout,
-        )
-    metadata = vote_metadata(result, number, mode)
-    if result.get("status") != "COMPLETED" or result.get("plugin_mode") != "none":
-        return {**metadata, "status": "ERROR", "error": "Agent evaluation unavailable."}
-    try:
-        backend_identity(result)
-    except AssessmentError:
+    attempts = []
+    backend = settings.backend
+    for repair in range(judge.MAX_REPROMPTS + 1):
+        with tempfile.TemporaryDirectory(prefix="devops-prompt-judge-") as directory:
+            result = agent_cli.run_prompt(
+                prompt,
+                verdict_schema(dimensions, artifact.raw),
+                Path(directory),
+                backend=backend,
+                prefer=settings.prefer,
+                model=settings.model,
+                plugin_root=None,
+                timeout=settings.timeout,
+            )
+        metadata = vote_metadata(result, number, mode)
+        if result.get("status") != "COMPLETED" or result.get("plugin_mode") != "none":
+            return {
+                **metadata,
+                "status": "ERROR",
+                "error": "Agent evaluation unavailable.",
+                "invalid_attempts": attempts,
+            }
+        try:
+            backend_identity(result)
+        except AssessmentError:
+            return {
+                **metadata,
+                "status": "ERROR",
+                "identity_unverified": True,
+                "error": "Agent model identity is unavailable.",
+                "invalid_attempts": attempts,
+            }
+        if (
+            mode == "live"
+            and result.get("backend") == "codex"
+            and not result.get("requested_model")
+        ):
+            return {
+                **metadata,
+                "status": "ERROR",
+                "identity_unverified": True,
+                "error": "Codex live assessment requires an explicit --model.",
+                "invalid_attempts": attempts,
+            }
+        try:
+            verdict = strict_verdict(result.get("output"), dimensions, artifact.raw)
+        except AssessmentError as exc:
+            attempts.append(
+                {
+                    "status": "INVALID",
+                    "reason": str(exc),
+                    "output_sha256": json_digest(result.get("output")),
+                }
+            )
+            if repair == judge.MAX_REPROMPTS:
+                return {
+                    **metadata,
+                    "status": "ERROR",
+                    "error": str(exc),
+                    "invalid_attempts": attempts,
+                }
+            backend = result["backend"]
+            prompt += (
+                "\nFORMAT REPAIR: Return corrected JSON only; copy citations "
+                "verbatim from allowed fragments."
+            )
+            continue
         return {
             **metadata,
-            "status": "ERROR",
-            "identity_unverified": True,
-            "error": "Agent model identity is unavailable.",
+            "status": "SCORED",
+            "dimensions": stored_dimensions(verdict),
+            "invalid_attempts": attempts,
         }
-    if (
-        mode == "live"
-        and result.get("backend") == "codex"
-        and not result.get("requested_model")
-    ):
-        return {
-            **metadata,
-            "status": "ERROR",
-            "identity_unverified": True,
-            "error": "Codex live assessment requires an explicit --model.",
-        }
-    try:
-        verdict = strict_verdict(result.get("output"), dimensions, artifact.raw)
-    except AssessmentError:
-        return {**metadata, "status": "ERROR", "error": "Invalid structured verdict."}
-    return {**metadata, "status": "SCORED", "dimensions": stored_dimensions(verdict)}
+    raise AssertionError("unreachable")
 
 
 def collect_votes(
@@ -381,6 +444,15 @@ def progress_failures(row: dict, mode: str) -> None:
         )
 
 
+def progress_error(row: dict, mode: str) -> None:
+    if mode == "live" and row.get("status") == "ERROR" and "error" in row:
+        print(
+            f"artifact {row['path']} error: {row['error']}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
 def calibrate_case(
     case: calibration.CalibrationCase, settings: Settings, mode: str
 ) -> dict:
@@ -416,7 +488,7 @@ def calibration_row(
     }
 
 
-def calibrated_identity(rows: list[dict]) -> tuple[str, str, str | None] | None:
+def calibrated_identity(rows: list[dict]) -> tuple[str, str, str, str] | None:
     if len(rows) != len(calibration_inventory()):
         return None
     if any(row["status"] != "PASSED" for row in rows):
@@ -624,6 +696,7 @@ def evaluate_one(
         row = assess_artifact(artifact, requested, context, settings, mode, identity)
     progress(f"artifact {row['path']}", row["status"], mode)
     progress_failures(row, mode)
+    progress_error(row, mode)
     return row
 
 

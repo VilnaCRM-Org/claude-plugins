@@ -10,7 +10,7 @@ Reassess applicability after each scope or source change.
 ## Complete inventory
 
 - [backup-recovery](backup-recovery/SKILL.md) — Use when assessing backups, restore drills, RPO/RTO or disaster recovery. Use state-migration for state ownership transfers and delivery-and-rollback for reverting a release.
-- [bmad-autonomous-planning](bmad-autonomous-planning/SKILL.md) — Use when turning infrastructure work into BMAD requirements, architecture, stories and a readiness handoff. Use infrastructure-quality for checking existing code; execution belongs to do-sdlc-implement.
+- [bmad-autonomous-planning](bmad-autonomous-planning/SKILL.md) — Use when turning infrastructure work into BMAD requirements, architecture, stories and a readiness handoff. Use infrastructure-quality for checking existing code; implementation execution is a separate command stage, outside this skill.
 - [cost-optimization](cost-optimization/SKILL.md) — Use when assessing infrastructure spend, budgets, quotas or rightsizing proposals. Use observability for non-cost telemetry and environment-lifecycle for approved retirement execution.
 - [delivery-and-rollback](delivery-and-rollback/SKILL.md) — Use when preparing saved-plan promotion, deployment health gates or release rollback. Use incident-response for broader incident triage and state-migration for backend ownership changes.
 - [drift-management](drift-management/SKILL.md) — Use when comparing deployed infrastructure with declared configuration or planning drift reconciliation. Use state-migration for ownership transfers and incident-response for active outages.
@@ -27,10 +27,13 @@ Reassess applicability after each scope or source change.
 ## Routing
 
 Validate `.claude/devops-sdlc.json` using `scripts/devops.py validate-profile`
-from the inspected plugin root; failure is BLOCKED. Select the explicit target ID.
+from the inspected plugin root; failure is BLOCKED. Select the `id` of one entry in the profile `targets` list, supplied by the task.
+A missing or nonmatching ID is BLOCKED; never infer the environment from the directory.
 Choose terraform-terraspace for Terraform/Terraspace, python-pulumi for Python
-Pulumi, and BLOCKED for an unsupported engine. Then add quality, security,
-delivery and evidence skills. State ownership/backend changes always receive
+Pulumi, and BLOCKED for an unsupported engine. Select `infrastructure-quality` when code or checks change, `security-iam` when
+permissions/secrets/public access change, `delivery-and-rollback` when promotion
+or recovery is requested, and `evidence-and-coverage` for completion reporting.
+Record the remaining skills as SKIPPED only when their stated trigger is absent. State ownership/backend changes always receive
 independent state review. Day-2 tasks select their operational skills by the
 actual requested action; a feature task does not imply deployment authorization.
 
