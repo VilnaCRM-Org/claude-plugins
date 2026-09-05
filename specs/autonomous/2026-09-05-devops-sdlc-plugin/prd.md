@@ -166,3 +166,15 @@ Use repository-native checks and explicit code trust to manage execution risk. U
 ### Portability and Maintainability
 
 - NFR5: The operational helper uses Python standard library, explicit argv with no shell execution, deterministic machine-readable output and repository-relative paths. Plugin artifacts pass existing packaging, schema, profile-key, generalization and content checks without modifying existing plugin behavior.
+
+## Security Review Clarification
+
+FR6 supports reviewable preview intentions for all three engines. Helper execution of Terraform/Terraspace preview remains blocked until effective backend identity can be established through a reviewed repository/CI handoff. Pulumi execution verifies declared stack/backend selection and AWS account metadata. The blocked paths remain visible FR8/FR12 evidence gaps and cannot satisfy live success or 90% operational completion claims.
+
+## Dual CLI Requirement Addendum
+
+FR13: Maintainers can select Claude CLI or Codex CLI explicitly or prefer either with automatic fallback when binary/authentication preflight is unavailable; evidence reports the backend actually used and preserves native Claude plugin loading versus explicit Codex source-context evaluation.
+
+NFR9: Structured evaluation disables executable tools, inherited user/project integrations and session persistence using supported CLI controls. Unsupported isolation capabilities block the run. Fallback is confined to preflight; no started, timed-out or uncertain run is replayed. Model identifiers are never translated between backends, and unreported defaults remain unknown.
+
+This user-directed addition is covered by Story 2.3 and the shared evaluation adapter. Existing cloud authorization, protected workflow, live-evidence and 90% reporting requirements remain in force.

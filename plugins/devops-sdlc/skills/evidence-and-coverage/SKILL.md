@@ -28,10 +28,11 @@ skill receives a verdict; no silent skips.
    engine/environment/risk breakdowns and manual interventions. Zero denominator
    is undefined, not 100%; preserve failed, blocked and skipped applicable rows.
 3. Distinguish supported workflow coverage, deterministic benchmark coverage,
-   actual Claude E2E and observed real operations. A documented handler, fixture,
+   actual Claude-native E2E, Codex source-context sessions and real operations. A documented handler, fixture,
    mock or prepared proposal does not count as completed real deployment work.
 4. Bind every result to source/profile/target/environment, artifact hashes,
-   tool/model version and timestamp. Hashes detect changes but do not establish
+   actual CLI/backend version, requested/observed model, plugin mode and timestamp.
+   Retain preflight fallback reasons; unreported default model identity is unknown. Hashes detect changes but do not establish
    trusted authorship, approval or executable safety.
 5. Reject incomplete schemas, stale/future timestamps, source mismatches,
    symlink/path escapes, altered commands and ambiguous statuses. Never include
@@ -39,6 +40,10 @@ skill receives a verdict; no silent skips.
 6. Compare observed coverage to the 90% target only with a reviewed nonempty
    baseline and sufficient evidence. Report remaining gaps honestly; code/test
    coverage percentage and prompt count are not human toil reduction.
+7. Distinguish verified Ralph completion from a documented parent/operator handoff.
+   Preserve the original blocked/failed run and external prerequisite evidence,
+   receiving owner's actions and independent current-source checks. A handoff
+   cannot erase failures, reset counters or count as an uninterrupted Ralph success.
 
 ## Evidence and failure handling
 

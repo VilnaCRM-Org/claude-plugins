@@ -29,7 +29,7 @@ The canonical bundle contains research.md, brief.md, prd.md, architecture.md and
 - FR11: Operators can use applicable guidance and repository commands for drift triage, incident response, recovery preparation, backup/restore evidence, cost/quota review, dependency maintenance, onboarding/retirement and audit evidence without implicit deployment authority.
 - FR12: Maintainers can maintain an auditable eligible-work inventory and report workflow support, fixture results, actual automated task completion and human-time reduction as separate measures with explicit exclusions.
 
-Total FRs: 12.
+Total FRs: 13 (FR13 in the dual CLI addendum).
 
 ### Non-Functional Requirements
 
@@ -42,7 +42,7 @@ Total FRs: 12.
 - NFR7: Command-intention evidence is immutable and binds timestamp, source SHA/content hashes, profile, target/environment and argv. Verification rejects stale or changed evidence. Saved IaC plans and deployed revisions require separate engine/pipeline evidence.
 - NFR5: The operational helper uses Python standard library, explicit argv with no shell execution, deterministic machine-readable output and repository-relative paths. Plugin artifacts pass existing packaging, schema, profile-key, generalization and content checks without modifying existing plugin behavior.
 
-Total NFRs: 8.
+Total NFRs: 9 (NFR9 in the dual CLI addendum).
 
 ### Additional Requirements and Completeness
 
@@ -51,7 +51,7 @@ The contract covers all supplied journeys, three existing engine families, autho
 ## Epic Coverage Validation
 
 | Requirement | Story | Status |
-|---|---|---|
+| --- | --- | --- |
 | FR1 | 1.1 | Covered |
 | FR2 | 1.1 | Covered |
 | FR3 | 1.1 | Covered |
@@ -64,8 +64,9 @@ The contract covers all supplied journeys, three existing engine families, autho
 | FR10 | 1.4 | Covered |
 | FR11 | 1.3 | Covered |
 | FR12 | 3.1 | Covered |
+| FR13 | 2.3 | Covered |
 
-No missing FRs; 12 of 12 requirements mapped (100% planning traceability). This percentage is not runtime coverage or operational automation. NFRs map to the story requirement lists and adversarial acceptance conditions. Ralph story 3.1 includes strict 100% line/branch coverage and existing Ruff/type/security/complexity requirements.
+No missing FRs; 13 of 13 requirements mapped (100% planning traceability). This percentage is not runtime coverage or operational automation. NFRs map to the story requirement lists and adversarial acceptance conditions. Ralph story 3.1 includes strict 100% line/branch coverage and existing Ruff/type/security/complexity requirements.
 
 ## UX Alignment Assessment
 
@@ -73,7 +74,7 @@ No separate UX document exists or is required. PRD journeys describe the convers
 
 ## Epic Quality Review
 
-Three epics deliver concrete outcomes: safe preparation/review, independent verification and honest measurement. Seven stories use Given/When/Then acceptance, explicit FR/NFR mappings, negative conditions and observable results. Dependencies flow from installed discovery to execution to orchestration/delivery, then independent verification. The reporter requires no future runtime feature or external service.
+Three epics deliver concrete outcomes: safe preparation/review, independent verification and honest measurement. Eight stories use Given/When/Then acceptance, explicit FR/NFR mappings, negative conditions and observable results. Dependencies flow from installed discovery to execution to orchestration/delivery, then independent verification. The reporter requires no future runtime feature or external service.
 
 No critical or major planning violation remains. Story 1.3 spans prompt/skill orchestration but is bounded to declarative plugin artifacts and existing external CLIs; it introduces no engine implementation. Core stories include their own baseline tests, while Epic 2 adds independent adversarial and live validation. No database, migration or unrelated starter scaffolding is introduced.
 
@@ -83,7 +84,7 @@ Resolved minor issue: research inputs originally used a workspace-relative path 
 
 ### Overall Readiness Status
 
-READY for implementation. Twelve FRs and eight NFRs map to architecture and seven stories across three user-value epics. Zero unresolved planning blockers; one minor input-path defect was corrected. Assessor: BMAD architecture/readiness agent, 2026-09-05.
+READY for implementation. Thirteen FRs and nine NFRs map to architecture and eight stories across three user-value epics. Zero unresolved planning blockers; one minor input-path defect was corrected. Assessor: BMAD architecture/readiness agent, 2026-09-05.
 
 ### Required Implementation Work
 
@@ -95,3 +96,13 @@ READY for implementation. Twelve FRs and eight NFRs map to architecture and seve
 ### Evidence and Risk Limits
 
 Planning readiness is not release acceptance. No live cloud deployment, operational 90% completion or time-savings claim is supported yet. Profile identity is declared metadata, not effective-caller attestation. Reviewed Make/uv/provider code runs with process authority; `--trust-repo` is not sandboxing. Source hashes provide integrity and freshness checks, not cryptographic authorization. The corpus covers explicit equivalence classes and adversarial boundaries; it cannot enumerate every possible DevOps case.
+
+## Dual CLI Requirement Addendum
+
+FR13: Maintainers can select Claude CLI or Codex CLI explicitly or prefer either with automatic fallback when binary/authentication preflight is unavailable; evidence reports the backend actually used and preserves native Claude plugin loading versus explicit Codex source-context evaluation.
+
+NFR9: Structured evaluation disables executable tools, inherited user/project integrations and session persistence using supported CLI controls. Unsupported isolation capabilities block the run. Fallback is confined to preflight; no started, timed-out or uncertain run is replayed. Model identifiers are never translated between backends, and unreported defaults remain unknown.
+
+This user-directed addition is covered by Story 2.3 and the shared evaluation adapter. Existing cloud authorization, protected workflow, live-evidence and 90% reporting requirements remain in force.
+
+Dual CLI addendum readiness: READY. Story 2.3 has no dependency on the already imported Ralph Story 3.1; the existing Ralph run need not be restarted or replayed. Backend-specific live acceptance remains observed separately.

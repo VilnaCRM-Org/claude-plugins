@@ -21,7 +21,7 @@ jobs:
         run: pipx install uv==0.9.21
       - name: Runtime, CLI and adversarial regressions
         run: |
-          uvx coverage@7.6.7 run --branch --source=plugins/devops-sdlc/scripts \
+          uvx --with pyyaml==6.0.3 coverage@7.6.7 run --branch --source=plugins/devops-sdlc/scripts \
             -m unittest discover -s plugins/devops-sdlc/tests
           uvx coverage@7.6.7 report --fail-under=100
       - name: Python lint and formatting

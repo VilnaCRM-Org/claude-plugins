@@ -32,4 +32,4 @@ Open an issue before submitting a new plugin or a major change.
 
 ## DevOps automation
 
-[devops-sdlc](plugins/devops-sdlc/README.md) supports Terraform, Terraspace and Python/Pulumi through BMAD planning, BMALPH implementation, independent QA, CI repair and draft PR completion. Operational skills cover state, IAM, delivery, drift, incidents, recovery, cost and onboarding, with explicit evidence and authorization boundaries.
+[devops-sdlc](plugins/devops-sdlc/README.md) supports Terraform, Terraspace and Python/Pulumi through BMAD planning, BMALPH implementation, independent QA, CI repair and draft PR completion. Its behavioral simulator can use an authenticated Claude or Codex CLI through a no-tool adapter; Codex receives explicit Markdown context and does not natively load the Claude plugin. Operational skills cover state, IAM, delivery, drift, incidents, recovery, cost and onboarding, with explicit evidence and authorization boundaries.

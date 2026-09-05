@@ -19,16 +19,14 @@ Missing cloud credentials must produce blocked live checks. Preview can execute 
 
 ## Infrastructure evidence
 
-# VilnaCRM DevOps plugin: repository evidence and requirements
-
 Research date: 2026-09-05. Read-only repository/source inspection; no cloud calls, deployments, credential access, repository edits, or messages to third parties.
 
-## Verified repository inventory
+### Verified repository inventory
 
 Current GitHub `main` tree SHAs were queried through `gh api`; paths below refer to those revisions. Repo names alone are insufficient to infer an operational service.
 
 | Repository | Main revision | Observed implementation |
-|---|---|---|
+| --- | --- | --- |
 | website-infrastructure | `4513eb429b8c4b660245352941a7894cec1d8e31` | Terraform/Terraspace, 6 stack directories, AWS CodePipeline/CodeBuild, GitHub checks |
 | crm-infrastructure | `e0bcb90177eb63cff584c1c26cc597eb8f5ac906` | Terraform/Terraspace, 6 stack directories, AWS CodePipeline/CodeBuild, GitHub checks |
 | infrastructure-template | `37e1ffd1b9683620183f9c8b5081cec8fd63fb1c` | Modern Python/Pulumi template; committed `dev` stack, example config, quality/security/preview workflows |
@@ -40,9 +38,9 @@ Adjacent application clone: `user-service` at `2a9d9d728273a12c8071450c59f49e1a1
 
 The separate local `bootstrap-governance` checkout is at `4b97403414db7330c0de6c38d80f12f2d61b75a2` with extensive staged/unstaged changes, including governance, CI bootstrap, IAM boundaries, service scaffolding, and promotion. Treat those as unmerged proposals, not verified `main` or deployed controls. No changes made there.
 
-## Adapters and concrete command coverage
+### Adapters and concrete command coverage
 
-### Existing Terraform/Terraspace
+#### Existing Terraform/Terraspace
 
 Website stack names: `ci-cd-iam`, `ci-cd-infrastructure`, `iam-groups`, `website-iam`, `website-sandbox`, `website`. CRM equivalents: `ci-cd-iam`, `ci-cd-infrastructure-crm`, `iam-groups`, `crm-iam`, `crm-sandbox`, `crm`.
 
@@ -62,7 +60,7 @@ Required adapter behavior:
 
 Website modules establish real day-2 scope: S3 website/logging/replication, CloudFront/WAF, Route53 DNS, IAM/OIDC, CodeBuild/CodePipeline, canary/static/anomaly alarms, dashboards, SNS and Chatbot, sandbox creation/deletion. CRM buildspecs additionally expose integration tests.
 
-### Modern Python/Pulumi
+#### Modern Python/Pulumi
 
 Sources: bootstrap and user-service infrastructure `AGENTS.md`, `Makefile`, `docs/ci-guardrails.md`, `docs/sre-operations.md`, `scripts/run_pulumi_command.py`, `scripts/_pulumi_command_support.py`, `scripts/run_pulumi_drift_check.py`, `.github/workflows/pulumi-{test-deploy,prod,pr-commands,pr-command-runner}.yml` (deployment workflows are bootstrap-specific).
 
@@ -78,7 +76,7 @@ Sources: bootstrap and user-service infrastructure `AGENTS.md`, `Makefile`, `doc
 - Detect drift using `preview --refresh --expect-no-changes` and the policy pack. A `refresh` operation writes state and is a separate reconciliation decision, not a read-only drift check.
 - Keep `pr-<number>`/`smoke` ephemeral environments separate from shared test/prod and verify cleanup. Never apply broad destruction to clean a local test environment.
 
-## State, incident, cost and evidence requirements
+### State, incident, cost and evidence requirements
 
 Bootstrap sources: `pulumi/infra/{pulumi_state,pulumi_secrets,logging_bucket,backup,operations_monitoring,cost_controls}.py`, `docs/sre-operations.md`.
 
@@ -91,7 +89,7 @@ Bootstrap sources: `pulumi/infra/{pulumi_state,pulumi_secrets,logging_bucket,bac
 - Cost adapter must separate Terraform Infracost estimate from Pulumi static resource/quota cost proxy and actual AWS cost telemetry. Website Infracost currently reads `terraform/plan.json`; verify freshness and source SHA before presenting the diff as current. Bootstrap budgets alert at actual >80% and forecast >100%; anomaly threshold is configurable. Support ownership/cost allocation tags and catalog fanout/quota checks.
 - Never promise generic automatic infrastructure rollback. Prepare a revert/fail-forward plan against current state; validate data/schema compatibility and backup recovery separately. The service's MongoDB schema/fixture reset targets must not be used against production for health verification.
 
-## Measuring “90%+ automated” honestly
+### Measuring “90%+ automated” honestly
 
 Use a versioned machine-readable inventory, not command count or test coverage. One denominator row is `(repository, project/stack, environment, operation-family)` with source revision/path, detected backend class, owner, risk tier, required preconditions, adapter command, required evidence, expected outcome, and exclusion reason if applicable. Freeze baseline and additions/removals in review.
 
@@ -101,7 +99,7 @@ Operation families: discovery/preflight, local validation, security/policy, prev
 
 Coverage = accepted applicable rows completed end-to-end by the plugin / all accepted applicable rows. Report separately by engine, risk tier, environment and family; also report frequency-weighted human toil where measured. Human approvals may remain an intentional checkpoint, but an automated proposal alone is not a completed deployment. Skipped/no-credential/mock runs, docs-only handlers and unsupported repositories stay visibly incomplete. Publish denominator, exclusions, task traces, manual interventions and failed/blocked cases alongside the percentage. No present 90% achievement claim is supported by this research.
 
-## Acceptance scenarios
+### Acceptance scenarios
 
 1. Fresh credential-free clone: detects the correct engine and actual supported Make targets, runs appropriate local checks, and labels cloud preview/drift skipped rather than passed.
 2. Terraform saved-plan path: selects website/CRM stack and test account explicitly, preserves S3/DynamoDB identity, stages/restores the exact plan, verifies CodePipeline SHA and health; rejects the V1 unpinned fallback as same-SHA evidence.
@@ -114,17 +112,15 @@ Coverage = accepted applicable rows completed end-to-end by the plugin / all acc
 9. Operations/cost: stale restore/alert/cost proof or ownerless queue remains blocked; cost proxy is never labeled actual spend; stale plan.json is rejected for current cost claims.
 10. New Python/Pulumi service: scaffold into authorized repository using current template, test policy/runtime/CI contracts without AWS, prepare explicit KMS-backed initialization and ownership; metadata-only and S3-example repos are not reported as deployed services.
 
-## Validation and unresolved limits
+### Validation and unresolved limits
 
 Validated by pinned GitHub tree/content reads and clean local clone source inspection. No runtime tests were needed for this research-only artifact. No live deployment, IAM, environment reviewer, account owner, backend, state, alert delivery or health assertions were made. Full CRM implementation parity and all Terraform runtime configuration remain unverified. The dirty governance checkout may change future interfaces and should receive a separate review at its final committed revision. Plan artifact confidentiality and exact runtime authorization must be assessed before operational plugin implementation.
 
 ## Existing Plugin Pattern Evidence
 
-# Claude plugin patterns for `devops-sdlc`
-
 Source reviewed: `work/claude-plugins` at `9580854`.
 
-## Architecture to reuse
+### Architecture to reuse
 
 Model the plugin on `php-backend-sdlc` / `react-frontend-sdlc`:
 
@@ -159,7 +155,7 @@ checks, deployment target, and capabilities such as ephemeral environment,
 policy-as-code, security scan, smoke test, and publish PR comments. Make every
 write/deploy/apply action opt-in and distinguish plan/dry-run from apply.
 
-## Agents, skills, scripts
+### Agents, skills, scripts
 
 Use seven agents with the existing mandatory eight-section spine: Profile keys
 consumed, Role, Inputs, Outputs, Allowed actions, Degrade paths, Iteration
@@ -187,7 +183,7 @@ commands, and be idempotent. There are no `hooks/` directories in either
 existing plugin, despite the generic README listing hooks as an optional Claude
 plugin component.
 
-## Meaningful E2E and LLM judge
+### Meaningful E2E and LLM judge
 
 The existing PHP dogfood is a useful standard: use a disposable sandbox
 repository, run actual installed-plugin scripts with `CLAUDE_PLUGIN_ROOT`, drive
@@ -212,7 +208,7 @@ is required for a stable gate. It blocks only when a critical dimension scores
 1--2. Deterministic checks remain mandatory regardless of credentials, so add
 unit tests only for new Python tooling and Bats tests for shell scripts.
 
-## Required local checks
+### Required local checks
 
 ```bash
 npx --yes markdownlint-cli2 "plugins/devops-sdlc/**/*.md"
@@ -227,7 +223,7 @@ If Python toolkit code changes, CI additionally requires Ruff format/lint, ty,
 Bandit, Xenon, and 100% line-and-branch coverage. Python tooling must stay under
 `tools/plugin-quality` or `tools/security-audit-validation` to be included.
 
-## Known traps
+### Known traps
 
 - Root `ci.yml` hard-codes `plugins/php-backend-sdlc` for profile-key and
   generalization checks. A new DevOps plugin needs equivalent generic or

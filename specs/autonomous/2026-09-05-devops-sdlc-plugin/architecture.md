@@ -14,7 +14,7 @@ date: 2026-09-05
 
 ### Requirements Overview
 
-Twelve FRs span installation, discovery/profile, planning/implementation, independent validation, delivery, operations and measurement. Eight NFRs constrain authorization, secrets, schema/path safety, loops, portability, validation honesty, provenance and protected gates. The plugin has high infrastructure risk but a small executable surface; no hosted data service or visual UI is required.
+Thirteen FRs span installation, discovery/profile, planning/implementation, independent validation, delivery, operations and measurement. Nine NFRs constrain authorization, secrets, schema/path safety, loops, portability, validation honesty, provenance and protected gates. The plugin has high infrastructure risk but a small executable surface; no hosted data service or visual UI is required.
 
 ### Technical Constraints and Dependencies
 
@@ -139,8 +139,10 @@ plugins/devops-sdlc/
   skills/environment-lifecycle/SKILL.md
   skills/evidence-and-coverage/SKILL.md
   scripts/devops.py
+  scripts/agent_cli.py
   scripts/automation_coverage.py
   tests/test_devops.py
+  tests/test_agent_cli.py
   tests/test_automation_coverage.py
   tests/ (behavior corpus, fixture and live-judge runner)
   docs/profile-schema.md
@@ -162,8 +164,22 @@ The inventory reporter reads a reviewed frozen input file and computes counters;
 
 ## Architecture Validation Results
 
-Coherence passes: strict JSON, argv-only helper, prompt orchestration and repository validators share one profile contract. Requirements mapping covers FR1-FR12 and NFR1-NFR8. No deployment API conflicts with the helper's execution scope. No frontend or database decision is needed.
+Coherence passes: strict JSON, argv-only helper, prompt orchestration and repository validators share one profile contract. Requirements mapping covers FR1-FR13 and NFR1-NFR9. No deployment API conflicts with the helper's execution scope. No frontend or database decision is needed.
 
 Resolved design gaps: root and runtime owner fixed profile fields/CLI before coding; command intentions are explicitly distinct from engine plans; trusted repository wrappers are not described as sandboxed; source/identity changes invalidate evidence; no-credential cases remain blocked. The independent inventory reporter is assigned to Ralph to exercise the required implementation workflow.
 
 Planning readiness is READY FOR IMPLEMENTATION with high confidence in the bounded design. Runtime correctness, adversarial test results, installed Claude behavior, live-model judge, current-head CI and PR comment resolution are still implementation acceptance work. Operational 90% completion and time savings require field observations. No architecture validation statement implies these have passed.
+
+## Reviewed Execution Limitation
+
+Security review found that Terraform/Terraspace cached backend identity cannot be attested safely by the helper. Their preview intentions remain supported, but helper execution fails closed before cloud interaction; an authorized reviewed repository/CI handoff must establish effective backend identity. Pulumi preview uses explicit backend/stack and a metadata-only AWS STS account comparison before execution. These checks do not restrict IAM privileges, prove provider aliases use the same account, or authorize deployment. No excluded live preview is counted as completed operational work.
+
+## Dual CLI Evaluation Architecture
+
+FR13/NFR9 introduce `scripts/agent_cli.py`, a Python standard-library adapter shared by behavioral evaluation and artifact judging. `probe_backend` checks binary version and CLI auth status without printing authentication payloads; `select_backend(backend="auto", prefer="claude")` falls back only before execution. Explicit backend requests block when unavailable. BMALPH uses an actually available authenticated implementation driver separately; this adapter evaluates structured responses and does not implement repository changes.
+
+`run_prompt(prompt, schema, cwd, backend=..., prefer=..., model=None, plugin_root=None, timeout=300)` returns status, backend/version, requested and reported model, preflight fallback reasons, plugin mode, parsed output and canonical JSON text. Unreported CLI-default models remain null. A supplied model identifier passes unchanged only to the selected backend. Failure, timeout and malformed output never trigger a second model invocation. POSIX child process groups are terminated on timeout; raw stderr is discarded and no authentication values appear in result evidence.
+
+Claude evaluation uses native `--plugin-dir` with an allowlisted metadata-only manifest and inspected bounded Markdown sources. Executable plugin integrations, custom component roots, symlinks and dynamic shell prompt expansion are rejected. Evaluation uses empty tools, plan permissions, empty setting sources, strict empty MCP configuration, disabled hooks, no browser integration and no persisted session. Codex evaluation explicitly embeds those inspected command/agent/skill bodies; it does not claim native Claude plugin installation. Codex uses structured schema/output files, read-only sandbox, ignored user configuration with CLI authentication retained, ephemeral sessions, disabled shell/unified execution/apps/plugins/hooks/delegation/browser/computer/image tools, disabled web and zero project document context. Inherited project Codex configuration is rejected because read-only shell sandbox alone does not constrain MCP services. Unsupported CLI options fail closed without weakening configured organization requirements.
+
+Both CLIs receive stdin prompts and argv lists without shell interpolation. Inputs and source context are bounded; schema must request an object and final output must parse as an object. Domain rubric validation remains the caller's responsibility. Evaluation directories and plugin sources must be reviewed and stable during a run. CLI/account availability and successful live model behavior are recorded separately from deterministic mocked adapter tests.

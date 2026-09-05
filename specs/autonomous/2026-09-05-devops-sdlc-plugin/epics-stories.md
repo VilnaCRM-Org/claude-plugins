@@ -27,6 +27,8 @@ Deliver an installable safe change-preparation workflow, independent verificatio
 - FR11: Operators can use applicable guidance and repository commands for drift triage, incident response, recovery preparation, backup/restore evidence, cost/quota review, dependency maintenance, onboarding/retirement and audit evidence without implicit deployment authority.
 - FR12: Maintainers can maintain an auditable eligible-work inventory and report workflow support, fixture results, actual automated task completion and human-time reduction as separate measures with explicit exclusions.
 
+- FR13: Maintainers can select Claude CLI or Codex CLI explicitly or prefer either with automatic fallback when binary/authentication preflight is unavailable; evidence reports the actual backend and distinguishes native Claude plugin loading from explicit Codex source-context evaluation.
+
 ### NonFunctional Requirements
 
 - NFR1: The helper rejects every tested apply/destroy/up/down/state-mutation/credential operation and never treats generic autonomy, a plan, or `-y` as cloud authorization. Operational prompts require scope-bound reviewed authorization and preserve protected workflows.
@@ -37,6 +39,8 @@ Deliver an installable safe change-preparation workflow, independent verificatio
 - NFR6: Every reported verification outcome identifies whether it was observed, simulated, skipped or blocked. Required live checks cannot become green through missing credentials, placeholder output or model self-assessment alone.
 - NFR7: Command-intention evidence is immutable and binds timestamp, source SHA/content hashes, profile, target/environment and argv. Verification rejects stale or changed evidence. Saved IaC plans and deployed revisions require separate engine/pipeline evidence.
 - NFR5: The operational helper uses Python standard library, explicit argv with no shell execution, deterministic machine-readable output and repository-relative paths. Plugin artifacts pass existing packaging, schema, profile-key, generalization and content checks without modifying existing plugin behavior.
+
+- NFR9: Structured evaluation disables executable tools, inherited integrations and persistence through supported CLI controls. Unsupported isolation blocks execution; fallback is preflight-only, started or uncertain runs are not replayed, model identifiers are not translated and unreported defaults remain unknown.
 
 ### Additional Requirements
 
@@ -49,7 +53,7 @@ Not applicable: scriptable developer workflow, no visual interface.
 ### FR Coverage Map
 
 | Requirement | Epic | User outcome |
-|---|---|---|
+| --- | --- | --- |
 | FR1 | 1 | Install and invoke complete staged workflow |
 | FR2 | 1 | Discover supported targets safely |
 | FR3 | 1 | Validate explicit profile and selection |
@@ -62,20 +66,19 @@ Not applicable: scriptable developer workflow, no visual interface.
 | FR10 | 1 | Receive reconciled draft PR |
 | FR11 | 1 | Prepare supported day-2 operational work |
 | FR12 | 3 | Measure accepted operational automation honestly |
+| FR13 | 2 | Select an authenticated CLI with honest fallback evidence |
 
 ## Epic List
 
-### Epic 1: Prepare and Review Infrastructure Changes Safely
-
-Maintainers install the plugin, select explicit targets, plan and implement changes, run reviewed checks, review infrastructure risks, and reconcile a draft PR. FR1-FR7 and FR9-FR11. No dependency on a future epic to use the core workflow; its own acceptance includes baseline runtime tests.
-
-### Epic 2: Verify Infrastructure Automation Across Failure Modes
-
-Maintainers obtain independent adversarial, integration, manual E2E and live-model evidence for the core workflow. FR8 plus validation of NFR1-NFR8. Builds on Epic 1 without changing its execution authority.
-
-### Epic 3: Measure Eligible Work Without Inflated Claims
-
-Maintainers run an independent inventory reporter showing applicable real completions, exclusions and evidence gaps. FR12. Uses the existing plugin distribution; reporter depends only on Python and input JSON. Ralph implements this isolated story after core components.
+1. **Prepare and review infrastructure changes safely:** install, discover, plan,
+   implement and reconcile a draft PR. Covers FR1-FR7 and FR9-FR11 with baseline
+   runtime acceptance; no future epic is needed to use the core workflow.
+2. **Verify infrastructure automation across failure modes:** independent
+   adversarial, manual E2E and model evidence, including authenticated CLI fallback.
+   Covers FR8/FR13 and NFR1-NFR9; builds on the first epic's execution boundaries.
+3. **Measure eligible work without inflated claims:** a standalone Python/JSON
+   inventory reporter separates actual completions, exclusions and evidence gaps.
+   Covers FR12; Ralph owns the isolated reporter story after core components.
 
 ## Epic 1: Prepare and Review Infrastructure Changes Safely
 
@@ -202,6 +205,34 @@ As a reviewer, I want observed installed-plugin behavior and independent model e
 **When** the existing LLM quality judge and behavioral scenario judge run,
 **Then** judgments include actual responses, a scored rubric, scenario identity and failure evidence,
 **And** deterministic safety failures cannot be overridden by judge scores. Missing credentials are blocked, not passing votes.
+
+### Story 2.3: Evaluate Through Either Authenticated CLI
+
+As a maintainer, I want Claude and Codex support with honest availability fallback, so that evaluation and driver selection do not require credentials for an unavailable backend.
+
+**Requirements:** FR8, FR13, NFR2, NFR5, NFR6, NFR9.
+
+**Acceptance Criteria:**
+
+**Given** auto selection and a preferred CLI with a missing binary or unavailable authentication,
+**When** preflight probes the alternative,
+**Then** an authenticated alternative is selected with backend/version and fallback reasons recorded; explicit unavailable backend selection stays blocked.
+
+**Given** an evaluation already started,
+**When** it fails, times out, returns malformed output or has uncertain completion,
+**Then** no alternate backend is invoked and the outcome remains failed, timeout or blocked.
+
+**Given** an inspected plugin and object response schema,
+**When** Claude runs it loads the native plugin, and when Codex runs it receives explicit bounded plugin source context,
+**Then** metadata accurately distinguishes the modes, no default model alias is mapped across providers, structured output is parsed and unreported model identity remains unknown.
+
+**Given** user/project integration settings or executable plugin extensions,
+**When** no-tool evaluation is requested,
+**Then** supported isolation controls disable tools/integrations and persistence, unsafe plugin sources/configuration are rejected, and unsupported controls fail closed without overriding managed restrictions.
+
+**Given** the shared adapter,
+**When** strict checks run,
+**Then** selection, isolation, failure, timeout, malformed output and native/explicit-context fixtures achieve 100% line and branch coverage with Ruff, type, Bandit and configured complexity checks; real model runs retain actual backend evidence separately.
 
 ## Epic 3: Measure Eligible Work Without Inflated Claims
 

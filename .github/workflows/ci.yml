@@ -234,7 +234,7 @@ jobs:
             # schema_version root key; other backticked words in the
             # section (null, false, ...) are not keys.
             keys=$(printf '%s\n' "$section" \
-              | grep -oE '`(schema_version|[a-z0-9_]+(\.[a-z0-9_<>]+)+)`' \
+              | grep -oE "\`(schema_version|[a-z0-9_]+(\.[a-z0-9_<>]+)+)\`" \
               | tr -d '`' | sort -u) || true
             for key in $keys; do
               if ! grep -qF "\`$key\`" "$SCHEMA"; then

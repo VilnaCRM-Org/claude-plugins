@@ -19,6 +19,15 @@ For development, load the checked-out plugin directly:
 claude --plugin-dir /absolute/path/to/claude-plugins/plugins/devops-sdlc
 ```
 
+The behavioral simulator also supports an authenticated Codex CLI through
+`scripts/agent_cli.py`. Codex receives bounded plugin Markdown as explicit
+context; it does not natively load this Claude plugin. Select the adapter with
+`--backend auto|claude|codex` and order preflight with
+`--prefer claude|codex`. `--model` and `--judge-model` are optional,
+backend-specific runner and judge model choices. Auto fallback occurs only when
+binary/authentication preflight fails; a selected CLI failure after start stops
+the run.
+
 Use an authenticated Claude Code installation, Python 3.10+, Git and GitHub CLI.
 BMALPH is installed separately; this implementation was developed with BMALPH
 2.11.0 and Claude Code 2.1.177. Each target uses its repository's pinned IaC,
@@ -61,9 +70,9 @@ python3 "$PLUGIN/scripts/devops.py" discover --repo .
 python3 "$PLUGIN/scripts/devops.py" validate-profile --repo .
 python3 "$PLUGIN/scripts/devops.py" plan --repo . --target example --stage validate
 python3 "$PLUGIN/scripts/devops.py" plan --repo . --target example --stage preview \
-  --environment test --output evidence/preview-intention.json
+  --environment test --output .artifacts/devops-sdlc/preview-intention.json
 python3 "$PLUGIN/scripts/devops.py" verify-plan --repo . \
-  --plan evidence/preview-intention.json
+  --plan .artifacts/devops-sdlc/preview-intention.json
 ```
 
 `plan` creates a **command intention**, not an engine saved plan or deployment
@@ -72,6 +81,12 @@ reviewing the repository code. Preview additionally requires
 `--read-only-credentials`; the caller must actually supply a restricted IAM role.
 The flag cannot reduce credential privileges. See the exact
 [profile and CLI contract](docs/profile-schema.md).
+
+Terraform and Terraspace preview execution is currently blocked by the helper
+because a profile string cannot attest the effective cached backend. It still
+prepares preview intentions; the engine skills use the repository's protected,
+reviewed plan workflow. Pulumi preview additionally verifies the current AWS
+account through STS and sets the selected backend and stack.
 
 The helper rejects direct apply/destroy and state/credential mutation commands.
 It does not sandbox Makefiles, Python programs, providers, binaries or Claude.
@@ -96,10 +111,12 @@ revisions are recorded in the [BMAD research](../../specs/autonomous/2026-09-05-
 
 ## Evidence and automation target
 
-The target is at least 90% of accepted applicable DevOps work. Supported workflow
-families, synthetic benchmark successes, real completed operations and hands-on
-time saved are separate measurements. This release does not claim an observed
-90% production automation rate without a reviewed inventory and field evidence.
+The target is true 90% coverage of a frozen eligible-task inventory, supported
+by traceable accepted work and operational evidence. Supported workflow families,
+synthetic benchmark successes, behavioral simulations, real completed operations
+and hands-on time saved are separate measurements. This release does not claim
+an observed 90% production automation rate without that reviewed inventory and
+field evidence.
 
 PASSED, FAILED, SKIPPED and BLOCKED remain distinct. Missing required credentials,
 placeholder previews, stale plans, empty CI checks or incomplete review pages
@@ -125,7 +142,8 @@ python3 tools/plugin-quality/judge/run_judge.py plugins/devops-sdlc \
   --gate --require --votes 3 --model sonnet --report prompt-judge-report.md
 ```
 
-The live judge requires authenticated Claude access. Test harness documentation
-describes behavioral E2E and calibration; deterministic fixtures never substitute
-for a required live run. The test campaign report records observed results and
-any remaining external prerequisites.
+The live judge requires an authenticated selected Claude or Codex CLI. It runs a
+no-tool behavioral simulation and calibration; it is not runtime E2E. Actual
+manual CLI E2E is independent evidence for plans, provider actions, rollback and
+recovery, and deterministic fixtures never substitute for it. The test campaign
+report records observed results and any remaining external prerequisites.

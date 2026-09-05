@@ -28,3 +28,10 @@ Choose engine skills from the validated target, then add quality, security,
 delivery and evidence skills. State ownership/backend changes always receive
 independent state review. Day-2 tasks select their operational skills by the
 actual requested action; a feature task does not imply deployment authorization.
+
+## Backend selection
+
+Apply the [agent guide](AI-AGENT-GUIDE.md) to every selected skill for explicit
+plugin-root resolution, authenticated Claude/Codex preflight and role delivery.
+Backend fallback preserves applicability decisions, evidence and stage budgets;
+it does not waive an unavailable native-plugin or live-infrastructure check.
