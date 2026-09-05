@@ -74,8 +74,10 @@ retry a started, timed-out or uncertain action through a different backend.
 Implementation maps `claude` to `bmalph run --driver claude-code` and `codex` to
 `bmalph run --driver codex`. Check installed help/config first. BMALPH 2.11's
 `--review` requires Claude; run independent plugin review with Codex separately.
-Before readiness, every backend selection or preflight fallback response records
-the selected backend and version; the declared BMALPH driver mapping above; the
+For every backend selection or preflight fallback, write this handoff record to
+the task run summary before returning the selection response and before starting
+a BMALPH implementation run: the selected backend and version; the declared
+BMALPH driver mapping above; the
 requested or observed model and its source; the preflight-only fallback reason;
 and the preserved ledger path, stage and attempt counter. Declare this mapping as
 a proposal even when BMALPH is unavailable. Actual invocation remains gated on
