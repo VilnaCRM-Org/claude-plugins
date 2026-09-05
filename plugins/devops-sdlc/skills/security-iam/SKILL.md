@@ -63,7 +63,15 @@ skill receives a verdict; no silent skips.
    `iam:PassRole`, `sts:AssumeRole`, policy/trust-policy create or edit actions,
    permissions-boundary changes, and access to roles that can perform them. State
    which paths are required, deny every other path by action and resource, and
-   include those denials in the review evidence.
+   include those denials in the review evidence. When rejecting unnecessary
+   privilege or public-access expansion, record a security finding in
+   `specs/<task>/run-summary.md`: affected principal/resource, rejected scope,
+   security impact, least-privilege remediation, source SHA, responsible reviewer
+   and unresolved/resolved status. The responsible reviewer is the assigned
+   independent security-reviewer; an unavailable reviewer leaves it unresolved.
+   Refusing the unsafe action does not replace this finding record. Describe the
+   record as proposed during simulation; actual closure needs review and test
+   evidence for the corrected configuration.
 2. Evaluate allowed and denied repository/branch/environment/account combinations,
    confused deputy protection and permissions boundaries. Preserve short-lived
    OIDC and protected environments; never add AdministratorAccess to fix a check.

@@ -54,38 +54,78 @@ Otherwise record SKIPPED with the unmatched trigger and route to the named sibli
 required evidence is BLOCKED and cannot satisfy the corresponding gate. Every
 skill receives a verdict; no silent skips.
 
+## Migration report contract
+
+Lead with the requested resource move and its decision, then provide: the
+source-to-destination ownership mapping, forward verification and stop trigger,
+mandatory protected pre-change backup and successful restore-rehearsal evidence,
+the ordered recovery sequence below, and required evidence/blockers. Missing
+backup or rehearsal evidence makes migration acceptance BLOCKED even when the
+proposed move preserves identity; backup readiness is required regardless of
+whether recovery will use the snapshot. A list of
+backup metadata or the words "reverse mapping" is not a recovery procedure.
+A general SDLC/setup preamble must not replace this migration report. When the
+engine or addresses are unknown, mark exact commands/mappings BLOCKED and name
+the missing inputs; still propose all logical recovery actions in order. Label
+unexecuted steps PROPOSED, never completed or authorized by this report.
+
 ## Procedure
 
-1. Inventory resource IDs/addresses and current owners using approved
-   metadata. Map every source address to a destination logical name and identify
-   dependencies, data-bearing resources and replacements. Never read raw state
-   into prompts or commit it as migration evidence.
-2. Before recommending a migration, prepare its recovery proposal: preserve the
-   current state and lock; name the write-freeze owner, lock retention and release
-   condition; record the last verified source commit, backend/account/region/stack,
-   provider pins and encrypted recovery snapshot metadata/hash. Verify the restore
-   procedure without exposing contents. Never delete state to force recreation.
-3. Rehearse imports in a disposable nonproduction environment. Preserve naming,
-   aliases, protect/retain semantics and secrets provider. Preview must show no
-   unintended creation, deletion or replacement of adopted resources.
-4. Prepare exact resource-by-resource ownership transfer and recovery boundary.
-   Compare each current resource identity with the backup and proposed
-   address/backend mapping. For a rename, use an engine-supported moved/import
-   mapping verified by preview, specify its reverse mapping to the prior address
-   and source commit, and do not recreate the resource. Restore only when the
-   recorded restore condition occurs, independent review confirms identity
-   consistency, and the exact restoration is authorized. Before lock release,
-   name the post-restore reconciliation, validation commands, health checks,
-   responsible operator and condition for resuming writers. State removal is not
-   cloud deletion, but remains a state mutation; never run two state engines as
-   simultaneous owners.
-5. Require reviewed authorization for the exact migration and recovery window.
-   No automatic `state rm`, import, backend migration, force-unlock, secrets-provider
-   change or `refresh`. Generic plugin implementation consent does not cover them.
-6. After authorized execution, verify resource identity and service health,
-   reconcile ownership once, retain recovery evidence and restore normal writers.
-   Partial state/log-replica migrations stay blocked until dependency consistency
-   and recovery are demonstrated.
+1. Inventory current resource IDs, addresses, owners and dependencies from approved
+   metadata. Map each source address to its destination and identify data-bearing
+   resources. Never expose raw state in prompts, logs or committed evidence.
+2. Propose an engine-supported ownership transfer preserving resource identities,
+   aliases, protect/retain settings and secrets provider. Require a disposable
+   rehearsal and reviewed preview showing no unintended create/delete/replace
+   before any separately authorized state change. Specify the failure that stops
+   migration and triggers recovery or reviewed fail-forward.
+3. Before migration acceptance or any state-changing transfer, require a protected
+   pre-change backup and successful restore-rehearsal results. Record encryption
+   and access-control evidence, capture time, integrity hash, backend/account/
+   region/stack, provider pins and verified source revision without exposing state.
+   Confirm that the backup and rehearsal apply to this source state and engine.
+   Missing, stale or failed evidence is BLOCKED; a proposed backup is not proof of
+   readiness. Prepare the ordered recovery actions below before recommending the
+   transfer. Backup readiness is mandatory; actual restoration remains conditional.
+4. Obtain reviewed authorization for the exact migration and recovery actions,
+   resources and window. No automatic import, state removal, backend migration,
+   force-unlock, secrets-provider change or refresh. Generic implementation consent
+   is insufficient; state removal is a mutation even when it deletes no resource.
+5. After authorized execution, verify identity, single ownership and service health
+   before resuming writers. Keep partial migrations BLOCKED until dependency
+   consistency and recovery are demonstrated. Record actual observations separately
+   from the proposed forward/recovery steps.
+
+### Required ordered recovery actions
+
+The migration report must spell out these actions and their verification evidence,
+not merely cite this heading or request a future rollback plan:
+
+1. On the recorded recovery trigger, propose stopping migration and maintaining
+   the write freeze under exact authorization. Name its operator; retain or acquire
+   the normal backend lock through the reviewed mechanism. Lock contention blocks
+   recovery; never force-unlock or permit competing writers.
+2. Compare current physical identities, addresses, ownership and changes since the
+   verified snapshot with the intended prior mapping. Preserve current state and
+   failure evidence. If reconciliation cannot establish a safe reversal, keep the
+   freeze and escalate a reviewed fail-forward plan; do not guess or recreate.
+3. Where reversal is safe, propose reversing the address/ownership mapping with
+   the selected engine's supported mechanism and restoring compatible source-code
+   mappings from the verified revision. Require review of the exact mapping and
+   code diff; never blindly revert unrelated changes or give both engines ownership.
+4. If mapping/code reversal is insufficient and the recorded restore condition
+   requires it, propose restoring only an independently reviewed, consistent
+   encrypted snapshot under exact restoration authorization. Account for subsequent
+   legitimate changes first; never overwrite current state with a stale backup or
+   delete state to force recreation. Otherwise leave the snapshot unused.
+5. Propose post-recovery validation and reviewed preview, then reconcile single
+   ownership and verify unchanged physical identities, dependency consistency and
+   service/data health. Require recorded results, including no unintended
+   create/delete/replace; a command intention or zero exit alone is insufficient.
+6. Only after those checks pass and the recorded release condition is met may the
+   authorized operator release the lock/write freeze and resume normal writers.
+   Preserve recovery evidence. Any failed or unavailable check keeps dependent
+   recovery completion BLOCKED and writers stopped; report the exact next action.
 
 ## Evidence and failure handling
 
