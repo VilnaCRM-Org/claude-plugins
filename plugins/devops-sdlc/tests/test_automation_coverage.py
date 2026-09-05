@@ -8,6 +8,9 @@ import io
 import json
 import os
 import runpy
+
+# Real CLI invocation is bounded by a timeout to detect FIFO regressions safely.
+import subprocess  # nosec B404
 import sys
 import tempfile
 import unittest
@@ -189,7 +192,9 @@ class ReportingTests(unittest.TestCase):
         summary = report["summary"]
         self.assertEqual(summary["applicable_denominator"], 9)
         self.assertEqual(summary["supplied_actual_completed_numerator"], 1)
-        self.assertAlmostEqual(summary["supplied_actual_completion_percentage"], 100 / 9)
+        self.assertAlmostEqual(
+            summary["supplied_actual_completion_percentage"], 100 / 9
+        )
         self.assertFalse(summary["reported_automation_target_met"])
         self.assertEqual(summary["total_rows"], 10)
         self.assertEqual(summary["excluded_count"], 1)
@@ -252,10 +257,15 @@ class ReportingTests(unittest.TestCase):
                     )
                     for index in range(total)
                 ]
-                summary = reporter.build_report(inventory(rows), inventory(rows))["summary"]
-                self.assertEqual(summary["supplied_actual_completed_numerator"], completed)
+                summary = reporter.build_report(inventory(rows), inventory(rows))[
+                    "summary"
+                ]
                 self.assertEqual(
-                    summary["supplied_actual_completion_percentage"], completed / total * 100
+                    summary["supplied_actual_completed_numerator"], completed
+                )
+                self.assertEqual(
+                    summary["supplied_actual_completion_percentage"],
+                    completed / total * 100,
                 )
                 self.assertEqual(summary["target_percentage"], 90)
                 self.assertEqual(summary["reported_automation_target_met"], expected)
@@ -367,7 +377,11 @@ class CliTests(unittest.TestCase):
             ):
                 runpy.run_path(str(SCRIPT), run_name="__main__")
             self.assertEqual(result.exception.code, 0)
-            self.assertIsNone(json.loads(stdout.getvalue())["summary"]["reported_automation_target_met"])
+            self.assertIsNone(
+                json.loads(stdout.getvalue())["summary"][
+                    "reported_automation_target_met"
+                ]
+            )
             self.assertEqual(path.read_bytes(), payload)
             self.assertEqual(path.stat().st_mtime_ns, before.st_mtime_ns)
 
@@ -377,11 +391,14 @@ class CliTests(unittest.TestCase):
                 code, stdout, stderr = self.call_main(args)
                 self.assertEqual((code, stdout), (2, ""))
                 self.assertIn("Usage:", stderr)
-        with patch.object(reporter, "read_payload", side_effect=OSError("sensitive filename")):
+        with patch.object(
+            reporter, "read_payload", side_effect=OSError("sensitive filename")
+        ):
             code, stdout, stderr = self.call_main(["secret-path"])
         self.assertEqual((code, stdout), (2, ""))
         self.assertEqual(
-            json.loads(stderr), {"status": "BLOCKED", "error": "Invalid inventory or baseline mismatch."}
+            json.loads(stderr),
+            {"status": "BLOCKED", "error": "Invalid inventory or baseline mismatch."},
         )
 
     def test_invalid_json_fails_without_echoing_values(self):
@@ -409,7 +426,11 @@ class CliTests(unittest.TestCase):
                 code, stdout, stderr = self.call_main(["input"])
                 self.assertEqual((code, stdout), (2, ""))
                 self.assertEqual(
-                    json.loads(stderr), {"status": "BLOCKED", "error": "Invalid inventory or baseline mismatch."}
+                    json.loads(stderr),
+                    {
+                        "status": "BLOCKED",
+                        "error": "Invalid inventory or baseline mismatch.",
+                    },
                 )
 
     def test_input_byte_limit(self):
@@ -421,6 +442,204 @@ class CliTests(unittest.TestCase):
                 self.assertEqual(self.call_main([str(path)])[0], 0)
             with patch.object(reporter, "MAX_BYTES", len(payload) - 1):
                 self.assertEqual(self.call_main([str(path)])[0], 2)
+
+
+def autonomous_row(identifier="autonomous", **changes):
+    value = row(
+        identifier,
+        execution_mode="autonomous",
+        workflow_supported=True,
+        source_revision="a" * 40,
+        owner="platform",
+    )
+    value.update(changes)
+    return value
+
+
+class AutomationBoundaryTests(unittest.TestCase):
+    def test_actual_manual_assisted_and_unsupported_do_not_count_as_automation(self):
+        rows = [
+            autonomous_row(),
+            autonomous_row("assisted", execution_mode="assisted"),
+            autonomous_row("manual", execution_mode="manual"),
+            autonomous_row("unsupported", workflow_supported=False),
+            autonomous_row("mock", evidence={"kind": "mock", "reference": "fixture"}),
+            row("unreported"),
+        ]
+        report = reporter.build_report(inventory(rows), inventory(rows))
+        summary = report["summary"]
+        self.assertEqual(summary["supplied_actual_completed_numerator"], 5)
+        self.assertEqual(summary["reported_automation_numerator"], 1)
+        self.assertEqual(summary["applicable_denominator"], 6)
+        self.assertFalse(summary["reported_automation_target_met"])
+        self.assertFalse(report["externally_verified"])
+        self.assertEqual(report["reported_automated_ids"], ["autonomous"])
+        self.assertEqual(
+            summary["supplied_actual_completions_by_execution_mode"],
+            {"autonomous": 2, "assisted": 1, "manual": 1},
+        )
+        self.assertEqual(summary["execution_mode_unreported_count"], 1)
+        self.assertEqual(report["rows"], sorted(rows, key=lambda item: item["id"]))
+
+    def test_autonomous_count_requires_complete_provenance(self):
+        for key in ("source_revision", "owner", "execution_mode", "workflow_supported"):
+            value = autonomous_row()
+            del value[key]
+            summary = reporter.build_report(inventory([value]))["summary"]
+            with self.subTest(key=key):
+                self.assertEqual(summary["reported_automation_numerator"], 0)
+                self.assertEqual(summary["supplied_actual_completed_numerator"], 1)
+        value = autonomous_row(source_revision="f" * 64)
+        self.assertEqual(
+            reporter.build_report(inventory([value]))["summary"][
+                "reported_automation_numerator"
+            ],
+            1,
+        )
+
+    def test_no_baseline_never_sets_target_true(self):
+        value = inventory([autonomous_row()])
+        without = reporter.build_report(value)
+        with_baseline = reporter.build_report(value, value)
+        self.assertIsNone(without["summary"]["reported_automation_target_met"])
+        self.assertFalse(without["baseline"]["supplied"])
+        self.assertTrue(with_baseline["summary"]["reported_automation_target_met"])
+        self.assertFalse(with_baseline["externally_verified"])
+        self.assertFalse(with_baseline["summary"]["externally_verified"])
+        empty = inventory([])
+        self.assertFalse(
+            reporter.build_report(empty, empty)["summary"][
+                "reported_automation_target_met"
+            ]
+        )
+
+    def test_baseline_freezes_identity_and_applicability_not_outcomes(self):
+        current = inventory([autonomous_row()])
+        baseline = inventory(
+            [
+                autonomous_row(
+                    outcome="blocked", evidence={"kind": "none", "reference": None}
+                )
+            ]
+        )
+        before = reporter.build_report(baseline, baseline)
+        after = reporter.build_report(current, baseline)
+        self.assertEqual(
+            before["baseline"]["denominator_sha256"],
+            after["baseline"]["denominator_sha256"],
+        )
+        self.assertNotEqual(before["inventory_sha256"], after["inventory_sha256"])
+        changes = [
+            {"id": "other"},
+            {"target": "other"},
+            {"repository": "example/other"},
+            {"environment": "prod"},
+            {"operation": "deploy"},
+            {"applicable": False, "outcome": "excluded", "exclusion_reason": "retired"},
+        ]
+        for change in changes:
+            altered = inventory([autonomous_row(**change)])
+            with (
+                self.subTest(change=change),
+                self.assertRaises(reporter.ValidationError),
+            ):
+                reporter.build_report(altered, baseline)
+        for altered in (inventory([]), inventory([autonomous_row(), row("extra")])):
+            with self.assertRaises(reporter.ValidationError):
+                reporter.build_report(altered, baseline)
+
+    def test_canonical_identity_rejects_case_variants_and_invisible_labels(self):
+        for key in (
+            "id",
+            "target",
+            "environment",
+            "operation",
+            "engine",
+            "risk",
+            "family",
+            "owner",
+        ):
+            for invalid in ("UPPER", "a\u200bb", "a\x7fb", "a/b", "é", "a b"):
+                value = row(**{key: invalid})
+                with (
+                    self.subTest(key=key, invalid=invalid),
+                    self.assertRaises(reporter.ValidationError),
+                ):
+                    reporter.validate_row(value)
+        for name in (
+            "Example/repo",
+            "example/Repo",
+            "https://github.com/example/repo",
+            "example/repo\u200b",
+            "example/repo/",
+            "example",
+        ):
+            with self.subTest(name=name), self.assertRaises(reporter.ValidationError):
+                reporter.validate_row(row(repository=name))
+        for revision in ("abc", "A" * 40, "a" * 39, "g" * 40):
+            with (
+                self.subTest(revision=revision),
+                self.assertRaises(reporter.ValidationError),
+            ):
+                reporter.validate_row(row(source_revision=revision))
+        for mode in (True, "AUTONOMOUS", "automatic", ""):
+            with self.subTest(mode=mode), self.assertRaises(reporter.ValidationError):
+                reporter.validate_row(row(execution_mode=mode))
+
+    def test_baseline_cli_mismatch_is_blocked_without_echoing_claims(self):
+        with tempfile.TemporaryDirectory() as directory:
+            current = Path(directory) / "current.json"
+            baseline = Path(directory) / "baseline.json"
+            current.write_text(json.dumps(inventory([autonomous_row()])))
+            baseline.write_text(json.dumps(inventory([autonomous_row(target="other")])))
+            output, errors = io.StringIO(), io.StringIO()
+            with redirect_stdout(output), redirect_stderr(errors):
+                code = reporter.main([str(current), "--baseline", str(baseline)])
+            self.assertEqual(code, 2)
+            self.assertEqual(json.loads(errors.getvalue())["status"], "BLOCKED")
+            self.assertEqual(output.getvalue(), "")
+            baseline.write_bytes(current.read_bytes())
+            with redirect_stdout(output), redirect_stderr(errors):
+                code = reporter.main([str(current), "--baseline", str(baseline)])
+            self.assertEqual(code, 0)
+            self.assertTrue(json.loads(output.getvalue())["baseline"]["matched"])
+        self.assertFalse(reporter.valid_arguments(["input", "--wrong", "baseline"]))
+
+    @unittest.skipUnless(os.name == "posix", "Safe input handling is POSIX-specific")
+    def test_fifo_directory_and_symlink_inputs_fail_without_blocking(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "fifo"
+            os.mkfifo(path)
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), str(path)],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )  # nosec B603
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(json.loads(result.stderr)["status"], "BLOCKED")
+            with self.assertRaises(reporter.ValidationError):
+                reporter.read_payload(path)
+            normal = root / "normal.json"
+            normal.write_text(json.dumps(inventory()))
+            link = root / "link"
+            link.symlink_to(normal)
+            parent_link = root / "parent-link"
+            parent_link.symlink_to(root, target_is_directory=True)
+            for invalid in (link, parent_link / "normal.json", root, root / "missing"):
+                with (
+                    self.subTest(invalid=invalid),
+                    self.assertRaises((OSError, reporter.ValidationError)),
+                ):
+                    reporter.load_inventory(invalid)
+            with self.assertRaises(OSError):
+                reporter.input_parent(root / "missing-dir" / "input")
+        explicit = Path("/input")
+        with patch.object(reporter.os, "name", "unsupported"):
+            with self.assertRaises(reporter.ValidationError):
+                reporter.input_parent(explicit)
 
 
 if __name__ == "__main__":

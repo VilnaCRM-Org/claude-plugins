@@ -21,20 +21,27 @@ import prompt_judge as subject  # noqa: E402
 def fake_agent(prompt, schema, cwd, **kwargs):
     ids = schema["properties"]["dimensions"]["required"]
     score = 5
+    citation = "Validate"
     for case in subject.calibration.CASES:
         if case.raw in prompt:
             score = 5 if case.polarity == "P" else 1
+            citation = next(line for line in case.raw.splitlines() if line)
     return {
         "status": "COMPLETED",
         "backend": "claude",
         "version": "fixture-cli-1",
         "model": "fixture-model",
+        "observed_model": "fixture-model",
         "requested_model": kwargs["model"],
         "fallback": [],
         "plugin_mode": "none",
         "output": {
             "dimensions": {
-                dimension: {"score": score, "evidence": "Specific fixture evidence."}
+                dimension: {
+                    "score": score,
+                    "evidence": "Specific fixture evidence.",
+                    "citation": citation,
+                }
                 for dimension in ids
             }
         },
@@ -85,10 +92,13 @@ class PromptJudgeTests(unittest.TestCase):
             self.assertEqual(kwargs["backend"], "auto")
             self.assertFalse(args[1]["additionalProperties"])
             self.assertIn("DATA", args[0])
+            self.assertIn("RESPONSE CONTRACT", args[0])
 
     def test_default_inventory_is_exactly_31_in_repository(self):
         with mock.patch.object(subject, "EXPECTED_ARTIFACTS", 31):
-            artifacts = subject.artifact_inventory(subject.PLUGIN)
+            artifacts = subject.artifact_inventory(
+                subject.PLUGIN, subject.plugin_snapshot(subject.PLUGIN)
+            )
         self.assertEqual(len(artifacts), 31)
         self.assertEqual(sum(a.kind == "meta-guide" for a in artifacts), 2)
 
@@ -119,7 +129,38 @@ class PromptJudgeTests(unittest.TestCase):
         ]
         for value in values:
             with self.subTest(value=value), self.assertRaises(subject.AssessmentError):
-                subject.strict_verdict(value, dims)
+                subject.strict_verdict(value, dims, "Validate infrastructure.")
+
+    def test_citations_bind_verdicts_and_stored_evidence_is_redacted(self):
+        def secret_evidence(*args, **kwargs):
+            result = fake_agent(*args, **kwargs)
+            for entry in result["output"]["dimensions"].values():
+                entry["evidence"] = "API_KEY=secret-sentinel is not retained."
+            return result
+
+        report = self.run_fixture(secret_evidence)
+        vote = report["artifacts"][0]["votes"][0]["dimensions"]
+        entry = next(iter(vote.values()))
+        self.assertEqual(entry["evidence"], "API_KEY=[REDACTED] is not retained.")
+        self.assertNotIn("secret-sentinel", json.dumps(report))
+        self.assertEqual(len(entry["evidence_sha256"]), 64)
+        self.assertEqual(
+            subject.redact_evidence("AWS_SECRET_ACCESS_KEY: not-retained"),
+            "AWS_SECRET_ACCESS_KEY=[REDACTED]",
+        )
+        value = {
+            "dimensions": {
+                "J1": {
+                    "score": 5,
+                    "evidence": "Specific evidence.",
+                    "citation": "not in artifact",
+                }
+            }
+        }
+        with self.assertRaises(subject.AssessmentError):
+            subject.strict_verdict(
+                value, [subject.rubrics.DIMENSIONS_BY_ID["J1"]], "artifact text"
+            )
 
     def test_invalid_output_has_safe_error_without_raw_response(self):
         def invalid(*args, **kwargs):
@@ -169,17 +210,17 @@ class PromptJudgeTests(unittest.TestCase):
         self.assertEqual(report["status"], "FAILED")
         self.assertEqual(report["artifacts"][0]["status"], "ERROR")
 
-    def test_unknown_model_stays_null_without_invented_version(self):
+    def test_missing_model_identity_blocks_without_invention(self):
         def unreported(*args, **kwargs):
             result = fake_agent(*args, **kwargs)
             result["model"] = None
+            result["observed_model"] = None
+            result["requested_model"] = None
             return result
 
         report = self.run_fixture(unreported)
-        vote = report["artifacts"][0]["votes"][0]
-        self.assertIsNone(vote["model"])
-        self.assertEqual(vote["model_source"], "adapter-reported")
-        self.assertEqual(vote["version"], "fixture-cli-1")
+        self.assertEqual(report["status"], "BLOCKED")
+        self.assertTrue(report["identity_unverified"])
 
     def test_only_requested_dimensions_count_as_coverage(self):
         report = self.run_fixture(settings=subject.Settings(dimensions=("J11",)))
@@ -187,6 +228,7 @@ class PromptJudgeTests(unittest.TestCase):
         self.assertEqual(row["requested_dimensions"], ["J11"])
         self.assertEqual(report["coverage"]["requested_dimension_pairs"], 1)
         self.assertEqual(report["coverage"]["assessed_dimension_pairs"], 1)
+        self.assertEqual(report["status"], "PARTIAL")
         report = self.run_fixture(settings=subject.Settings(dimensions=("J1",)))
         self.assertEqual(report["artifacts"][0]["status"], "NOT_REQUESTED")
         self.assertEqual(report["status"], "FAILED")
@@ -204,6 +246,36 @@ class PromptJudgeTests(unittest.TestCase):
         report = self.run_fixture(changed)
         self.assertEqual(report["status"], "BLOCKED")
         self.assertIn("changed", report["error"])
+
+    def test_artifact_raw_must_match_the_initial_snapshot(self):
+        snapshot = subject.plugin_snapshot(self.root)
+        (self.root / "commands/example.md").write_text("changed after snapshot")
+        with self.assertRaises(subject.AssessmentError):
+            subject.artifact_inventory(self.root, snapshot)
+
+    def test_live_codex_requires_explicit_model_for_identity(self):
+        def codex(*args, **kwargs):
+            result = fake_agent(*args, **kwargs)
+            result.update(backend="codex", observed_model=None, requested_model=None)
+            return result
+
+        with mock.patch.object(subject.agent_cli, "run_prompt", side_effect=codex):
+            report = subject.evaluate(self.root, self.settings, mode="live")
+        self.assertEqual(report["status"], "BLOCKED")
+        self.assertTrue(report["identity_unverified"])
+
+        def explicit_codex(*args, **kwargs):
+            result = fake_agent(*args, **kwargs)
+            result.update(backend="codex", observed_model=None)
+            return result
+
+        with mock.patch.object(
+            subject.agent_cli, "run_prompt", side_effect=explicit_codex
+        ):
+            report = subject.evaluate(
+                self.root, subject.Settings(model="gpt-5.5"), mode="live"
+            )
+        self.assertEqual(report["status"], "PASSED")
 
     def test_invalid_settings_inventory_and_symlinks_rejected(self):
         for settings in (
@@ -284,6 +356,22 @@ class PromptJudgeTests(unittest.TestCase):
             subject.progress("artifact example", "PASSED", "live")
             subject.progress("fixture", "PASSED", "fixture")
         self.assertEqual(output.getvalue(), "artifact example: PASSED\n")
+
+    def test_live_failure_progress_uses_redacted_evidence(self):
+        row = {
+            "path": "commands/example.md",
+            "status": "FAILED",
+            "dimensions": [{"id": "J1", "passed": False, "scores": [1, 2, 1]}],
+            "votes": [
+                {"dimensions": {"J1": {"evidence": "API_KEY=[REDACTED]"}}},
+                {"dimensions": {"J1": {"evidence": "missing trigger"}}},
+                {"dimensions": {"J1": {"evidence": "missing trigger"}}},
+            ],
+        }
+        with contextlib.redirect_stderr(io.StringIO()) as output:
+            subject.progress_failures(row, "live")
+        self.assertIn("J1", output.getvalue())
+        self.assertIn("[REDACTED]", output.getvalue())
 
 
 if __name__ == "__main__":

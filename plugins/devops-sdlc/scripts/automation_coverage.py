@@ -87,14 +87,18 @@ def repository_field(value: object) -> str:
     result = text_field(value)
     pattern = r"[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?/[a-z0-9][a-z0-9._-]{0,99}"
     if not re.fullmatch(pattern, result, flags=re.ASCII):
-        raise ValidationError("Repository must be canonical lowercase GitHub owner/repo.")
+        raise ValidationError(
+            "Repository must be canonical lowercase GitHub owner/repo."
+        )
     return result
 
 
 def revision_field(value: object) -> str:
     result = text_field(value)
     if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", result, flags=re.ASCII):
-        raise ValidationError("Source revision must be a full lowercase Git commit hash.")
+        raise ValidationError(
+            "Source revision must be a full lowercase Git commit hash."
+        )
     return result
 
 
@@ -128,15 +132,18 @@ def validate_metadata(row: dict[str, object]) -> None:
                 identifier_field(row[key])
     for key in ("command", "preconditions"):
         if key in row:
-            values = row[key]
-            if not isinstance(values, list) or len(values) > 256:
-                raise ValidationError("Expected a bounded string array.")
-            for value in values:
-                text_field(value)
+            text_array(row[key])
     if "workflow_supported" in row:
         bool_field(row["workflow_supported"])
     if "execution_mode" in row:
         enum_field(row["execution_mode"], EXECUTION_MODES)
+
+
+def text_array(values: object) -> None:
+    if not isinstance(values, list) or len(values) > 256:
+        raise ValidationError("Expected a bounded string array.")
+    for value in values:
+        text_field(value)
 
 
 def validate_row(value: object) -> dict[str, object]:
@@ -269,7 +276,6 @@ def summarize(
     applicable = [row for row in rows if row["applicable"]]
     denominator = len(applicable)
     numerator = sum(actual_complete(row) for row in applicable)
-    automated = sum(automated_complete(row) for row in applicable)
     outcomes = Counter(cast(str, row["outcome"]) for row in applicable)
     return {
         "total_rows": len(rows),
@@ -278,14 +284,7 @@ def summarize(
         "supplied_actual_completion_percentage": numerator / denominator * 100
         if denominator
         else None,
-        "reported_automation_numerator": automated,
-        "reported_automation_percentage": automated / denominator * 100
-        if denominator
-        else None,
-        "target_percentage": 90,
-        "reported_automation_target_met": (
-            denominator > 0 and automated * 100 >= denominator * 90
-        ) if baseline_matched else None,
+        **automation_metrics(applicable, baseline_matched),
         "externally_verified": False,
         "excluded_count": len(rows) - denominator,
         "outcome_counts": {key: outcomes[key] for key in OUTCOMES[:-1]},
@@ -297,9 +296,36 @@ def summarize(
             "workflow_supported" not in row for row in applicable
         ),
         "human_time_reduction_percentage": None,
+        **execution_counts(applicable),
+    }
+
+
+def automation_metrics(
+    applicable: list[dict[str, object]], baseline_matched: bool
+) -> dict[str, object]:
+    denominator = len(applicable)
+    automated = sum(automated_complete(row) for row in applicable)
+    return {
+        "reported_automation_numerator": automated,
+        "reported_automation_percentage": automated / denominator * 100
+        if denominator
+        else None,
+        "target_percentage": 90,
+        "reported_automation_target_met": (
+            denominator > 0 and automated * 100 >= denominator * 90
+        )
+        if baseline_matched
+        else None,
+    }
+
+
+def execution_counts(applicable: list[dict[str, object]]) -> dict[str, object]:
+    return {
         "supplied_actual_completions_by_execution_mode": {
-            mode: sum(actual_complete(row) and row.get("execution_mode") == mode
-                      for row in applicable)
+            mode: sum(
+                actual_complete(row) and row.get("execution_mode") == mode
+                for row in applicable
+            )
             for mode in EXECUTION_MODES
         },
         "execution_mode_unreported_count": sum(
@@ -330,8 +356,10 @@ def breakdown(
 def denominator_contract(inventory: dict[str, object]) -> list[dict[str, object]]:
     fields = (*IDENTITY, "id", "applicable")
     rows = cast(list[dict[str, object]], inventory["rows"])
-    return [{key: row[key] for key in fields}
-            for row in sorted(rows, key=lambda item: cast(str, item["id"]))]
+    return [
+        {key: row[key] for key in fields}
+        for row in sorted(rows, key=lambda item: cast(str, item["id"]))
+    ]
 
 
 def canonical_digest(value: object) -> str:
@@ -346,14 +374,22 @@ def baseline_contract(
 ) -> dict[str, object]:
     contract = denominator_contract(inventory)
     if baseline is None:
-        return {"supplied": False, "matched": None,
-                "denominator_sha256": canonical_digest(contract)}
+        return {
+            "supplied": False,
+            "matched": None,
+            "denominator_sha256": canonical_digest(contract),
+        }
     frozen = validate_inventory(baseline)
     if denominator_contract(frozen) != contract:
-        raise ValidationError("Current identities or applicability differ from baseline.")
-    return {"supplied": True, "matched": True,
-            "inventory_version": frozen["inventory_version"],
-            "denominator_sha256": canonical_digest(contract)}
+        raise ValidationError(
+            "Current identities or applicability differ from baseline."
+        )
+    return {
+        "supplied": True,
+        "matched": True,
+        "inventory_version": frozen["inventory_version"],
+        "denominator_sha256": canonical_digest(contract),
+    }
 
 
 def build_report(value: object, baseline: object | None = None) -> dict[str, object]:
@@ -373,20 +409,35 @@ def build_report(value: object, baseline: object | None = None) -> dict[str, obj
         "inventory_sha256": canonical_digest({**inventory, "rows": rows}),
         "baseline": frozen,
         "summary": summarize(rows, baseline_matched),
-        "breakdowns": {key: breakdown(rows, key, baseline_matched) for key in DIMENSIONS},
+        "breakdowns": {
+            key: breakdown(rows, key, baseline_matched) for key in DIMENSIONS
+        },
         "rows": rows,
-        "supplied_actual_completed_ids": [
-            row["id"] for row in rows if row["applicable"] and actual_complete(row)
-        ],
-        "reported_automated_ids": [
-            row["id"] for row in rows if row["applicable"] and automated_complete(row)
-        ],
-        "outstanding_automation_ids": [
-            row["id"] for row in rows if row["applicable"] and not automated_complete(row)
-        ],
-        "excluded_rows": [row for row in rows if not row["applicable"]],
+        **row_indexes(rows),
         "limitations": list(LIMITATIONS),
     }
+
+
+def row_indexes(rows: list[dict[str, object]]) -> dict[str, object]:
+    applicable = applicability_rows(rows, True)
+    return {
+        "supplied_actual_completed_ids": [
+            row["id"] for row in applicable if actual_complete(row)
+        ],
+        "reported_automated_ids": [
+            row["id"] for row in applicable if automated_complete(row)
+        ],
+        "outstanding_automation_ids": [
+            row["id"] for row in applicable if not automated_complete(row)
+        ],
+        "excluded_rows": applicability_rows(rows, False),
+    }
+
+
+def applicability_rows(
+    rows: list[dict[str, object]], applicable: bool
+) -> list[dict[str, object]]:
+    return [row for row in rows if row["applicable"] is applicable]
 
 
 def main(argv: list[str] | None = None) -> int:

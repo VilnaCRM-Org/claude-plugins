@@ -1,197 +1,176 @@
-# Frozen operational automation inventory
+# Operational automation inventory
 
-Run the standalone reporter from the repository root:
+The reporter summarizes supplied claims. It does not verify referenced
+operations, deployed revisions, authorship, or approval of a supplied baseline.
+Every report sets `externally_verified: false`.
 
 ```bash
-python3 plugins/devops-sdlc/scripts/automation_coverage.py INVENTORY.json
+python3 plugins/devops-sdlc/scripts/automation_coverage.py CURRENT.json --baseline BASELINE.json
 ```
 
-Python 3.10 or newer is the only runtime dependency. The reporter reads the
-explicit UTF-8 JSON input once, writes a deterministic JSON report to stdout and
-leaves the input unchanged. Exit code `0` means valid input, including reports
-below target; `2` means invalid arguments or invalid/unreadable input. Errors go
-to stderr without echoing input contents or filenames. No cloud, engine, model,
-network, environment credentials or external commands are accessed.
+Omit `--baseline` for an exploratory report. Without a baseline,
+`reported_automation_target_met` is always null. A baseline mismatch returns
+`status: "BLOCKED"` and exit code 2. Valid reports return exit code 0, including
+below-target reports. They never certify the broader 90% automation goal.
 
-## Version 1 contract
+Python 3.10+ and POSIX are required. The reporter reads only the explicitly
+supplied inventory and optional baseline. Descriptor-anchored traversal and
+`O_NOFOLLOW` reject symlink components; the final input opens with
+`O_NONBLOCK` and must be a regular file. FIFOs, devices, sockets and directories
+cannot block the reader. Each input is limited to 8 MiB and remains unchanged.
+No references, commands, network services, cloud credentials or external
+processes are accessed.
 
-The root object has exactly three required fields:
+## Schema version 1
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `schema_version` | integer `1` | Schema version; booleans and `1.0` are rejected. |
-| `inventory_version` | string | Maintainer-assigned identifier for a reviewed frozen baseline. |
-| `rows` | array of objects | At most 10,000 operational records; may be empty. |
+The root contains exactly `schema_version`, `inventory_version`, and `rows`.
+The schema version is integer 1; booleans/floats are rejected.
+`inventory_version` is a nonempty bounded maintainer label. `rows` contains at
+most 10,000 objects and may be empty.
 
-Each row requires the following fields:
+| Required row field | Contract |
+| --- | --- |
+| `id` | Unique canonical lowercase ASCII row ID. |
+| `repository` | Canonical lowercase GitHub `owner/repo`; URLs and case variants are rejected. |
+| `target` | Canonical target ID, not an unrestricted path. |
+| `environment` | Canonical explicit environment ID. |
+| `operation` | Canonical accepted end-to-end operation ID. |
+| `applicable` | Boolean deciding membership in the denominator. |
+| `outcome` | `complete`, `failed`, `blocked`, `skipped`, `incomplete`, or `excluded`. |
+| `evidence` | Exactly `kind` and `reference`. |
+| `exclusion_reason` | Nonempty reason for an excluded row; null otherwise. |
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `id` | string | Unique row ID within this snapshot. |
-| `repository` | string | Repository identifier, treated as data. |
-| `target` | string | Project or stack identifier, treated as data. |
-| `environment` | string | Explicit environment identifier. |
-| `operation` | string | Accepted end-to-end unit of work, such as `preview` or `deploy`. |
-| `applicable` | boolean | Whether this row belongs in the accepted denominator. |
-| `outcome` | enum string | `complete`, `failed`, `blocked`, `skipped`, `incomplete`, or `excluded`. |
-| `evidence` | object | Exactly `kind` and `reference`, as defined below. |
-| `exclusion_reason` | string or null | Nonempty reason for an excluded row; otherwise null. |
+IDs use `[a-z0-9][a-z0-9._-]{0,127}`. Case variants, invisible characters,
+non-ASCII letters, spaces and slash-containing target IDs are rejected rather
+than silently rewritten. Repository owners use up to 39 lowercase ASCII
+alphanumeric/hyphen characters with alphanumeric ends; repository names use
+up to 100 lowercase ASCII alphanumeric/dot/underscore/hyphen characters and
+start alphanumeric. These are local syntax checks, not GitHub existence or
+redirect verification.
 
 Both IDs and `(repository, target, environment, operation)` tuples must be
-unique. Different IDs cannot double-count the same operational unit. Use one
-accepted end-to-end operation per row, rather than one row per command or retry.
-Identifiers are case-sensitive and are not canonicalized against remote systems.
+unique. Renaming a row cannot duplicate an operation. Use one accepted
+end-to-end operation per row; retries and individual commands do not become
+additional completed operations.
 
-`evidence.kind` is exactly one of `actual`, `fixture`, `mock`, `simulated`,
-`documentation`, or `none`. `reference` must be a nonempty string for every kind
-except `none`, which requires null. `complete` requires evidence, even for
-synthetic/documentation records. Only `complete` plus `actual` can enter the
-actual numerator. `actual` means the author claims accepted real work completed
-end-to-end by the plugin, not merely a successful proposal, command preparation,
-human-only completion, or model self-assessment. The reporter cannot attest that
-claim. Record unavailable credentials/approval as applicable `blocked` with
-`none` evidence when no run evidence exists. Keep required skipped checks and
-unsupported work applicable; lack of automation is not an exclusion reason.
+`evidence.kind` is `actual`, `fixture`, `mock`, `simulated`,
+`documentation`, or `none`. Every kind except `none` requires a nonempty
+`reference`; `none` requires null. A `complete` outcome requires evidence.
+References are inert strings. An arbitrary reference labeled `actual` remains
+an unverified author claim.
 
-An inapplicable row must use `outcome: "excluded"` with a nonempty
-`exclusion_reason`. An applicable row must use another outcome with
-`exclusion_reason: null`. Exclusions require human review: the reporter checks
-that a reason exists, not whether the reason is justified.
+| Optional metadata | Contract |
+| --- | --- |
+| `execution_mode` | `autonomous`, `assisted`, or `manual`; omission means unreported. |
+| `workflow_supported` | Boolean claiming a supported workflow performed the work. |
+| `source_revision` | Full lowercase 40- or 64-character hexadecimal Git revision. |
+| `owner` | Canonical accountable owner or team ID. |
+| `engine`, `risk`, `family` | Canonical grouping labels using the ID vocabulary. |
+| `command`, `preconditions` | Up to 256 nonempty string tokens; inert descriptive data. |
 
-Optional row metadata:
+Optional fields may be omitted, but cannot be null. Missing provenance keeps a
+row out of the automation numerator. A supplied revision with invalid syntax is
+rejected. Assisted completion involved human intervention; manual completion
+was performed by a human. Owners must consistently distinguish intentional
+policy approval checkpoints from hands-on assisted execution.
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `engine` | string | Engine label, for example `terraform`, `terraspace`, or `pulumi`. |
-| `risk` | string | Reviewed risk tier using the team's taxonomy. |
-| `family` | string | Operation family used for grouping. |
-| `source_revision` | string | Revision binding for supplied evidence. |
-| `owner` | string | Accountable team or role. |
-| `preconditions` | array of strings | Up to 256 reviewed prerequisites. |
-| `command` | array of strings | Up to 256 command tokens; inert descriptive data. |
-| `workflow_supported` | boolean | Author's independent claim that a workflow exists. |
+General text must be nonempty, trimmed, at most 4,096 characters, and free of
+C0 controls and lone Unicode surrogates. Labels have the stricter ASCII rules.
+Unknown keys, duplicate JSON keys, malformed types, non-finite numbers and
+inconsistent applicability/outcome combinations fail closed.
+Supply only non-secret metadata: reports reproduce supplied rows without
+redacting their contents.
 
-Omit unavailable optional fields; null is not valid for them. Empty `command`
-and `preconditions` arrays are valid. All strings must be trimmed, nonempty,
-at most 4,096 characters, and contain neither C0 control characters nor lone
-Unicode surrogates. Input is limited to 8 MiB. Unknown fields, duplicate JSON
-object keys, unsupported outcomes/evidence kinds, non-finite numbers, malformed
-types and incomplete objects are rejected. No numeric metadata is accepted.
+## Completion and automation are separate
 
-References, repository/target names and command tokens are always data. A
-reference resembling a path, URL or shell command is never opened, fetched or
-executed. Supply only non-secret identifiers and sanitized metadata: successful
-reports reproduce supplied rows, and the reporter does not redact their contents.
+`supplied_actual_completed_numerator` counts applicable rows with
+`outcome: "complete"` and `evidence.kind: "actual"`, including manual and
+assisted work. It is an operational completion claim, not an automation count.
 
-## Counting and interpretation
+`reported_automation_numerator` requires every predicate below:
 
-`summary.applicable_denominator` counts all applicable rows.
-`summary.actual_completed_numerator` counts applicable rows whose outcome is
-`complete` and evidence kind is `actual`.
+- The row is applicable.
+- Outcome is `complete` and evidence kind is `actual`.
+- Execution mode is explicitly `autonomous`.
+- `workflow_supported` is explicitly true.
+- A valid full `source_revision` and canonical `owner` are supplied.
 
 ```text
-actual_completion_percentage = actual_completed_numerator / applicable_denominator * 100
+reported_automation_percentage =
+  reported_automation_numerator / applicable_denominator * 100
 ```
 
-An empty denominator produces JSON null and `target_met: false`. Otherwise,
-`target_met` compares the exact integer ratio against 90%, without rounding the
-displayed percentage first. It is a calculation over supplied claims, not a
-verified operational achievement. Synthetic successes, fixtures, documentation,
-blocked, failed, skipped and incomplete rows remain in the denominator.
+Manual, assisted, unsupported, unreported-mode, fixture, mock, simulated and
+documentation completions remain in the denominator. Required skipped work,
+missing credentials/approvals and incomplete automation remain applicable.
+Lack of automation is not an exclusion reason.
 
-Each summary includes outcome counts, evidence kind counts, completions by
-evidence kind, explicit exclusion count and workflow support counts. Evidence
-and workflow counters concern applicable rows only. Unreported workflow support
-is counted separately; a documentation record does not implicitly assert the
-optional `workflow_supported` field. `human_time_reduction_percentage` is always
-null because this schema does not measure baseline minutes or interventions.
+With a matching baseline and nonempty denominator,
+`reported_automation_target_met` compares the unrounded integer ratio to 90%.
+Without a baseline it is null. With a matching empty baseline it is false and
+percentages are null. Even a calculated true target has
+`externally_verified: false`.
 
-`breakdowns` applies the same summaries independently by engine, risk,
-environment and family. Groups sort by their exact labels; an additional group
-with `value: null` retains rows missing optional metadata. Group totals reconcile
-to the overall summary, including exclusions. `rows`, `actual_completed_ids`,
-`outstanding_ids` and `excluded_rows` sort by ID. Outstanding rows include
-synthetic/documented completions. Supplied evidence and exclusion reasons stay
-visible in the report.
+Summaries include outcomes, evidence kinds, completion modes, workflow support,
+unreported metadata and exclusions. Breakdowns apply the same calculation by
+engine, risk, environment and family; null groups retain missing labels.
+Group totals reconcile. `human_time_reduction_percentage` is always null because
+this schema does not measure hands-on minutes.
 
-`inventory_sha256` hashes the validated inventory serialized with sorted object
-keys and rows sorted by ID, compact separators and ASCII escaping. Reordering
-rows or keys does not change the digest; changing metadata or version does.
-Freeze the baseline and review additions/removals outside the reporter. The
-digest identifies a snapshot; it does not prove immutability, approval,
-authorship, evidence freshness or completeness. The reporter neither maintains
-baseline history nor independently verifies source revisions or references.
+The report preserves `rows`, `supplied_actual_completed_ids`,
+`reported_automated_ids`, `outstanding_automation_ids`, and `excluded_rows`,
+sorted by ID. Manual completion can appear in both the supplied-completion
+list and the outstanding-automation list.
 
-The emitted limitations explicitly state that supplied evidence is unverified,
-human-time reduction is unmeasured, deployment success beyond supplied evidence
-is unproven, and the inventory does not represent every kind of DevOps work.
-Measure comparable hands-on baselines and interventions separately before
-claiming time savings. Code coverage and workflow support are different measures
-from operational automation coverage.
+## Baseline integrity
 
-## Offline example
+The baseline uses the same schema. Its canonical denominator contract contains
+exactly each row's `id`, `repository`, `target`, `environment`, `operation`,
+and `applicable`, sorted by ID. The reporter rejects added/removed/renamed
+identities and changed applicability. Exclusion drift cannot silently reduce
+the denominator.
 
-This example deliberately uses a fixture success, not a claimed real operation.
-From the repository root, create a temporary example and run the real CLI:
+Outcomes, evidence, execution modes and optional metadata may advance without
+changing `baseline.denominator_sha256`. Reordering rows or JSON keys does not
+change it. `inventory_sha256` hashes the complete current inventory, preserving
+visibility of outcome and metadata changes.
 
-```bash
-inventory_example=$(mktemp)
-cat > "$inventory_example" <<'JSON'
-{
-  "schema_version": 1,
-  "inventory_version": "example-fixture-only-v1",
-  "rows": [
-    {
-      "id": "service-test-preview",
-      "repository": "example/service",
-      "target": "application",
-      "environment": "test",
-      "operation": "preview",
-      "applicable": true,
-      "outcome": "complete",
-      "evidence": {"kind": "fixture", "reference": "fixture:preview-001"},
-      "exclusion_reason": null,
-      "engine": "pulumi",
-      "risk": "low",
-      "family": "preview",
-      "workflow_supported": true
-    }
-  ]
-}
-JSON
-python3 plugins/devops-sdlc/scripts/automation_coverage.py "$inventory_example"
-rm "$inventory_example"
-```
+An excluded row requires `outcome: "excluded"`, `applicable: false`, and a
+nonempty reason. The baseline binds applicability, not explanatory wording;
+changed reasons remain visible in the full inventory hash and supplied rows.
+Applicable rows require a null reason.
 
-Expected summary: denominator `1`, actual numerator `0`, percentage `0.0`,
-fixture completions `1`, workflow support `1`, target met `false`. Replacing
-`rows` with `[]` yields denominator/numerator `0`, percentage null and target met
-false. Neither example needs credentials or evidence files.
+These hashes do not establish approval, authorship, immutability, authentic
+evidence or comprehensive DevOps coverage. A caller can supply a different
+baseline. Retain the reviewed baseline and digest in the existing repository
+and approval process. A legitimate scope change requires a newly reviewed
+baseline; passing the current file as its own baseline does not prove review.
+
+## Example interpretation
+
+For an applicable row with actual completed evidence, autonomous mode,
+workflow support, a full revision and an owner, the reported automation
+numerator is 1. With a one-row denominator its percentage is 100.
+Without a baseline the target remains null; with a matching baseline the
+calculated target is true. External verification remains false in both cases.
+
+Changing the mode to `manual` preserves supplied actual completion and reduces
+automation to zero. Changing evidence to `fixture` makes both numerators zero.
+Neither fixture tests nor model self-assessments establish actual operations.
 
 ## Focused validation
 
-Run from the repository root. The unittest suite covers mixed evidence,
-exclusions, missing credentials, threshold boundaries, empty inventories,
-deterministic snapshots, strict validation and the CLI entry point. It blocks
-file/network/command/environment access during the inert-reference test and
-checks the input's bytes and modification time after CLI execution. These are
-reporter tests, not evidence of live infrastructure or model execution.
+Tests cover canonical identities, baseline drift, autonomous versus manual
+counting, raw claim preservation, FIFO/symlink rejection, inert references and
+the real CLI entry point. No reporter branches are excluded from coverage.
 
 ```bash
 python3 -m unittest discover -s plugins/devops-sdlc/tests -p test_automation_coverage.py -v
-uvx ruff==0.15.6 format --check plugins/devops-sdlc/scripts/automation_coverage.py plugins/devops-sdlc/tests/test_automation_coverage.py
-uvx ruff==0.15.6 check plugins/devops-sdlc/scripts/automation_coverage.py plugins/devops-sdlc/tests/test_automation_coverage.py
-uvx ty==0.0.21 check plugins/devops-sdlc/scripts/automation_coverage.py plugins/devops-sdlc/tests/test_automation_coverage.py
-uvx bandit==1.8.6 plugins/devops-sdlc/scripts/automation_coverage.py plugins/devops-sdlc/tests/test_automation_coverage.py
-uvx xenon==0.9.3 --max-absolute B --max-modules B --max-average A plugins/devops-sdlc/scripts/automation_coverage.py plugins/devops-sdlc/tests/test_automation_coverage.py
-coverage_data=$(mktemp)
-COVERAGE_FILE="$coverage_data" uvx coverage==7.6.7 run --rcfile=/dev/null --branch --source=automation_coverage -m unittest discover -s plugins/devops-sdlc/tests -p test_automation_coverage.py
-COVERAGE_FILE="$coverage_data" uvx coverage==7.6.7 report --rcfile=/dev/null --fail-under=100 -m
-rm "$coverage_data"
+uvx ruff@0.15.6 check plugins/devops-sdlc/scripts/automation_coverage.py plugins/devops-sdlc/tests/test_automation_coverage.py
+uvx ruff@0.15.6 format --check plugins/devops-sdlc/scripts/automation_coverage.py plugins/devops-sdlc/tests/test_automation_coverage.py
+uvx ty@0.0.21 check plugins/devops-sdlc/scripts/automation_coverage.py plugins/devops-sdlc/tests/test_automation_coverage.py
+uvx bandit@1.8.6 -q plugins/devops-sdlc/scripts/automation_coverage.py plugins/devops-sdlc/tests/test_automation_coverage.py
+uvx xenon@0.9.3 --max-absolute B --max-modules B --max-average A plugins/devops-sdlc/scripts/automation_coverage.py plugins/devops-sdlc/tests/test_automation_coverage.py
+COVERAGE_FILE=/tmp/devops-inventory-coverage uvx coverage@7.6.7 run --rcfile=/dev/null --branch --source=automation_coverage -m unittest discover -s plugins/devops-sdlc/tests -p test_automation_coverage.py
+COVERAGE_FILE=/tmp/devops-inventory-coverage uvx coverage@7.6.7 report --rcfile=/dev/null --fail-under=100 -m
 ```
-
-Quality tools must be installed or cached before offline validation. Ruff and ty
-use the repository's `pyproject.toml`. The focused coverage invocation isolates
-the reporter from the existing toolkit source selection and entry-point
-exclusion: it measures the real `__main__` branch as well. No reporter lines or
-branches are suppressed or excluded, and the gate requires 100% coverage.

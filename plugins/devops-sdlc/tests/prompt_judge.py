@@ -45,7 +45,8 @@ CONTEXT = (
     "authoritative inventory; do not infer unseen implementation or test success."
 )
 SECRET_RE = re.compile(
-    r"(?i)\\b(api[_-]?key|secret|token|password)\\b\\s*[:=]\\s*[^\\s,;]+"
+    r"(?i)\b([a-z0-9_-]*(?:api[_-]?key|secret|token|password)[a-z0-9_-]*)\b"
+    r"\s*[:=]\s*[^\s,;]+"
 )
 
 
@@ -121,11 +122,11 @@ def verdict_schema(dimensions: list[rubrics.Dimension]) -> dict:
     entry = {
         "type": "object",
         "additionalProperties": False,
-            "required": ["score", "evidence", "citation"],
-            "properties": {
-                "score": {"type": "integer", "minimum": 1, "maximum": 5},
-                "evidence": {"type": "string", "minLength": 1, "maxLength": 240},
-                "citation": {"type": "string", "minLength": 1, "maxLength": 120},
+        "required": ["score", "evidence", "citation"],
+        "properties": {
+            "score": {"type": "integer", "minimum": 1, "maximum": 5},
+            "evidence": {"type": "string", "minLength": 1, "maxLength": 240},
+            "citation": {"type": "string", "minLength": 1, "maxLength": 120},
         },
     }
     return {
@@ -174,7 +175,9 @@ def validate_entry(entry: dict, artifact_raw: str) -> None:
         or any(ord(char) < 32 for char in citation)
         or citation not in artifact_raw
     ):
-        raise AssessmentError("Verdict citation must be a bounded exact artifact substring.")
+        raise AssessmentError(
+            "Verdict citation must be a bounded exact artifact substring."
+        )
 
 
 def backend_identity(result: dict) -> tuple[str, str, str, str]:
@@ -186,11 +189,17 @@ def backend_identity(result: dict) -> tuple[str, str, str, str]:
     )
     if backend not in agent_cli.BACKENDS or type(version) is not str or not version:
         raise AssessmentError("Agent result lacks observed backend/version identity.")
-    if type(observed) is str and observed:
-        return backend, version, "observed", observed
-    if type(requested) is str and requested:
-        return backend, version, "requested", requested
-    raise AssessmentError("Agent result lacks observed or explicitly requested model identity.")
+    if observed is not None:
+        if type(observed) is str and observed:
+            return backend, version, "observed", observed
+        raise AssessmentError("Agent result has an invalid observed model identity.")
+    if requested is not None:
+        if type(requested) is str and requested:
+            return backend, version, "requested", requested
+        raise AssessmentError("Agent result has an invalid requested model identity.")
+    raise AssessmentError(
+        "Agent result lacks observed or explicitly requested model identity."
+    )
 
 
 def redact_evidence(value: str) -> str:
@@ -233,7 +242,22 @@ def one_vote(
     number: int,
     mode: str,
 ) -> dict:
-    prompt = judge.build_prompt(artifact, dimensions, context)
+    citation_lines = [
+        line for line in artifact.raw.splitlines() if line and len(line) <= 120
+    ]
+    prompt = (
+        judge.build_prompt(artifact, dimensions, context)
+        + "\n\n"
+        + (
+            "RESPONSE CONTRACT: Fields are score, evidence, and citation only."
+            " citation is a non-empty single-line substring copied from ARTIFACT."
+            " Never cite CONTEXT, a rubric, a link target, or a paraphrase."
+            " Limit citation to 120 characters and verify it occurs in ARTIFACT."
+            "evidence must be single-line and at most 240 characters."
+        )
+        + "\nAllowed exact citation lines (copy one verbatim):\n"
+        + "\n".join(citation_lines)
+    )
     with tempfile.TemporaryDirectory(prefix="devops-prompt-judge-") as directory:
         result = agent_cli.run_prompt(
             prompt,
@@ -250,10 +274,29 @@ def one_vote(
         return {**metadata, "status": "ERROR", "error": "Agent evaluation unavailable."}
     try:
         backend_identity(result)
-        verdict = strict_verdict(result.get("output"), dimensions)
+    except AssessmentError:
+        return {
+            **metadata,
+            "status": "ERROR",
+            "identity_unverified": True,
+            "error": "Agent model identity is unavailable.",
+        }
+    if (
+        mode == "live"
+        and result.get("backend") == "codex"
+        and not result.get("requested_model")
+    ):
+        return {
+            **metadata,
+            "status": "ERROR",
+            "identity_unverified": True,
+            "error": "Codex live assessment requires an explicit --model.",
+        }
+    try:
+        verdict = strict_verdict(result.get("output"), dimensions, artifact.raw)
     except AssessmentError:
         return {**metadata, "status": "ERROR", "error": "Invalid structured verdict."}
-    return {**metadata, "status": "SCORED", "dimensions": verdict["dimensions"]}
+    return {**metadata, "status": "SCORED", "dimensions": stored_dimensions(verdict)}
 
 
 def collect_votes(
@@ -319,6 +362,23 @@ def parallel_rows(items: list, worker: Callable[[Any], dict], jobs: int) -> list
 def progress(label: str, status: str, mode: str) -> None:
     if mode == "live":
         print(f"{label}: {status}", file=sys.stderr, flush=True)
+
+
+def progress_failures(row: dict, mode: str) -> None:
+    if mode != "live" or row.get("status") != "FAILED":
+        return
+    for dimension in row["dimensions"]:
+        if dimension["passed"]:
+            continue
+        evidence = [
+            vote["dimensions"][dimension["id"]]["evidence"] for vote in row["votes"]
+        ]
+        print(
+            f"artifact {row['path']} {dimension['id']}: scores={dimension['scores']} "
+            f"evidence={evidence}",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def calibrate_case(
@@ -400,7 +460,7 @@ def assess_artifact(
         "path": artifact.path.relative_to(artifact.plugin_root).as_posix(),
         "kind": artifact.kind,
         "name": artifact.name,
-        "sha256": digest(artifact.path.read_bytes()),
+        "sha256": digest(artifact.raw.encode()),
         "prompt_text_sha256": digest(artifact.raw.encode()),
         "requested_dimensions": [dimension.id for dimension in dimensions],
         "votes": [],
@@ -427,7 +487,7 @@ def assess_artifact(
     }
 
 
-def artifact_inventory(root: Path) -> list[_model.Artifact]:
+def artifact_inventory(root: Path, snapshot: dict[str, str]) -> list[_model.Artifact]:
     artifacts = _model.discover(root)
     if len(artifacts) != EXPECTED_ARTIFACTS:
         raise AssessmentError("Prompt inventory differs from the 31-artifact baseline.")
@@ -435,6 +495,12 @@ def artifact_inventory(root: Path) -> list[_model.Artifact]:
         artifact.frontmatter_error or not artifact.raw.strip() for artifact in artifacts
     ):
         raise AssessmentError("Prompt inventory contains malformed or empty artifacts.")
+    if any(
+        snapshot.get(artifact.path.relative_to(root).as_posix())
+        != digest(artifact.raw.encode())
+        for artifact in artifacts
+    ):
+        raise AssessmentError("Artifact text differs from the initial input snapshot.")
     return artifacts
 
 
@@ -486,7 +552,7 @@ def evaluate(root: Path, settings: Settings, *, mode: str = "live") -> dict:
     validate_settings(settings, mode)
     root = safe_root(root)
     snapshot = plugin_snapshot(root)
-    artifacts = artifact_inventory(root)
+    artifacts = artifact_inventory(root, snapshot)
     dimensions = rubric_dimensions(settings)
     report = base_report(root, snapshot, settings, mode)
     report["calibration"] = calibrate(settings, mode)
@@ -494,14 +560,27 @@ def evaluate(root: Path, settings: Settings, *, mode: str = "live") -> dict:
     rows = evaluate_rows(artifacts, dimensions, settings, mode, identity)
     report.update(artifacts=rows, coverage=coverage(rows, mode))
     if identity is None:
-        report["error"] = "Mandatory calibration failed or backend identity changed."
+        report["identity_unverified"] = any(
+            vote.get("identity_unverified")
+            for row in report["calibration"]
+            for vote in row["votes"]
+        )
+        report["error"] = (
+            "Mandatory calibration failed or model identity is unverified."
+        )
         return report
     if plugin_snapshot(root) != snapshot:
         report["error"] = "Plugin inputs changed during assessment."
         return report
     outcomes = [row["status"] for row in rows if row["status"] != "NOT_REQUESTED"]
     passed = bool(outcomes) and all(status == "PASSED" for status in outcomes)
-    report["status"] = "PASSED" if passed else "FAILED"
+    report["status"] = (
+        "PARTIAL"
+        if passed and settings.dimensions
+        else "PASSED"
+        if passed
+        else "FAILED"
+    )
     return report
 
 
@@ -535,7 +614,7 @@ def evaluate_one(
     if identity is None:
         row = {
             "path": artifact.path.relative_to(artifact.plugin_root).as_posix(),
-            "sha256": digest(artifact.path.read_bytes()),
+            "sha256": digest(artifact.raw.encode()),
             "status": "BLOCKED",
             "requested_dimensions": [d.id for d in requested],
             "votes": [],
@@ -544,6 +623,7 @@ def evaluate_one(
     else:
         row = assess_artifact(artifact, requested, context, settings, mode, identity)
     progress(f"artifact {row['path']}", row["status"], mode)
+    progress_failures(row, mode)
     return row
 
 
