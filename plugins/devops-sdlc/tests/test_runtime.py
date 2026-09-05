@@ -175,7 +175,7 @@ class RuntimeTests(unittest.TestCase):
             with self.assertRaises(runtime.Invalid):
                 runtime.validate_profile(self.root)
 
-    def test_unsafe_command_vectors_are_rejected(self):
+    def test_rejects_bad_argv(self):
         vectors = [
             ["sh", "-c", "echo bad"],
             ["make", "pulumi-up"],
