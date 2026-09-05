@@ -25,8 +25,10 @@ Only setup creates an absent `.claude/devops-sdlc.json`; every other stage route
 an absent profile to setup and waits for its result. Then validate the profile
 using `python3 "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`
 before any repository-provided code, tests or operational command executes.
-Select target IDs and environments explicitly named by the user's task or its
-accepted run summary. Process multiple named targets separately with distinct
+Select target IDs and environments explicitly named by the latest user request.
+Otherwise reuse stored selections from the same task's run summary only when
+they still exist in the validated profile and no newer request changed that scope.
+Process multiple named targets separately with distinct
 profile/evidence records. Each helper invocation uses exactly one declared target
 ID and, for preview, one environment belonging to that target; local checks may
 omit it. If scope selects no target and multiple profile targets could match,
@@ -40,8 +42,11 @@ available as a separate invocable agent/session in the host's tool inventory.
 If that capability or the role definition is absent, immediately BLOCK that
 review/QA gate; there is no role fallback or implementer self-approval.
 
-Stage prerequisites: Python 3/profile helper and readable files for all eight
-commands. Check each invoked stage's declared prerequisites immediately before
+Stage prerequisites: Python 3/profile helper and readable files for these eight
+commands under `$DEVOPS_PLUGIN_ROOT/commands/`: `do-sdlc.md`, `do-sdlc-setup.md`,
+`do-sdlc-issue.md`, `do-sdlc-plan.md`, `do-sdlc-implement.md`, `do-sdlc-review.md`,
+`do-sdlc-qa.md` and `do-sdlc-finish-pr.md`.
+Check each invoked stage's declared prerequisites immediately before
 that stage; a missing stage file or dependency blocks that transition. BMALPH,
 where invoked by planning/implementation, means the bmalph CLI that connects
 BMAD planning to the Ralph implementation loop.
@@ -57,6 +62,9 @@ preparing every concrete task-specific artifact, command intention, review matri
 and evidence checklist that does not depend on those facts. Do not let a generic
 missing-facts list replace that preparation, and do not claim it was executed.
 
+An applicable skill is one whose description's action trigger matches the
+requested task; use the decision guide to distinguish overlapping triggers.
+A missing prerequisite blocks that skill; it does not make the skill inapplicable.
 For a real workflow response, lead with the task-specific decision and next
 action. Then use each applicable skill's numbered procedure as a compact
 checklist: `step -> proposed action or reviewed command -> required evidence`.
@@ -80,7 +88,10 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    current source SHA, profile hash, target, environment and actual GitHub state.
    Carry selected backend/version, plugin root, model and preflight fallback
    evidence in this same summary; backend changes never create a fresh stage budget.
-   Resume at the first unmet gate. An old PASS is invalid after relevant changes.
+   Resume at the first unmet gate. Reuse a PASS only when its recorded source SHA,
+   profile hash, target/environment, plugin file hashes, evidence hashes and
+   prerequisite gate identities equal the current values. Any mismatch or missing
+   identity invalidates that PASS and every gate that depended on it.
 3. Adopt an existing issue when supplied. Use `/devops-sdlc:do-sdlc-issue` only
    when issue creation is requested; otherwise a local brief is the task input.
 4. Run `/devops-sdlc:do-sdlc-plan`: research, brief, PRD, architecture,

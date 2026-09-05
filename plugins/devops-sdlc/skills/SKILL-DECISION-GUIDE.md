@@ -26,27 +26,45 @@ Reassess applicability after each scope or source change.
 
 ## Routing
 
-Validate `.claude/devops-sdlc.json` using `scripts/devops.py validate-profile`
-from the inspected plugin root; failure is BLOCKED. Select the `id` of one entry in the profile `targets` list, supplied by the task.
+Validate `.claude/devops-sdlc.json` using
+`python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
+from the task repository; resolve `DEVOPS_PLUGIN_ROOT` as described in the agent
+guide first. Failure is BLOCKED. Select the `id` of one entry in the profile `targets` list, supplied by the task.
 A missing or nonmatching ID is BLOCKED; never infer the environment from the directory.
 Choose terraform-terraspace for Terraform/Terraspace, python-pulumi for Python
 Pulumi, and BLOCKED for an unsupported engine. Select `infrastructure-quality` when code or checks change, `security-iam` when
 permissions/secrets/public access change, `delivery-and-rollback` when promotion
 or recovery is requested, and `evidence-and-coverage` for completion reporting.
 Record the remaining skills as SKIPPED only when their stated trigger is absent. State ownership/backend changes always receive
-independent state review. Day-2 tasks select their operational skills by the
+independent state review: a separate agent/session that did not author the change
+checks the state-migration requirements. Operational maintenance selects skills by the
 actual requested action; a feature task does not imply deployment authorization.
 
 ## Backend selection
 
 Apply the [agent guide](AI-AGENT-GUIDE.md) to every selected skill for explicit
 plugin-root resolution, authenticated Claude/Codex preflight and role delivery.
-Before starting a new CLI process, `scripts/agent_cli.py detect --backend auto`
+Before starting a new CLI process,
+`python3 "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`
 selects authenticated Claude, or authenticated Codex if Claude binary/auth fails.
 Use `--prefer codex` to reverse that order. If both are unavailable, stop live
 work as BLOCKED. Never replay a started or uncertain action through fallback.
-The stage is the invoking command name (or directly invoked skill name). Each
-full procedure attempt increments its persisted count before starting and reports
-n/5; at 5 stop. Preserve that ledger across sessions and never reset a breaker.
-Backend fallback preserves applicability decisions, evidence and stage budgets;
-it does not waive an unavailable native-plugin or live-infrastructure check.
+The stage is the invoking command name (or directly invoked skill name). Its
+budget is five procedure attempts, recorded in `specs/<task>/run-summary.md`;
+reuse the existing task path or create the date/task-title slug once for new work.
+An attempt starts when the first applicable procedure step begins and ends on its
+PASSED, FAILED or BLOCKED outcome. Before starting, read the saved count: if it is
+already five, stop with FAILED; otherwise increment once, save and report `n/5`.
+Observing an already-started attempt does not increment again. Preserve counts,
+applicability and evidence across sessions and backend changes. Ralph is the loop
+run by BMALPH; an open/tripped circuit breaker in `.ralph/logs/` ends that run.
+Preserve the failed log and partial work; never reset it to retry.
+
+Required checks are the exact acceptance checks recorded in that same task
+summary. A native Claude-plugin check means observing Claude actually load and
+invoke the installed plugin; source-context execution in Codex cannot satisfy
+that specific check. It is required only when the task explicitly requires that
+native behavior. A live infrastructure check means observing the specified real
+provider/backend operation with its scoped authorization; local mocks cannot
+satisfy it. Missing prerequisites leave either required check BLOCKED, while
+independent local work continues. Backend fallback cannot turn either into PASS.

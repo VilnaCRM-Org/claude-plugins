@@ -69,7 +69,15 @@ skill receives a verdict; no silent skips.
 3. Run repository format, validate, TFLint, security, docs and module tests.
    Initialize backend-free only when the repository supports that local workflow.
    Do not replace Terraspace with raw Terraform against a generated working dir.
-4. For helper validation use `plan --stage validate`; for a preview intention
+4. If cloud credentials are missing, block provider operations and name this
+   remediation: authenticate the repository's configured read-only preview role
+   through its documented SSO/OIDC sign-in flow, then verify the resulting account
+   and role identity against the selected target. Resolve the exact role, profile
+   and sign-in instructions from repository authentication documentation; if absent,
+   report those missing selections as BLOCKED instead of inventing credentials.
+   Keep local backend-free checks separate. Credentials alone do not authorize
+   deployment or remove the helper's backend-attestation restriction below.
+   For helper validation use `plan --stage validate`; for a preview intention
    use `plan --stage preview`, both with explicit `--target` and `--environment`
    as shown in the agent guide. Helper Terraform/Terraspace preview execution
    currently fails closed: the helper cannot verify that the initialized engine
