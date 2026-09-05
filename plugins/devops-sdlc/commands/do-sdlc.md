@@ -57,6 +57,14 @@ preparing every concrete task-specific artifact, command intention, review matri
 and evidence checklist that does not depend on those facts. Do not let a generic
 missing-facts list replace that preparation, and do not claim it was executed.
 
+For a real workflow response, lead with the task-specific decision and next
+action. Then use each applicable skill's numbered procedure as a compact
+checklist: `step -> proposed action or reviewed command -> required evidence`.
+Verify and record the exact `DEVOPS_PLUGIN_ROOT` path, manifest/helper readability,
+and the selected backend/version provenance required by the backend guide. Name
+missing facts as blockers, but complete the independent checklist entries; a
+generic setup preamble must not replace the requested operational preparation.
+
 This plugin automates development and operational preparation. A request to
 implement the plugin or prepare a PR does not authorize a cloud deployment.
 Reuse authorization already given for an exact action and scope; otherwise

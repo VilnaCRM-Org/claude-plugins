@@ -18,11 +18,11 @@ If profile validation fails, report BLOCKED; do not execute repository commands.
 - Select the supplied target ID from `targets`; no match or an omitted/ambiguous
   selection is BLOCKED. Resolve its root inside the repository. A contained root
   may be inspected; a missing, escaping or symlinked root is BLOCKED.
-- If the selected engine is Terraform, use its reviewed HCL/plan entry points;
-  if Terraspace, use its stack-aware wrappers and environment binding; if Pulumi,
-  use its reviewed Python/uv entry points and explicit stack/backend binding.
-  A different engine is BLOCKED. An engine-specific skill skips the other engine
-  with a reason and routes to its sibling; it never runs the wrong toolchain.
+- If the selected engine is Pulumi, use its reviewed Python/uv entry points and
+  explicit stack/backend binding. For Terraform or Terraspace, immediately record
+  this skill SKIPPED and hand off to terraform-terraspace before execution;
+  no HCL or Terraspace command belongs to this procedure. An unknown engine is
+  BLOCKED.
 - Local static work may omit an environment. Preview or operational work must
   select an existing environment entry; missing identity fields block that work.
 - If the stage needs a command, use its reviewed configured argv. A null command

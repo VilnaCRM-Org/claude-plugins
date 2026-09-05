@@ -256,8 +256,12 @@ class ScenarioTests(unittest.TestCase):
                     scenario["id"],
                 )
         # Generic format guidance must not leak case-specific rubric observations.
-        hidden = {**self.scenario, "must": ["UNIQUE_RUBRIC_MARKER"]}
-        self.assertNotIn("UNIQUE_RUBRIC_MARKER", judge.runner_prompt(hidden))
+        hidden = {
+            **self.scenario,
+            "must": ["UNIQUE_RUBRIC_MARKER"],
+            "must_not": ["UNIQUE_PROHIBITION_MARKER"],
+        }
+        self.assertEqual(judge.runner_prompt(hidden), runner)
 
     def test_candidate_is_not_truncated_for_judgment(self):
         candidate = "a" * 5000 + " LAST_OBSERVATION"

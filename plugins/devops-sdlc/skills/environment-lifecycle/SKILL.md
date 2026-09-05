@@ -1,6 +1,6 @@
 ---
 name: environment-lifecycle
-description: "Use when onboarding a project from a template or planning environment retirement. Use python-pulumi for program implementation and state-migration for moving existing ownership."
+description: "Use when onboarding projects, upgrading templates/providers or retiring environments. Use python-pulumi for program implementation, delivery-and-rollback for deployment execution and state-migration for ownership or secrets-provider migration."
 ---
 
 # Environment Lifecycle
@@ -64,8 +64,11 @@ skill receives a verdict; no silent skips.
    and examples are onboarding artifacts, not deployed services.
 3. Test valid/invalid configurations, policy, secrets propagation, duplicate
    names and stack isolation. Preview with explicit scope when prerequisites exist.
-4. Shared stack initialization, imports, secrets-provider migration, deployment
-   and retirement need their exact operational authorization and reviewed plans.
+4. Prepare shared-stack initialization metadata for onboarding; execution needs
+   its exact operational authorization and reviewed plan. Route imports and
+   secrets-provider migration to state-migration, and deployment execution to
+   delivery-and-rollback. Those operations are handoffs, not lifecycle-skill
+   execution. Retirement also requires its reviewed plan and exact authorization.
 5. For ephemeral environments, verify owner, expiry, data classification and
    retained resources before cleanup. Never use broad destruction against test
    or prod to clean a fixture. Record actual cleanup and residual-resource proof.

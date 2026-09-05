@@ -1,6 +1,6 @@
 ---
 name: terraform-terraspace
-description: "Use when editing or validating Terraform HCL or Terraspace stacks. Use python-pulumi for Python programs; add state-migration for ownership/import changes and delivery-and-rollback for promotion."
+description: "Use when editing, validating or preparing reviewed plans for Terraform HCL or Terraspace stacks. Use python-pulumi for Python programs; add state-migration for ownership/import changes and delivery-and-rollback for promotion execution."
 ---
 
 # Terraform Terraspace
@@ -19,10 +19,10 @@ If profile validation fails, report BLOCKED; do not execute repository commands.
   selection is BLOCKED. Resolve its root inside the repository. A contained root
   may be inspected; a missing, escaping or symlinked root is BLOCKED.
 - If the selected engine is Terraform, use its reviewed HCL/plan entry points;
-  if Terraspace, use its stack-aware wrappers and environment binding; if Pulumi,
-  use its reviewed Python/uv entry points and explicit stack/backend binding.
-  A different engine is BLOCKED. An engine-specific skill skips the other engine
-  with a reason and routes to its sibling; it never runs the wrong toolchain.
+  if Terraspace, use its stack-aware wrappers and environment binding.
+  For Pulumi, immediately record this skill SKIPPED and hand off to python-pulumi
+  before any execution; no Pulumi command belongs to this procedure.
+  An unknown engine is BLOCKED.
 - Local static work may omit an environment. Preview or operational work must
   select an existing environment entry; missing identity fields block that work.
 - If the stage needs a command, use its reviewed configured argv. A null command
@@ -72,11 +72,13 @@ skill receives a verdict; no silent skips.
 4. For helper validation use `plan --stage validate`; for a preview intention
    use `plan --stage preview`, both with explicit `--target` and `--environment`
    as shown in the agent guide. Helper Terraform/Terraspace preview execution
-   currently fails closed pending effective backend attestation. Propose the
+   currently fails closed: the helper cannot verify that the initialized engine
+   backend matches the selected profile backend. Propose the
    configured protected repository/CI plan handoff, and require recorded validate
    and plan outcomes before actual acceptance. Never claim an intention is a run.
    Preview using the selected account/region/environment/backend and preserve
-   S3 encryption and locking configuration. Never disable locks or automatically
+   encryption and locking configuration (S3 controls only for an S3 backend).
+   Never disable locks or automatically
    force-unlock after contention. Exit code 2 from a documented detailed-exitcode
    plan means changes, not failure; inspect and classify the actual command.
 5. Review create/update/delete/replace counts, IAM, public access, retention and
@@ -84,8 +86,9 @@ skill receives a verdict; no silent skips.
    stack, account, provider lock and timestamp before deployment handoff.
 6. For CodePipeline/CodeBuild, verify actual execution revision and staged plan
    hashes. A trigger or V1 fallback without a source override does not prove the
-   reviewed SHA deployed. Apply consumes the reviewed saved plan only within
-   explicit authorization; application rollback is a separate workflow.
+   reviewed SHA deployed. Record these as deployment handoff requirements for
+   delivery-and-rollback: apply consumes the reviewed saved plan only within
+   explicit authorization. This skill does not perform promotion or rollback.
 
 ## Evidence and failure handling
 

@@ -50,7 +50,11 @@ loaded limits in the initial log before proceeding.
 - Independent runtime security review: seven findings fixed and rechecked.
 - First full live diagnostics exposed prompt and behavioral failures. Preserve
   those failed reports; fixes do not retroactively change their verdicts.
-- Version-four complete prompt and behavioral campaigns are in progress. Earlier
+- Version-five complete prompt and behavioral campaigns are in progress. Version
+  four assessed all 203 prompt dimension pairs, passing 200; its scope/routing
+  findings were corrected. Behavior passed 27/30 scenarios plus all three
+  calibration controls. The remaining omissions motivated a generic procedural
+  coverage table; scenario expectations remain hidden from the candidate. Earlier
   runs exposed procedural omissions and a Codex citation-enum schema rejection.
   The schema now uses one shared definition with literal-safe exact source
   fragments; a real three-vote command smoke passed before the full rerun. Prompt

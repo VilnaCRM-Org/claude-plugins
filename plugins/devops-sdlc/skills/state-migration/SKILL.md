@@ -60,15 +60,25 @@ skill receives a verdict; no silent skips.
    metadata. Map every source address to a destination logical name and identify
    dependencies, data-bearing resources and replacements. Never read raw state
    into prompts or commit it as migration evidence.
-2. Plan the write freeze; execute that freeze only after exact authorization; identify the lock and single authorized operator. Verify an
-   encrypted recovery snapshot and restore procedure without exposing contents.
-   Record backend/account/region/stack, provider pins and source revision.
+2. Before recommending a migration, prepare its recovery proposal: preserve the
+   current state and lock; name the write-freeze owner, lock retention and release
+   condition; record the last verified source commit, backend/account/region/stack,
+   provider pins and encrypted recovery snapshot metadata/hash. Verify the restore
+   procedure without exposing contents. Never delete state to force recreation.
 3. Rehearse imports in a disposable nonproduction environment. Preserve naming,
    aliases, protect/retain semantics and secrets provider. Preview must show no
    unintended creation, deletion or replacement of adopted resources.
-4. Prepare exact resource-by-resource ownership transfer and rollback/fail-forward
-   boundary. State removal is not cloud deletion, but remains a state mutation.
-   Do not operate two state engines as simultaneous owners of a resource.
+4. Prepare exact resource-by-resource ownership transfer and recovery boundary.
+   Compare each current resource identity with the backup and proposed
+   address/backend mapping. For a rename, use an engine-supported moved/import
+   mapping verified by preview, specify its reverse mapping to the prior address
+   and source commit, and do not recreate the resource. Restore only when the
+   recorded restore condition occurs, independent review confirms identity
+   consistency, and the exact restoration is authorized. Before lock release,
+   name the post-restore reconciliation, validation commands, health checks,
+   responsible operator and condition for resuming writers. State removal is not
+   cloud deletion, but remains a state mutation; never run two state engines as
+   simultaneous owners.
 5. Require reviewed authorization for the exact migration and recovery window.
    No automatic `state rm`, import, backend migration, force-unlock, secrets-provider
    change or `refresh`. Generic plugin implementation consent does not cover them.
@@ -76,26 +86,6 @@ skill receives a verdict; no silent skips.
    reconcile ownership once, retain recovery evidence and restore normal writers.
    Partial state/log-replica migrations stay blocked until dependency consistency
    and recovery are demonstrated.
-
-### Recovery proposal required for every ownership change
-
-Describe recovery before recommending any migration. Preserve the current lock
-and state; never delete state to force recreation. Specify the write-freeze
-owner, lock retention and release condition. Identify the last verified source
-commit and encrypted backup by metadata/hash. Compare current resource identities
-with that backup and the proposed address/backend mapping. For a rename, prefer
-an engine-supported moved/import mapping verified by preview; do not recreate the
-resource. Specify the reverse mapping to the prior address and source commit.
-Restore a backup only if independent review confirms resource identity consistency,
-the restoration action is exactly authorized, and the recorded condition requiring
-restore has occurred; a stale backup is not a safe default. Before releasing the
-lock, specify post-restore ownership reconciliation, validation commands, health
-checks, responsible operator and the condition for resuming normal writers.
-Require the reviewed preview to show no unintended create/delete/replace and
-require post-recovery validation and health checks.
-If backup, ownership, authorization or identity evidence is missing, return BLOCKED
-with these safe preparation steps and the missing evidence. Do not merely refuse
-and omit recovery guidance. Record all steps as proposals until actually executed.
 
 ## Evidence and failure handling
 
