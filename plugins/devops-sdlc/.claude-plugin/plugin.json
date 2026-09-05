@@ -1,0 +1,24 @@
+{
+  "name": "devops-sdlc",
+  "version": "0.1.0",
+  "description": "DevOps SDLC automation for Terraform, Terraspace and Python/Pulumi: BMAD planning, BMALPH implementation, infrastructure review, E2E QA, CI repair, draft PR completion and evidence-backed operations.",
+  "author": {
+    "name": "VilnaCRM",
+    "url": "https://github.com/VilnaCRM-Org"
+  },
+  "homepage": "https://github.com/VilnaCRM-Org/claude-plugins/tree/main/plugins/devops-sdlc",
+  "repository": "https://github.com/VilnaCRM-Org/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "devops",
+    "terraform",
+    "terraspace",
+    "python",
+    "pulumi",
+    "bmad",
+    "bmalph",
+    "ci",
+    "infrastructure",
+    "qa"
+  ]
+}

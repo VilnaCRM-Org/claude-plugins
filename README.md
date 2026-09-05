@@ -29,3 +29,7 @@ docs/superpowers/specs/           # design documents
 Plugins follow the [Claude Code plugin format](https://docs.claude.com/en/docs/claude-code/plugins):
 `.claude-plugin/plugin.json` plus `commands/`, `agents/`, `skills/`, `hooks/`, `scripts/`.
 Open an issue before submitting a new plugin or a major change.
+
+## DevOps automation
+
+[devops-sdlc](plugins/devops-sdlc/README.md) supports Terraform, Terraspace and Python/Pulumi through BMAD planning, BMALPH implementation, independent QA, CI repair and draft PR completion. Operational skills cover state, IAM, delivery, drift, incidents, recovery, cost and onboarding, with explicit evidence and authorization boundaries.
