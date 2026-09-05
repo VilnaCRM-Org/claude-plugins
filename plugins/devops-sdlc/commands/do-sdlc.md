@@ -72,6 +72,13 @@ Verify and record the exact `DEVOPS_PLUGIN_ROOT` path, manifest/helper readabili
 and the selected backend/version provenance required by the backend guide. Name
 missing facts as blockers, but complete the independent checklist entries; a
 generic setup preamble must not replace the requested operational preparation.
+Before readiness, record each backend selection or preflight fallback with its
+selected backend/version, declared BMALPH driver mapping (`claude` ->
+`bmalph run --driver claude-code`; `codex` -> `bmalph run --driver codex`),
+requested or observed model/source, preflight-only fallback reason, and preserved
+ledger/stage/attempt counter. The mapping is a proposal; invoke BMALPH only after
+installed help/config confirms it, and BLOCK dependent execution if that check is
+missing.
 
 This plugin automates development and operational preparation. A request to
 implement the plugin or prepare a PR does not authorize a cloud deployment.
