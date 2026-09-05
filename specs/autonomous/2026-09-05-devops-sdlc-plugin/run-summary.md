@@ -15,8 +15,8 @@ and readiness. The user then added dual CLI support: FR13, NFR9 and Story 2.3.
 The finalized planning artifacts were mirrored into the configured BMAD path.
 Actual `bmalph implement` imported the original seven stories into Ralph.
 
-A bounded `bmalph run --driver codex --no-dashboard` implemented Story 3.1 in
-an isolated worktree: automation_coverage.py, its regression tests and inventory
+A bounded `bmalph run --driver codex --no-dashboard` attempt for Story 3.1 in
+an isolated worktree produced automation_coverage.py, its regression tests and inventory
 documentation. The run stopped with a circuit breaker: child sandbox restrictions
 prevented writing shared Git metadata, and Bandit was unavailable in that child.
 The parent retained the original failed run and imported only those three files.
@@ -31,7 +31,7 @@ loaded limits in the initial log before proceeding.
 ## Verification state
 
 - Native Claude manifest validation passed; this is packaging evidence, not an
-  authenticated Claude execution campaign. Live evaluation selects Codex explicitly.
+  authenticated Claude execution campaign. Live evaluation uses authenticated Codex through preflight fallback.
 - Prompt lint and Python format/lint/types/security/complexity checks passed.
 - Current deterministic campaign: 131 tests passed, with 100% coverage of 1,057
   runtime statements and 444 branches, without exclusions. Judge harness tests
@@ -50,25 +50,44 @@ loaded limits in the initial log before proceeding.
 - Independent runtime security review: seven findings fixed and rechecked.
 - First full live diagnostics exposed prompt and behavioral failures. Preserve
   those failed reports; fixes do not retroactively change their verdicts.
-- Version-six complete prompt and behavioral campaigns are in progress. Version
-  five assessed all 203 prompt dimension pairs, passing 201; remaining evidence
-  invalidation and decision-guide definitions were clarified. Behavior passed
-  29/30 scenarios plus all three calibration controls; missing-credential
-  remediation is now an explicit procedure step. Earlier omissions motivated a generic procedural
-  coverage table; scenario expectations remain hidden from the candidate. Earlier
-  runs exposed procedural omissions and a Codex citation-enum schema rejection.
-  The schema now uses one shared definition with literal-safe exact source
-  fragments; a real three-vote command smoke passed before the full rerun. Prompt
-  assessment requires all 31 artifacts with three votes each, all ten critical
-  positive/negative calibration controls with three votes each, exact citations,
-  complete dimension coverage and calibrated backend/model identity. Behavioral
-  simulation requires all 30 scenarios plus three calibration seeds. Codex runner
-  and judge selections use explicit `gpt-5.5`; no Claude authentication is requested.
-- Draft PR 13 exists. Structural review comments have explicit dispositions;
-  a secret-detector false positive was removed by shortening a test method name
-  without changing assertions. Current-head CI and final reconciliation remain
-  pending. Recheck the latest head before
-  delivery; an older green head cannot close the gate.
+- Final version-twelve fresh prompt assessment PASSED all 31 artifacts and all 203
+  applicable dimension pairs, using three live votes per artifact. All ten
+  critical positive/negative calibration controls passed with three votes each.
+  Exact source citations, median thresholds and critical-vote floors were enforced.
+- Final version-twelve behavioral simulation PASSED all 30 catalog scenarios plus
+  all three calibration controls in one complete campaign. Three separately
+  predeclared migration diagnostics at version ten and three fallback diagnostics
+  at version eleven also passed; these do not replace catalog
+  completion. The generic runner requires concrete planning contents and a
+  procedural coverage table; hidden scenario criteria never reach the runner.
+  Version ten passed prompt assessment but exposed a missing Claude BMALPH driver
+  in one behavioral response. Backend handoffs now require the exact driver record.
+  Version eleven passed the complete behavioral catalog but one prompt dimension
+  rejected an undefined handoff-timing phrase. The final source defines when the
+  task summary must be written; version twelve freshly assesses both full gates.
+- Earlier failed campaigns remain diagnostic evidence. Fixes addressed evidence
+  freshness, credential remediation, security finding records, protected backup
+  readiness and concrete ordered recovery. The judge criteria were not weakened.
+  Codex citation-schema compatibility uses literal-safe exact source fragments.
+- Version-seven/eight incremental reuse proofs omitted a changing snapshot-directory
+  artifact label from their dependency comparison. Their reuse claims are
+  superseded; version nine reported BLOCKED without model calls after detecting
+  that mismatch. Version twelve is a complete fresh assessment with no reused votes.
+- Every final live runner and judge selected authenticated Codex CLI 0.153.4 after
+  Claude authentication preflight was unavailable. Both explicitly requested
+  `gpt-5.5`; the CLI did not expose independently observed model identity. These
+  final campaigns required no Claude login. Input snapshots stayed unchanged and the
+  committed plugin matches the reported input hashes.
+- Draft PR 13 contains the change. Review findings have explicit independent
+  dispositions; fixes and valid maintainability advisories are distinguished.
+  A secret-detector false positive was removed by shortening a test method name
+  without changing assertions. Completion additionally requires exact final-head
+  CI and fully paginated review reconciliation. Their delivery records belong
+  outside the source tree; an older green head cannot close the final gate.
+- Machine-readable local results are in
+  [the verification record](verification/local-campaign.json). The delivery archive
+  retains complete final reports, failed diagnostics, reuse limitations, operator
+  replay scripts, source bindings and independent review evidence.
 
 The testing documents map every FR1--FR13 and NFR1--NFR9 to its required evidence.
 The catalog's authoritative `requirement_map` covers ten FRs and all nine NFRs;
