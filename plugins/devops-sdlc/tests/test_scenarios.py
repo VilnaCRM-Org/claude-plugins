@@ -28,6 +28,30 @@ def envelope(result: object, error: bool = False) -> str:
 
 
 class ScenarioTests(unittest.TestCase):
+    def test_importlib_loader_finds_shared_redaction_from_foreign_directory(self):
+        code = "\n".join(
+            (
+                "import importlib.util, sys",
+                f"path = {str((HERE / 'behavior_judge.py').resolve())!r}",
+                "spec = importlib.util.spec_from_file_location("
+                "'isolated_behavior_judge', path)",
+                "module = importlib.util.module_from_spec(spec)",
+                "sys.modules[spec.name] = module",
+                "spec.loader.exec_module(module)",
+                "assert module.redact_text('api_token=fixture') "
+                "== 'api_token=[REDACTED]'",
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     @classmethod
     def setUpClass(cls):
         cls.catalog = judge.load_catalog(HERE / "scenarios.json")

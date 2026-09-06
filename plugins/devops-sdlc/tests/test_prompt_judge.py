@@ -6,6 +6,7 @@ import contextlib
 import copy
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import threading
@@ -49,6 +50,30 @@ def fake_agent(prompt, schema, cwd, **kwargs):
 
 
 class PromptJudgeTests(unittest.TestCase):
+    def test_importlib_loader_finds_shared_redaction_from_foreign_directory(self):
+        code = "\n".join(
+            (
+                "import importlib.util, sys",
+                f"path = {str(Path(subject.__file__).resolve())!r}",
+                "spec = importlib.util.spec_from_file_location("
+                "'isolated_prompt_judge', path)",
+                "module = importlib.util.module_from_spec(spec)",
+                "sys.modules[spec.name] = module",
+                "spec.loader.exec_module(module)",
+                "assert module.redact_evidence('api_token=fixture') "
+                "== 'api_token=[REDACTED]'",
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
