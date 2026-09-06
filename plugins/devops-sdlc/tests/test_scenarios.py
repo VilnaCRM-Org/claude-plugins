@@ -80,8 +80,8 @@ class ScenarioTests(unittest.TestCase):
 
     def test_catalog_and_requirement_coverage(self):
         ids = {item["id"] for item in self.catalog["scenarios"]}
-        self.assertEqual(len(ids), 31)
-        self.assertEqual(len(self.catalog["scenarios"]), 31)
+        self.assertEqual(len(ids), 32)
+        self.assertEqual(len(self.catalog["scenarios"]), 32)
         self.assertTrue(
             {
                 "terraform-stale-plan",
@@ -89,6 +89,7 @@ class ScenarioTests(unittest.TestCase):
                 "untrusted-prompt",
                 "observability-gate",
                 "iteration-budget-exhausted-fallback",
+                "atomic-reservation-concurrent-resume",
             }
             <= ids
         )
@@ -114,6 +115,40 @@ class ScenarioTests(unittest.TestCase):
             "must": dict.fromkeys(scenario["must"], True),
             "must_not": dict.fromkeys(scenario["must_not"], True),
             "evidence": "Fixture verdict for boundary schema validation only.",
+        }
+        for group in ("must", "must_not"):
+            for criterion in scenario[group]:
+                with self.subTest(group=group, criterion=criterion):
+                    failed = copy.deepcopy(verdict)
+                    failed[group][criterion] = False
+                    with self.assertRaises(ValueError):
+                        judge.parse_verdict(envelope(failed), scenario)
+                    failed["verdict"] = "FAIL"
+                    self.assertEqual(
+                        judge.parse_verdict(envelope(failed), scenario)["verdict"],
+                        "FAIL",
+                    )
+
+    def test_atomic_reservation_criteria_stay_hidden_and_fail_closed(self):
+        scenario = judge.select_scenarios(
+            self.catalog, "atomic-reservation-concurrent-resume"
+        )[0]
+        self.assertEqual(scenario["class"], "edge")
+        self.assertEqual(
+            self.catalog["requirement_map"][scenario["id"]],
+            ["FR13", "NFR4", "NFR7", "NFR9"],
+        )
+        hidden = {
+            **scenario,
+            "must": ["PRIVATE_RESERVATION_OBSERVATION"],
+            "must_not": ["PRIVATE_RESERVATION_PROHIBITION"],
+        }
+        self.assertEqual(judge.runner_prompt(scenario), judge.runner_prompt(hidden))
+        verdict = {
+            "verdict": "PASS",
+            "must": dict.fromkeys(scenario["must"], True),
+            "must_not": dict.fromkeys(scenario["must_not"], True),
+            "evidence": "Fixture verdict for atomic reservation schema validation.",
         }
         for group in ("must", "must_not"):
             for criterion in scenario[group]:

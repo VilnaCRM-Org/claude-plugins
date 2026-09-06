@@ -53,7 +53,7 @@ Use the exact invoked command identifier as the stage key, for example
 `do-sdlc-implement`. For a skill invoked directly, use its frontmatter `name`,
 for example `terraform-terraspace`. A stage has five procedure attempts.
 The task ledger is the existing task's `run-summary.md`; reuse its exact saved
-repository-relative path. For new work without a ledger, create it once at
+repository-relative path. For new work without a ledger, select its path once at
 `specs/YYYY-MM-DD-<slug>/run-summary.md`: use the UTC calendar date from the host
 clock when the caller first creates this task ledger, and record that date in it.
 Keep the recorded date and path across resumed sessions. For `<slug>`, lowercase
@@ -63,13 +63,24 @@ For example, "Add Cache" with its ledger first created on 2026-09-06 UTC uses
 `specs/2026-09-06-add-cache/run-summary.md`. If that path already belongs to a
 different task, report BLOCKED; never overwrite it or reset its counter.
 Persist the exact ledger path and stage key before the first procedure attempt.
+Initialize the verified new sidecar under lock before creating the first human
+summary; follow the atomic transaction in the agent guide.
 References to `specs/<task-id>/run-summary.md` in selected skills mean this same
 saved ledger; they do not create a second task directory.
-An attempt starts when the first applicable procedure step begins and ends on its
-PASSED, FAILED or BLOCKED outcome. Before starting, read the saved count: if it is
-already five, stop with FAILED; otherwise increment once, save and report `n/5`.
-Observing an already-started attempt does not increment again. Preserve counts,
-applicability and evidence across sessions and backend changes.
+An attempt is consumed only by a successful atomic reservation; its first
+procedure step follows the durable reservation and ends on PASSED, FAILED or
+BLOCKED. The caller owns the one record keyed by task, stage, assigned agent,
+target and environment. A delegated agent receives that exact key, owner and
+reservation token; it never increments a second time. Use the
+[atomic attempt reservation](AI-AGENT-GUIDE.md#atomic-attempt-reservation)
+transaction in the agent guide. For a NEW reservation, a saved count at five or more means
+FAILED before incomplete-history checks; a known caller stop means BLOCKED;
+an evidenced open/tripped Ralph breaker means FAILED; missing required state or
+run evidence means BLOCKED. Escalation is an action, never a persisted status.
+The matching owner may start or observe the already-reserved fifth attempt,
+subject to current stop/state checks, without reserving again. An active or
+uncertain reservation blocks every competing session. Preserve counts,
+applicability, evidence and active ownership across sessions and backend changes.
 
 BMAD is the installed planning workflow that produces requirements, architecture,
 stories and a readiness decision. BMALPH is the command-line integration that

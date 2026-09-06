@@ -10,7 +10,10 @@ argument-hint: "[repository-path]"
 Inputs are the command argument, repository guidance and
 `specs/<task>/run-summary.md` when resuming. That summary records task/repository
 identity, target/environment selections, source/profile hashes, artifact paths,
-check outcomes and persisted counters; a fresh task starts an empty summary.
+check outcomes and persisted counters. For a verified fresh task, the caller
+initializes its new sidecar under lock before creating the first human summary,
+following the agent guide's atomic transaction. An existing summary with no
+sidecar requires verified locked migration; never reset it to zero.
 Resolve the installed/source plugin directory once; set `DEVOPS_PLUGIN_ROOT`
 to its absolute path in the command environment and record it. Native Claude may initialize it from
 `CLAUDE_PLUGIN_ROOT`; Codex must receive the explicit inspected plugin path.
@@ -102,15 +105,25 @@ evidence and source identity. Only PASSED satisfies a required gate.
 
 ## Iteration guard
 
-MAX_ITERATIONS=5 per stage, persisted in `specs/<task>/run-summary.md`.
-Before starting an attempt, read the counter: if already 5, stop and escalate;
-otherwise increment it exactly once, persist it, and print `stage: <name> n/5`.
-Restate that same counter at each turn and handoff. A retry starts a new attempt;
-resuming observation of the same attempt does not consume another one. Preserve
-counters across QA loop-backs, sessions, backend changes and operator handoffs.
-Never automatically reset counters or a tripped Ralph circuit breaker. A tripped
-breaker or missing external prerequisite immediately stops dependent work;
-continue independent work only, without retrying that prerequisite in a loop.
+MAX_ITERATIONS=5 per stage. Reuse the saved `specs/<task>/run-summary.md` as
+a human report; its adjacent `attempts.json` is the only counter authority.
+Use the [atomic caller transaction](../skills/AI-AGENT-GUIDE.md#atomic-attempt-reservation),
+keyed by task, stage, agent, target and environment. Verify actual host locking;
+missing/unverified capability or a conflicting active reservation means BLOCKED.
+The caller atomically validates state and persists count+1 with an active owner
+and token before execution. A delegate receives the same reservation and never
+increments again. For a NEW reservation, count >=5 means FAILED before missing
+history; caller stop means BLOCKED; an evidenced open/tripped Ralph breaker means
+FAILED; missing required state/log means BLOCKED. The matching owner may start or
+observe its already-reserved fifth attempt without taking another reservation.
+Print `stage: <name> n/5` from the saved record and restate it at every handoff.
+Only verified terminal completion closes ownership; crashes or uncertain effects
+retain the marker and block replay. Existing history with no sidecar requires
+verified locked migration, never initialization to zero. Preserve the exact key,
+count, owner and token across QA loop-backs, sessions and backend changes.
+Never automatically reset counters or a tripped Ralph circuit breaker. Escalate
+with evidence while retaining PASSED, FAILED, SKIPPED or BLOCKED as the status.
+Continue independent authorized work only; do not retry a missing prerequisite.
 
 ## Failure escalation
 

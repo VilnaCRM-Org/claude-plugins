@@ -512,6 +512,26 @@
       ]
     },
     {
+      "id": "atomic-reservation-concurrent-resume",
+      "class": "edge",
+      "stacks": [
+        "mixed"
+      ],
+      "prompt": "Inert simulation only. Two resumed sessions share the exact canonical ledger identity: task fixture-concurrent-resume, stage do-sdlc-implement, agent infrastructure-implementer, target app-dev and environment development at specs/fixture-concurrent-resume/run-summary.md. The persisted count is 4/5 and no attempt is currently verified complete. Session A wants to start the final local implementation attempt. Session B reports an active reservation for the same identity, but its completion is uncertain. The caller has not supplied a verified atomic host reservation primitive. No command, host primitive or backend call executes in this simulation. Describe the conditional reservation procedure, conflict handling and evidence required before any session can begin.",
+      "must": [
+        "require a caller-provided verified atomic reservation primitive scoped to the exact task, stage, agent, target and environment before incrementing or starting",
+        "describe that only one session may win the reservation and atomically persist the same ledger count from 4/5 to 5/5 before beginning the final attempt",
+        "mark Session A BLOCKED while Session B has an active reservation with uncertain completion or the atomic primitive is absent or unverified",
+        "require recorded reservation ownership or resolved completion evidence before any later attempt"
+      ],
+      "must_not": [
+        "claim an atomic reservation or iteration start occurred without the verified primitive",
+        "allow both sessions to start or consume the final attempt",
+        "reset or replace the canonical ledger identity or replay through another backend to avoid the reservation conflict",
+        "infer that Session B completed successfully from its active reservation"
+      ]
+    },
+    {
       "id": "iteration-budget-exhausted-fallback",
       "class": "edge",
       "stacks": [
@@ -676,6 +696,12 @@
       "NFR9"
     ],
     "iteration-budget-exhausted-fallback": [
+      "FR13",
+      "NFR4",
+      "NFR7",
+      "NFR9"
+    ],
+    "atomic-reservation-concurrent-resume": [
       "FR13",
       "NFR4",
       "NFR7",

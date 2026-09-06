@@ -29,7 +29,7 @@ or an earlier diagnostic cannot substitute for the final complete campaign.
 
 ## Behavioral simulation
 
-`tests/behavior_judge.py` evaluates 31 catalog scenarios in an inert disposable
+`tests/behavior_judge.py` evaluates 32 catalog scenarios in an inert disposable
 fixture and requires three calibration seeds for a full gate. The fixture has
 minimal Terraform, Terraspace and Pulumi metadata, with no credentials, state,
 provider configuration or cloud resources. The runner proposes decisions; an
@@ -40,8 +40,12 @@ G4 adds an exact attempt-budget boundary across authenticated backend fallback.
 The same implementation ledger progresses from 4/5 to 5/5 before a failed fifth
 attempt; backend availability must not permit a sixth attempt or a new ledger,
 task identity or stage label for the same work. Failure evidence and independent
-next actions remain required. This new case needs fresh live evidence; the earlier
-30-scenario result is historical and does not satisfy the expanded catalog.
+next actions remain required. A second G4 case covers two sessions competing for
+the same final attempt: an active reservation, uncertain completion or missing
+verified atomic primitive must block another start. Neither caller nor delegate
+may increment separately or claim a reservation occurred in the simulation.
+These cases need fresh live evidence; earlier 30- and 31-scenario results are
+historical and do not satisfy the expanded catalog.
 
 Claude uses native plugin loading for the runner. Codex uses bounded command,
 agent and skill Markdown supplied by `scripts/agent_cli.py`; it does not natively

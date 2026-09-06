@@ -126,7 +126,11 @@ def citation_choices(artifact_raw: str) -> list[str]:
         for literal in re.split(r'["\\\x00-\x1f]', line):
             for start in range(0, len(literal), 120):
                 chunk = literal[start : start + 120]
-                if chunk.strip() and chunk not in choices:
+                if (
+                    chunk.strip()
+                    and chunk not in choices
+                    and _redact_text(chunk) == chunk
+                ):
                     choices.append(chunk)
                     if len(choices) == MAX_CITATIONS:
                         return choices
@@ -203,9 +207,11 @@ def validate_entry(entry: dict, artifact_raw: str) -> None:
         or len(citation) > 120
         or any(ord(char) < 32 for char in citation)
         or citation not in artifact_raw
+        or _redact_text(citation) != citation
     ):
         raise AssessmentError(
-            "Verdict citation must be a bounded exact artifact substring."
+            "Verdict citation must be a bounded, redaction-stable "
+            "exact artifact substring."
         )
 
 
@@ -236,16 +242,19 @@ def redact_evidence(value: str) -> str:
 
 
 def stored_dimensions(verdict: dict) -> dict:
-    return {
-        identifier: {
+    stored = {}
+    for identifier, entry in verdict["dimensions"].items():
+        evidence = redact_evidence(entry["evidence"])
+        citation = redact_evidence(entry["citation"])
+        stored[identifier] = {
             "score": entry["score"],
-            "evidence": redact_evidence(entry["evidence"]),
-            "evidence_sha256": digest(entry["evidence"].encode()),
-            "citation": redact_evidence(entry["citation"]),
-            "citation_sha256": digest(entry["citation"].encode()),
+            "evidence": evidence,
+            "evidence_sha256": digest(evidence.encode()),
+            "citation": citation,
+            "citation_sha256": digest(citation.encode()),
+            "digest_scope": "redacted UTF-8 text",
         }
-        for identifier, entry in verdict["dimensions"].items()
-    }
+    return stored
 
 
 def vote_metadata(result: dict, number: int, mode: str) -> dict:
@@ -348,7 +357,8 @@ def one_vote(
                     "status": "INVALID",
                     "prompt_text_sha256": digest(prompt.encode()),
                     "reason": str(exc),
-                    "output_sha256": json_digest(result.get("output")),
+                    "output_sha256": None,
+                    "output_digest_scope": "omitted: untrusted model output",
                 }
             )
             if repair == judge.MAX_REPROMPTS:

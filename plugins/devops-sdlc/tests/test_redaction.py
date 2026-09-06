@@ -1,0 +1,160 @@
+"""JSON field preservation and secret removal across real evaluator surfaces."""
+
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+
+import behavior_judge
+import prompt_judge
+import redaction
+
+
+class RedactionBoundaryTests(unittest.TestCase):
+    def surfaces(self, value: str) -> tuple[str, ...]:
+        scenario = {
+            "id": "redaction-boundary",
+            "prompt": "Describe a safe validation proposal.",
+            "must": ["validate"],
+            "must_not": ["mutate"],
+        }
+        stored = prompt_judge.stored_dimensions(
+            {"dimensions": {"J1": {"score": 5, "evidence": value, "citation": value}}}
+        )
+        return (
+            redaction.redact_text(value),
+            behavior_judge.audit_text(value),
+            behavior_judge.judge_prompt(scenario, value),
+            json.dumps(stored),
+        )
+
+    def test_json_neighbors_survive_without_secret_fragments(self):
+        cases = (
+            '{"token":"ORCHID","must":"validate"}',
+            '{"token":"ORCHID\\"COBALT","must":"validate"}',
+            '{"outer":{"token":"ORCHID","must":"validate"}}',
+            '{"token":"ORCHID,COBALT;QUARTZ","must":"validate"}',
+            '{"token":123456,"must":"validate"}',
+            '{"token":"ORCHID","password":"COBALT","must":"validate"}',
+            '{"token":"ORCHID", "must": "validate"}',
+        )
+        for candidate in cases:
+            with self.subTest(candidate=candidate):
+                for result in self.surfaces(candidate):
+                    self.assertIn("validate", result)
+                    for secret in ("ORCHID", "COBALT", "QUARTZ", "123456"):
+                        self.assertNotIn(secret, result)
+        self.assertEqual(
+            redaction.redact_text(cases[0]),
+            '{"token":"[REDACTED]","must":"validate"}',
+        )
+
+    def test_structured_secret_values_and_embedded_assignments_preserve_neighbors(self):
+        cases = (
+            '{"token":{"first":"ORCHID","second":"COBALT"},"must":"validate"}',
+            '{"token":["ORCHID","COBALT"],"must":"validate"}',
+            '{"token":{"deep":[{"key":"ORCHID"},"COBALT"]},"must":"validate"}',
+            '{"token":{"first":"ORCHID\\"COBALT"},"must":"validate"}',
+            '{"message":"token=ORCHID","must":"validate"}',
+            '{"message":"token=\\"ORCHID COBALT\\"","must":"validate"}',
+            '{"message":"token=ORCHID tail \\ud800","must":"validate"}',
+        )
+        for candidate in cases:
+            with self.subTest(candidate=candidate):
+                redacted = redaction.redact_text(candidate)
+                parsed = json.loads(redacted)
+                self.assertEqual(parsed["must"], "validate")
+                self.assertEqual(redaction.redact_text(redacted), redacted)
+                for result in self.surfaces(candidate):
+                    self.assertIn("validate", result)
+                    for fragment in ("ORCHID", "COBALT"):
+                        self.assertNotIn(fragment, result)
+
+    def test_decoded_and_punctuated_json_secret_keys_preserve_public_fields(self):
+        for key in (r"to\u006ben", "db.password", r"api\u005fkey", r"db\"token"):
+            candidate = '{"' + key + '":"ORCHID","must":"validate"}'
+            with self.subTest(key=key):
+                for result in self.surfaces(candidate):
+                    self.assertNotIn("ORCHID", result)
+                    self.assertIn("validate", result)
+                redacted = redaction.redact_text(candidate)
+                self.assertEqual(json.loads(redacted)["must"], "validate")
+                self.assertEqual(redaction.redact_text(redacted), redacted)
+        control = r'{"pub\u006cic.key":"ordinary","must":"validate"}'
+        self.assertEqual(redaction.redact_text(control), control)
+
+    def test_malformed_secret_container_consumes_tail(self):
+        for candidate in (
+            '{"token":{"first":"ORCHID","second":"COBALT"',
+            '{"token":["ORCHID",{"key":"COBALT"}]',
+            '{"token":["ORCHID"},"COBALT"',
+        ):
+            with self.subTest(candidate=candidate):
+                for result in self.surfaces(candidate):
+                    for fragment in ("ORCHID", "COBALT"):
+                        self.assertNotIn(fragment, result)
+
+    def test_shell_joined_quotes_punctuation_and_tails_remain_one_secret(self):
+        cases = (
+            "token='ORCHID'\"COBALT QUARTZ\"TAIL",
+            '"token"="ORCHID",COBALT;TAIL',
+            "token=ORCHID\\ COBALT",
+            "token=ORCHID\\\nCOBALT",
+            "token='ORCHID'\"COBALT QUARTZ",
+            'token="ORCHID\\',
+            '{"token":"ORCHID"TAIL,"must":"validate"}',
+        )
+        for candidate in cases:
+            with self.subTest(candidate=candidate):
+                for result in self.surfaces(candidate):
+                    for secret in ("ORCHID", "COBALT", "QUARTZ", "TAIL"):
+                        self.assertNotIn(secret, result)
+
+    def test_unclosed_json_quote_consumes_tail_not_fake_fields(self):
+        candidate = '{"token":"ORCHID\\"COBALT,\\"must\\":\\"QUARTZ'
+        for result in self.surfaces(candidate):
+            for fragment in ("ORCHID", "COBALT", "QUARTZ"):
+                self.assertNotIn(fragment, result)
+
+    def test_nonsecret_json_and_shell_controls_are_unchanged(self):
+        for candidate in (
+            '{"must":"validate","safe":[1,2]}',
+            'message="ordinary words" status=READY',
+            '{"outer":{"must":"validate"},"safe":true}',
+            '"token" is a word',
+        ):
+            self.assertEqual(redaction.redact_text(candidate), candidate)
+
+    def test_long_json_and_shell_inputs_finish_in_bounded_process(self):
+        code = """
+from redaction import redact_text
+escaped_quote = chr(92) + chr(34)
+for n in (1000, 4000, 16000):
+    for text in ('a' * n, 'secret' * n, 'secret' * n + '=   '):
+        assert redact_text(text) == text
+    for key in ('x' * n + escaped_quote * n, ('x,' + escaped_quote) * n):
+        malformed = '{"' + key
+        assert redact_text(malformed) == malformed
+    text = '{' + ','.join('"token":"ORCHID","safe":"validate"' for _ in range(n)) + '}'
+    result = redact_text(text)
+    assert result.count('validate') == n and 'ORCHID' not in result
+    text = 'token="' + ('ORCHID' + escaped_quote) * n
+    assert 'ORCHID' not in redact_text(text)
+print('bounded-redaction-PASS')
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=Path(__file__).parent,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        self.assertEqual(result.stdout.strip(), "bounded-redaction-PASS")
+
+
+if __name__ == "__main__":
+    unittest.main()

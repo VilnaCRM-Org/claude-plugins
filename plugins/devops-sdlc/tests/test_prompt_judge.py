@@ -206,7 +206,13 @@ class PromptJudgeTests(unittest.TestCase):
         entry = next(iter(vote.values()))
         self.assertEqual(entry["evidence"], "API_KEY=[REDACTED] is not retained.")
         self.assertNotIn("secret-sentinel", json.dumps(report))
-        self.assertEqual(len(entry["evidence_sha256"]), 64)
+        self.assertEqual(
+            entry["evidence_sha256"], subject.digest(entry["evidence"].encode())
+        )
+        self.assertNotIn(
+            subject.digest(b"API_KEY=secret-sentinel is not retained."),
+            json.dumps(report),
+        )
         self.assertEqual(
             subject.redact_evidence("AWS_SECRET_ACCESS_KEY: not-retained"),
             "AWS_SECRET_ACCESS_KEY=[REDACTED]",
@@ -295,7 +301,7 @@ class PromptJudgeTests(unittest.TestCase):
                 self.assertEqual(stored["J1"]["score"], 5)
                 self.assertEqual(
                     stored["J1"]["evidence_sha256"],
-                    subject.digest(candidate.encode()),
+                    subject.digest(stored["J1"]["evidence"].encode()),
                 )
 
     def test_evidence_redaction_retains_nonsecret_text_and_empty_assignment(self):
@@ -320,6 +326,67 @@ class PromptJudgeTests(unittest.TestCase):
         report = self.run_fixture(invalid)
         self.assertEqual(report["status"], "BLOCKED")
         self.assertNotIn("SECRET_SENTINEL", json.dumps(report))
+
+    def test_exported_dimension_digests_do_not_fingerprint_raw_secrets(self):
+        exported = []
+        for secret in ("guessable-one", "guessable-two"):
+            raw = f"api_token={secret}"
+            verdict = {
+                "dimensions": {"J1": {"score": 5, "evidence": raw, "citation": raw}}
+            }
+            entry = subject.stored_dimensions(verdict)["J1"]
+            exported.append(entry)
+            self.assertEqual(entry["digest_scope"], "redacted UTF-8 text")
+            for field in ("evidence", "citation"):
+                self.assertEqual(
+                    entry[field + "_sha256"], subject.digest(entry[field].encode())
+                )
+                self.assertNotEqual(
+                    entry[field + "_sha256"], subject.digest(raw.encode())
+                )
+            self.assertNotIn(secret, json.dumps(entry))
+            self.assertNotIn(subject.digest(raw.encode()), json.dumps(entry))
+        self.assertEqual(exported[0], exported[1])
+
+    def test_citation_choices_and_validation_require_redaction_stable_source(self):
+        unsafe = "api_token=guessable-secret"
+        source = unsafe + "\nUse bounded validation."
+        self.assertNotIn(unsafe, subject.citation_choices(source))
+        self.assertIn("Use bounded validation.", subject.citation_choices(source))
+        entry = {"score": 5, "evidence": "Observed source.", "citation": unsafe}
+        with self.assertRaisesRegex(subject.AssessmentError, "redaction-stable"):
+            subject.validate_entry(entry, source)
+        entry["citation"] = "Use bounded validation."
+        subject.validate_entry(entry, source)
+        self.assertEqual(
+            subject.stored_dimensions({"dimensions": {"J1": entry}})["J1"]["citation"],
+            entry["citation"],
+        )
+
+    def test_invalid_model_output_exports_no_raw_digest(self):
+        raw_output = {"api_token": "guessable-secret"}
+
+        def invalid(*args, **kwargs):
+            result = fake_agent(*args, **kwargs)
+            result["output"] = raw_output
+            return result
+
+        report = self.run_fixture(invalid)
+        rendered = json.dumps(report)
+        self.assertNotIn(subject.json_digest(raw_output), rendered)
+        self.assertNotIn("guessable-secret", rendered)
+        attempts = [
+            attempt
+            for row in report["artifacts"] + report["calibration"]
+            for vote in row["votes"]
+            for attempt in vote.get("invalid_attempts", [])
+        ]
+        self.assertGreater(len(attempts), 0)
+        for attempt in attempts:
+            self.assertIsNone(attempt["output_sha256"])
+            self.assertEqual(
+                attempt["output_digest_scope"], "omitted: untrusted model output"
+            )
 
     def test_all_floors_and_any_critical_block_are_enforced(self):
         dims = [subject.rubrics.DIMENSIONS_BY_ID[key] for key in ("J2", "J11")]

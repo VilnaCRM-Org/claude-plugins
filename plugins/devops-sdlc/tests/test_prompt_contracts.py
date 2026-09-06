@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import pathlib
 import re
+import tempfile
 import unittest
 
 PLUGIN = pathlib.Path(__file__).resolve().parents[1]
@@ -20,12 +23,22 @@ CONTRACTS = {
             "Never automatically reset counters or a tripped Ralph circuit breaker."
         ),
         "required gate": "Only PASSED satisfies a required gate.",
+        "atomic reservation": (
+            "The caller atomically validates state and persists count+1 "
+            "with an active owner and token before execution."
+        ),
+        "delegate ownership": (
+            "A delegate receives the same reservation and never increments again."
+        ),
     },
     "skill": {
         "profile validation": "validate-profile --repo .",
         "status vocabulary": "Return PASSED, FAILED, SKIPPED or BLOCKED",
         "attempt limit": "persisted count is already 5, stop with FAILED",
         "terminal breaker": "never reset or clear it to retry.",
+        "atomic reservation": (
+            "persists count+1 with active owner/token under one lock before execution."
+        ),
         "authorization scope": (
             "Reuse authorization only for its exact action, target, "
             "environment and resource scope;"
@@ -37,6 +50,15 @@ CONTRACTS = {
             "resuming without its prior count, report BLOCKED instead of assuming zero."
         ),
         "terminal breaker": "Re-entry preserves both count and breaker state.",
+        "atomic reservation": (
+            "The caller must verify a real atomic host reservation primitive."
+        ),
+        "fifth attempt ownership": (
+            "including attempt 5/5, subject to current stop/state checks."
+        ),
+        "exhausted budget": "a known count at five or more means FAILED",
+        "caller stop": "a known caller stop means BLOCKED",
+        "no double increment": "the agent never increments again.",
         "required gate": "Neither BLOCKED nor SKIPPED satisfies a required check.",
         "quality floor": (
             "Never suppress findings, add baseline exclusions, lower thresholds,"
@@ -101,6 +123,345 @@ class PromptContractTests(unittest.TestCase):
                 "skill",
             ),
         )
+
+
+class AtomicLedgerReferenceTests(unittest.TestCase):
+    """Execute the documented transaction against isolated ledger fixtures."""
+
+    def setUp(self):
+        text = (PLUGIN / "skills/AI-AGENT-GUIDE.md").read_text()
+        code = re.search(
+            r"<!-- atomic-ledger-reference:start -->\n```python\n(.*?)```",
+            text,
+            re.S,
+        )
+        self.assertIsNotNone(code)
+        self.api = {}
+        exec(compile(code.group(1), "documented-ledger-reference", "exec"), self.api)
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = pathlib.Path(self.temp.name)
+        self.directory = os.open(self.path, os.O_RDONLY | os.O_DIRECTORY)
+        self.addCleanup(os.close, self.directory)
+        self.identity = [
+            "fixture",
+            "do-sdlc-qa",
+            "qa-infrastructure-tester",
+            "app",
+            "dev",
+        ]
+        self.request = {"owner": "caller-session"}
+        self.observation = {
+            "verified": True,
+            "evidence": "inert host observation",
+            "caller_stop": False,
+            "caller_stop_evidence": None,
+            "breaker": "clear",
+            "ralph": "none",
+            "ralph_evidence": None,
+        }
+
+    def observe(self, identity, _entry):
+        return {"identity": identity, **self.observation}
+
+    def call(self, action, **fields):
+        callback = fields.pop("callback", self.observe)
+        return self.api["transaction"](
+            self.directory,
+            self.identity,
+            {**self.request, "action": action, **fields},
+            callback,
+        )
+
+    def initialize(self):
+        result = self.call("initialize", verified_new_task_reference="inert proof")
+        self.assertEqual(result["decision"], "INITIALIZED")
+
+    def read_entry(self):
+        data = json.loads((self.path / "attempts.json").read_text())
+        return data, next(iter(data["entries"].values()))
+
+    def test_documented_fifth_attempt_is_owned_and_no_sixth_can_start(self):
+        self.initialize()
+        for count in range(1, 6):
+            reserved = self.call("reserve")
+            self.assertEqual(reserved["decision"], "RESERVED")
+            self.assertEqual(reserved["attempt"], count)
+            token = reserved["token"]
+            self.assertEqual(self.call("start", token=token)["decision"], "START_ONCE")
+            self.assertEqual(self.call("start", token=token)["decision"], "BLOCKED")
+            self.assertEqual(
+                self.call("observe", token=token)["decision"], "OBSERVE_ONLY"
+            )
+            self.assertEqual(self.call("finish", token=token)["decision"], "BLOCKED")
+            result = self.call(
+                "finish",
+                token=token,
+                outcome="FAILED",
+                evidence="fixture outcome",
+                no_pending_verified=True,
+            )
+            self.assertEqual(result["decision"], "RECORDED")
+        self.assertEqual(self.call("reserve")["decision"], "FAILED")
+        _, entry = self.read_entry()
+        self.assertEqual(entry["count"], 5)
+        self.assertEqual(len(entry["history"]), 5)
+        self.assertIsNone(entry["active"])
+
+    def test_live_lock_conflict_and_persisted_owner_prevent_double_reservation(self):
+        self.initialize()
+        lock = os.open(self.path / "attempts.lock", os.O_RDWR)
+        try:
+            self.api["fcntl"].flock(lock, self.api["fcntl"].LOCK_EX)
+            self.assertEqual(self.call("reserve")["decision"], "BLOCKED")
+        finally:
+            os.close(lock)
+        reserved = self.call("reserve")
+        self.assertEqual(
+            self.call("reserve", owner="competing-session")["decision"], "BLOCKED"
+        )
+        self.assertEqual(
+            self.call("start", token=reserved["token"], owner="competing-session")[
+                "decision"
+            ],
+            "BLOCKED",
+        )
+        _, entry = self.read_entry()
+        self.assertEqual(entry["count"], 1)
+        self.assertEqual(entry["active"]["token"], reserved["token"])
+
+    def test_missing_sidecar_never_resets_historical_markdown_count(self):
+        (self.path / "run-summary.md").write_text(
+            "Recorded count 4/5; prior run uncertain"
+        )
+        self.assertEqual(self.call("reserve")["decision"], "BLOCKED")
+        self.assertEqual(
+            self.call("initialize", verified_new_task_reference="incorrect new claim")[
+                "decision"
+            ],
+            "BLOCKED",
+        )
+        self.assertFalse((self.path / "attempts.json").exists())
+
+    def test_status_precedence_preserves_stop_and_incomplete_history(self):
+        self.initialize()
+        data, entry = self.read_entry()
+        baseline = dict(entry)
+        for fields, expected in (
+            ({"count": 5, "caller_stop": True, "breaker": None}, "FAILED"),
+            ({"caller_stop": True, "breaker": None}, "BLOCKED"),
+            ({"breaker": "tripped", "ralph_evidence": "actual log"}, "FAILED"),
+            ({"breaker": "tripped", "ralph_evidence": None}, "BLOCKED"),
+            ({"count": None}, "BLOCKED"),
+            ({"ralph": "pending"}, "BLOCKED"),
+        ):
+            with self.subTest(fields=fields):
+                entry.clear()
+                entry.update({**baseline, **fields})
+                self.api["_save"](self.directory, data)
+                self.assertEqual(self.call("reserve")["decision"], expected)
+        for path in (PLUGIN / "agents").glob("*.md"):
+            self.assertNotIn("ESCALATED", path.read_text())
+
+    def test_current_observation_under_lock_blocks_start_and_retains_stop(self):
+        self.initialize()
+        reserved = self.call("reserve")
+        self.observation.update(
+            caller_stop=True, caller_stop_evidence="new caller halt"
+        )
+        calls = []
+
+        def inspect(identity, entry):
+            lock = os.open(self.path / "attempts.lock", os.O_RDWR)
+            try:
+                with self.assertRaises(BlockingIOError):
+                    self.api["fcntl"].flock(
+                        lock, self.api["fcntl"].LOCK_EX | self.api["fcntl"].LOCK_NB
+                    )
+            finally:
+                os.close(lock)
+            calls.append(identity)
+            return self.observe(identity, entry)
+
+        self.assertEqual(
+            self.call("start", token=reserved["token"], callback=inspect)["decision"],
+            "BLOCKED",
+        )
+        self.assertEqual(calls, [self.identity])
+        _, entry = self.read_entry()
+        self.assertTrue(entry["caller_stop"])
+        self.assertEqual(entry["caller_stop_evidence"], "new caller halt")
+        self.assertEqual(entry["active"]["phase"], "reserved")
+        self.observation.update(caller_stop=False, caller_stop_evidence=None)
+        self.assertEqual(
+            self.call("start", token=reserved["token"])["decision"], "BLOCKED"
+        )
+        self.assertTrue(self.read_entry()[1]["caller_stop"])
+
+    def test_absent_unverified_or_throwing_observer_cannot_reserve(self):
+        self.initialize()
+        before = (self.path / "attempts.json").read_bytes()
+
+        def broken(_identity, _entry):
+            raise RuntimeError("host observation failed")
+
+        for callback in (None, broken, lambda *_: {"verified": False}):
+            with self.subTest(callback=callback):
+                self.assertEqual(
+                    self.call("reserve", callback=callback)["decision"], "BLOCKED"
+                )
+                self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+
+    def test_malformed_active_history_is_never_retired(self):
+        self.initialize()
+        token = self.call("reserve")["token"]
+        data, _ = self.read_entry()
+        cases = [
+            lambda e: e["active"].update(phase="finished"),
+            lambda e: e["active"].update(attempt=True),
+            lambda e: e["active"].update(attempt=0),
+            lambda e: e["active"].update(attempt=6),
+            lambda e: e.update(count=True),
+            lambda e: e["active"].update(owner=" "),
+            lambda e: e["active"].update(token="z" * 32),
+            lambda e: e["history"].append({"attempt": 1}),
+        ]
+        for mutate in cases:
+            changed = copy.deepcopy(data)
+            entry = next(iter(changed["entries"].values()))
+            mutate(entry)
+            self.api["_save"](self.directory, changed)
+            before = (self.path / "attempts.json").read_bytes()
+            self.assertEqual(
+                self.call(
+                    "finish",
+                    token=token,
+                    outcome="FAILED",
+                    evidence="fixture",
+                    no_pending_verified=True,
+                )["decision"],
+                "BLOCKED",
+            )
+            self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+
+    def test_invalid_initialization_and_boolean_schema_preserve_data(self):
+        for reference in (True, {}, [], 1, "", " "):
+            self.assertEqual(
+                self.call("initialize", verified_new_task_reference=reference)[
+                    "decision"
+                ],
+                "BLOCKED",
+            )
+            self.assertFalse((self.path / "attempts.json").exists())
+        self.initialize()
+        data, _ = self.read_entry()
+        data["schema_version"] = True
+        self.api["_save"](self.directory, data)
+        before = (self.path / "attempts.json").read_bytes()
+        with self.assertRaises(ValueError):
+            self.call("initialize", verified_new_task_reference="fixture")
+        self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+
+    def test_duplicate_keys_at_any_depth_preserve_exact_ledger_bytes(self):
+        self.initialize()
+        self.call("reserve")
+        raw = (self.path / "attempts.json").read_text()
+        for original, duplicate in (
+            ('"count": 1', '"count": 5, "count": 1'),
+            ('"task_id": "fixture"', '"task_id": "other", "task_id": "fixture"'),
+            ('"entries": {', '"entries": {}, "entries": {'),
+        ):
+            self.assertIn(original, raw)
+            changed = raw.replace(original, duplicate, 1)
+            (self.path / "attempts.json").write_text(changed)
+            with self.assertRaisesRegex(ValueError, "Duplicate ledger key"):
+                self.call("reserve")
+            self.assertEqual((self.path / "attempts.json").read_text(), changed)
+
+    def test_invalid_saved_state_blocks_before_current_observation(self):
+        self.initialize()
+        original, _ = self.read_entry()
+        cases = [
+            ("caller_stop", None),
+            ("caller_stop", "false"),
+            ("breaker", None),
+            ("breaker", "unknown"),
+            ("ralph", None),
+            ("ralph", "unknown"),
+            ("ralph_evidence", None),
+            ("ralph_evidence", " "),
+        ]
+        for field, value in cases:
+            for missing in (True, False):
+                with self.subTest(field=field, missing=missing, value=value):
+                    data = copy.deepcopy(original)
+                    entry = next(iter(data["entries"].values()))
+                    if field == "ralph_evidence":
+                        entry["ralph"] = "completed"
+                    if missing:
+                        entry.pop(field, None)
+                    else:
+                        entry[field] = value
+                    self.api["_save"](self.directory, data)
+                    before = (self.path / "attempts.json").read_bytes()
+                    calls = []
+
+                    def fresh(identity, entry):
+                        calls.append(identity)
+                        return self.observe(identity, entry)
+
+                    self.assertEqual(
+                        self.call("reserve", callback=fresh)["decision"], "BLOCKED"
+                    )
+                    self.assertEqual(calls, [])
+                    self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+
+    def test_lost_run_observation_keeps_prior_reference_and_can_be_resolved(self):
+        self.initialize()
+        data, entry = self.read_entry()
+        entry.update(ralph="completed", ralph_evidence="original run log")
+        self.api["_save"](self.directory, data)
+        self.assertEqual(self.call("reserve")["decision"], "BLOCKED")
+        _, saved = self.read_entry()
+        self.assertEqual(saved["ralph"], "completed")
+        self.assertEqual(saved["ralph_evidence"], "original run log")
+        self.assertEqual(saved["count"], 0)
+        self.assertTrue(saved["observation_blocked"])
+        self.observation.update(
+            ralph="completed", ralph_evidence="verified completion log"
+        )
+        self.assertEqual(self.call("reserve")["decision"], "RESERVED")
+        self.assertEqual(
+            self.read_entry()[1]["ralph_evidence"], "verified completion log"
+        )
+
+    def test_valid_pending_state_can_resolve_through_verified_callback(self):
+        self.initialize()
+        original, _ = self.read_entry()
+        self.observation.update(
+            ralph="completed", ralph_evidence="verified terminal log"
+        )
+        for state in ("active", "pending", "uncertain"):
+            with self.subTest(state=state):
+                data = copy.deepcopy(original)
+                entry = next(iter(data["entries"].values()))
+                entry.update(ralph=state, ralph_evidence="existing run reference")
+                self.api["_save"](self.directory, data)
+                self.assertEqual(self.call("reserve")["decision"], "RESERVED")
+                self.assertEqual(self.read_entry()[1]["ralph"], "completed")
+
+    def test_active_marker_and_atomic_contract_removal_is_detected(self):
+        for kind, path, needle in (
+            ("command", "commands/do-sdlc-qa.md", "active owner"),
+            ("agent", "agents/qa-infrastructure-tester.md", "real atomic host"),
+            ("skill", "skills/terraform-terraspace/SKILL.md", "active owner/token"),
+        ):
+            text = (PLUGIN / path).read_text()
+            self.assertEqual(contract_violations(text, kind), [])
+            self.assertIn(
+                "atomic reservation",
+                contract_violations(text.replace(needle, "counter"), kind),
+            )
 
 
 if __name__ == "__main__":

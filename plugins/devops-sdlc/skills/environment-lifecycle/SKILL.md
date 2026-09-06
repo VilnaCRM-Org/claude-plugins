@@ -94,11 +94,19 @@ edit quality configuration merely to make a gate pass.
 
 The stage is the invoking command's name; for direct use it is this skill's name.
 Reuse the task's recorded `specs/<task-id>/run-summary.md`. If no task record exists,
-create one using the date and task-title slug, record that path, and preserve it.
-One attempt means one execution of this procedure. Before each attempt, if its
+select its date/task-title slug path, initialize the verified new sidecar under
+lock before creating the first human summary, and preserve that path.
+One attempt means one execution of this procedure. For a NEW reservation, if its
 persisted count is already 5, stop with FAILED and the unmet exit condition.
-Otherwise increment once, save, and report `stage: n/5`; report it again with the
-outcome. Retries, resumed sessions and delegated handoffs share that same count.
+Use the [atomic caller transaction](../AI-AGENT-GUIDE.md#atomic-attempt-reservation):
+the verified host primitive persists count+1 with active owner/token under one
+lock before execution. Missing capability or active/uncertain ownership conflicts
+mean BLOCKED. Delegates reuse the exact task/stage/agent/target/environment key
+and token without another increment. The matching owner may start/observe its
+already-reserved fifth attempt; never reserve it twice. Report `stage: n/5` with
+the outcome. Retain the marker after crashes or uncertain effects; only verified
+terminal completion closes ownership. Existing history with a missing sidecar
+requires locked migration, never zero initialization or a renamed identity.
 Ralph is the autonomous implementation loop launched by the `bmalph` CLI.
 Its `.ralph/logs/` output reporting an open/tripped circuit breaker stops that run
 immediately; never reset or clear it to retry. Record its error and partial work.

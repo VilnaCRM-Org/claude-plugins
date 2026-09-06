@@ -201,7 +201,7 @@ capabilities must retain their own status; a simulation cannot satisfy live E2E.
 Use the exact invoked command identifier as the stage key. For direct skill use,
 use the skill's frontmatter `name`. A stage has five procedure attempts. Reuse
 the existing task ledger's exact saved repository-relative `run-summary.md` path.
-For new work without a ledger, create it once at
+For new work without a ledger, select its path once at
 `specs/YYYY-MM-DD-<slug>/run-summary.md`: use the UTC calendar date from the host
 clock when the caller first creates this task ledger, and record that date in it.
 Keep the recorded date and path across resumed sessions. For `<slug>`, lowercase
@@ -209,14 +209,24 @@ the task title, replace each run of characters outside `a-z` and `0-9` with one
 hyphen, and trim leading/trailing hyphens. Use `task` if the slug is empty. If
 that path already belongs to a different task, report BLOCKED; never overwrite
 it or reset its counter. Persist the exact ledger path and stage key before the
-first procedure attempt. References to `specs/<task-id>/run-summary.md` mean this
+first procedure attempt. Initialize the verified new sidecar under lock before
+creating the first human summary, as defined below. References to `specs/<task-id>/run-summary.md` mean this
 same saved ledger; they do not create a second task directory.
 
-An attempt starts when the first applicable procedure step begins and ends on its
-PASSED, FAILED or BLOCKED outcome. Before starting, read the saved count: if it is
-already five, stop with FAILED; otherwise increment once, save and report `n/5`.
-Observing an already-started attempt does not increment again. Preserve counts,
-applicability and evidence across sessions, handoffs and backend changes.
+An attempt is consumed only by a successful atomic reservation; its first
+procedure step follows the durable reservation and ends on PASSED, FAILED or
+BLOCKED. The caller owns the one record keyed by task, stage, assigned agent,
+target and environment. A delegated agent receives that exact key, owner and
+reservation token; it never increments a second time. Use the
+[atomic attempt reservation](AI-AGENT-GUIDE.md#atomic-attempt-reservation)
+transaction below. For a NEW reservation, a saved count at five or more means
+FAILED before incomplete-history checks; a known caller stop means BLOCKED;
+an evidenced open/tripped Ralph breaker means FAILED; missing required state or
+run evidence means BLOCKED. Escalation is an action, never a persisted status.
+The matching owner may start or observe the already-reserved fifth attempt,
+subject to current stop/state checks, without reserving again. An active or
+uncertain reservation blocks every competing session. Preserve counts,
+applicability, evidence and active ownership across sessions and backend changes.
 
 An external Ralph blocker is a recorded missing executable/dependency, denied
 filesystem access, unavailable authentication, or missing scoped authorization.
@@ -231,3 +241,331 @@ ledger path, stage, attempts-used/5 and remaining attempts. Missing both CLIs
 blocks live agent calls only: identify local manifest/profile validation, lint,
 types and unit checks that can still run, and keep their executed or proposed
 results in a separate static ledger. Never replace a live gate with those results.
+
+## Atomic attempt reservation
+
+`run-summary.md` is the human report, not a second counter writer. The canonical
+machine record is `attempts.json` beside that saved report; `attempts.lock` is its
+persistent lock inode. Record schema version 1, the immutable task ID, and an
+`entries` map keyed by the JSON array `[task_id, stage_key, agent, target,
+environment]`. Use the assigned agent name, or `caller` for an undelegated stage.
+The caller supplies all five nonempty identity values and an actual host session
+owner; copy them unchanged to delegates and resumed sessions.
+
+This is a caller-executed Python 3 stdlib reference algorithm, not a shipped
+`devops.py` subcommand. Before using it, the caller must verify `fcntl.flock`,
+`os.replace` and directory `fsync` on the actual shared filesystem using two
+contending inert processes. Verify both sessions use the same protected lock
+inode and task directory; advisory locks require every caller/writer to obey this
+protocol. If that capability or host write isolation cannot be verified, report
+BLOCKED without incrementing or starting. Inspect host inventory and the actual
+probe result; importing `fcntl` alone is insufficient. This mechanism coordinates
+cooperating callers; it is not protection against arbitrary authorized repository
+code or a malicious process with write access.
+
+Open the repository root as a retained directory descriptor; traverse each
+recorded task-directory component with `os.open(component, os.O_DIRECTORY |
+os.O_NOFOLLOW, dir_fd=parent)`, rejecting empty, `.` and `..` components and
+symlinks. Pass the resulting descriptor as `directory` below; keep it open until
+the transaction returns. Create a genuinely new task directory only within the
+reviewed repository scope. Never unlink/replace the lockfile or assume a local
+lock coordinates separate hosts without an observed shared-filesystem probe.
+
+Only the caller may issue `initialize`, after recording a real reference proving
+this identity has no history, stop directive, breaker or active/pending/uncertain
+run. Initialize before creating the first human report. If a historical
+`run-summary.md` exists but the sidecar is missing, BLOCK pending an authorized,
+locked migration that imports its verified count, states, evidence and any active
+owner. Missing sidecar is never permission to initialize zero. A new entry also
+requires verified absence of prior history for that exact key; it cannot replace
+an existing entry or let a backend change create another budget.
+
+The caller invokes `transaction(directory, identity, request, observe)` with `owner` and
+one `action`: `initialize`, `reserve`, `start`, `observe` or `finish`. After
+`reserve` returns RESERVED, pass its token and attempt number to the one assigned
+executor. `start` durably records started before returning START_ONCE; launch the
+procedure only once on that return. A caller that already started a delegated
+attempt passes the existing execution handle; its agent may inspect that same
+process rather than calling `start` or `reserve` again. OBSERVE_ONLY never
+permits new procedural work, replay or executable continuation after a stop.
+Any existing live execution remains subject to the host's stop enforcement;
+a marker alone cannot recreate its execution handle. Report `stage: n/5`
+from the saved count before execution and in every handoff/outcome. Transaction
+decisions such as RESERVED are coordination results, not successful task gates.
+
+State observations (`caller_stop`, `breaker`, `ralph`, `ralph_evidence`) are
+caller-verified evidence, not values guessed by the executor. `observe` is a
+trusted caller-supplied callable invoked under the held lock before admission
+to reserve/start. Already-known terminal stops return without needing a new
+observation. Missing/invalid saved state or required evidence blocks before the
+callback; a fresh clear observation cannot reconstruct unknown history. Otherwise
+the callback receives `(identity, copied_entry)`. It must actually collect current host/caller state
+and return `verified: true`, the exact `identity`, nonempty `evidence` reference,
+boolean `caller_stop`, `breaker` (`clear`, `open`, `tripped`), and `ralph` (`none`,
+`active`, `pending`, `completed`, `uncertain`). A true caller stop requires a
+nonempty `caller_stop_evidence`; any run or non-clear breaker requires a nonempty
+`ralph_evidence` log/reference. The caller must inspect and verify this callback's
+implementation and host access; a model-created always-clear stub is not valid
+live evidence. Missing, throwing or unverified callbacks BLOCK without starting.
+The reference rejects duplicate JSON keys at every nesting before mutation.
+It validates exact integer counts, token/owner/phase fields and sequential history
+before using or closing active ownership. It stores validated observations even
+when a newly observed stop blocks work;
+it never automatically clears a known stop/breaker or erases a past run. For
+`finish`, only the verified owner may provide the actual terminal outcome and
+nonempty evidence after proving no child process, pending or uncertain effect
+remains. That transaction appends history and clears active ownership without
+changing the count. A reserved attempt that never safely starts is still spent.
+An exception, crash, timeout or uncertain persistence/start outcome means BLOCKED:
+retain/re-read the marker and evidence, never retry the action blindly. There is
+no TTL takeover, automatic marker clearing, replay, decrement or breaker reset.
+A separately authorized operator may resolve ownership only after proving the
+previous execution cannot continue, preserving its consumed count and history.
+
+The executable reference is bounded to ledger coordination; it runs no workflow,
+CLI backend or cloud command. The caller must treat any raised exception as
+BLOCKED and preserve uncertain state rather than retrying automatically.
+
+<!-- atomic-ledger-reference:start -->
+```python
+import copy
+import fcntl
+import json
+import os
+import re
+import stat
+import uuid
+
+
+def _unique(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate ledger key")
+        result[key] = value
+    return result
+
+
+def _read(directory, name):
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    with os.fdopen(fd) as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise ValueError("Non-regular ledger")
+        return json.load(stream, object_pairs_hook=_unique)
+
+
+def _save(directory, value):
+    name = ".attempts-" + uuid.uuid4().hex
+    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                 0o600, dir_fd=directory)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(value, stream, sort_keys=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, "attempts.json", src_dir_fd=directory, dst_dir_fd=directory)
+        os.fsync(directory)
+    finally:
+        try:
+            os.unlink(name, dir_fd=directory)
+        except FileNotFoundError:
+            pass
+
+
+def _stop(entry, new_reservation):
+    count = entry.get("count")
+    if new_reservation and type(count) is int and count >= 5:
+        return "FAILED"
+    if entry.get("caller_stop") is True:
+        return "BLOCKED"
+    observed = _text(entry.get("ralph_evidence"))
+    if entry.get("breaker") in ("open", "tripped") and observed:
+        return "FAILED"
+    if (entry.get("observation_blocked") is True
+            or type(count) is not int or count < 0 or entry.get("caller_stop") is not False
+            or entry.get("breaker") != "clear"
+            or entry.get("ralph") not in ("none", "completed")
+            or (entry.get("ralph") == "completed" and not observed)):
+        return "BLOCKED"
+    return None
+
+
+def transaction(directory, identity, request, observe=None):
+    # directory is the caller's verified, retained descriptor for the task folder.
+    # identity is [task_id, stage_key, agent, target, environment].
+    lock = os.open("attempts.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+                   0o600, dir_fd=directory)
+    try:
+        if not stat.S_ISREG(os.fstat(lock).st_mode):
+            raise ValueError("Non-regular lock")
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return _locked(directory, identity, request, observe)
+    except BlockingIOError:
+        return {"decision": "BLOCKED", "reason": "reservation conflict"}
+    finally:
+        os.close(lock)  # Release this lock; never unlink its persistent inode.
+
+
+def _text(value):
+    return isinstance(value, str) and bool(value.strip()) and value == value.strip()
+
+
+def _attempt(value):
+    return (isinstance(value, dict) and type(value.get("attempt")) is int
+            and 1 <= value["attempt"] <= 5 and _text(value.get("owner"))
+            and isinstance(value.get("token"), str)
+            and re.fullmatch("[0-9a-f]{32}", value["token"]) is not None
+            and value.get("phase") in ("reserved", "started"))
+
+
+def _coherent(entry):
+    count, active, history = entry.get("count"), entry.get("active"), entry.get("history")
+    if (type(count) is not int or not 0 <= count <= 5 or "active" not in entry
+            or not isinstance(history, list) or len(history) != count - (active is not None)):
+        return False
+    tokens = []
+    for number, past in enumerate(history, 1):
+        if (not _attempt(past) or past["attempt"] != number
+                or past.get("outcome") not in ("PASSED", "FAILED", "BLOCKED")
+                or not _text(past.get("evidence"))
+                or (past["outcome"] == "PASSED" and past["phase"] != "started")):
+            return False
+        tokens.append(past["token"])
+    if active is not None:
+        if not _attempt(active) or active["attempt"] != count:
+            return False
+        tokens.append(active["token"])
+    return len(tokens) == len(set(tokens))
+
+
+def _saved_state(entry):
+    return (type(entry.get("caller_stop")) is bool
+            and entry.get("breaker") in ("clear", "open", "tripped")
+            and entry.get("ralph") in ("none", "active", "pending", "completed", "uncertain")
+            and (not entry["caller_stop"] or _text(entry.get("caller_stop_evidence")))
+            and ((entry["ralph"] == "none" and entry["breaker"] == "clear")
+                 or _text(entry.get("ralph_evidence"))))
+
+
+def _refresh(entry, identity, observe):
+    if not callable(observe):
+        return False
+    try:
+        value = observe(list(identity), copy.deepcopy(entry))
+    except Exception:
+        return False
+    if (not isinstance(value, dict) or value.get("verified") is not True
+            or value.get("identity") != identity or not _text(value.get("evidence"))
+            or type(value.get("caller_stop")) is not bool
+            or value.get("breaker") not in ("clear", "open", "tripped")
+            or value.get("ralph") not in ("none", "active", "pending", "completed", "uncertain")
+            or (value["caller_stop"] and not _text(value.get("caller_stop_evidence")))
+            or ((value["ralph"] != "none" or value["breaker"] != "clear")
+                and not _text(value.get("ralph_evidence")))):
+        return False
+    lost_run = entry.get("ralph") not in (None, "none") and value["ralph"] == "none"
+    if entry.get("caller_stop") is not True:
+        entry["caller_stop"] = value["caller_stop"]
+        entry["caller_stop_evidence"] = value.get("caller_stop_evidence")
+    if entry.get("breaker") not in ("open", "tripped"):
+        entry["breaker"] = value["breaker"]
+        if not lost_run:
+            entry["ralph_evidence"] = value.get("ralph_evidence")
+    elif value["breaker"] in ("open", "tripped") and not lost_run:
+        entry["ralph_evidence"] = value["ralph_evidence"]
+    if not lost_run:
+        entry["ralph"] = value["ralph"]
+    entry["observation_blocked"] = lost_run
+    entry["observations"].append({key: value.get(key) for key in (
+        "identity", "evidence", "caller_stop", "caller_stop_evidence",
+        "breaker", "ralph", "ralph_evidence")})
+    return True
+
+
+def _locked(directory, identity, request, observe):
+    if (not isinstance(identity, list) or len(identity) != 5
+            or not all(_text(x) for x in identity) or not _text(request.get("owner"))):
+        raise ValueError("Missing immutable identity or host session owner")
+    key = json.dumps(identity, separators=(",", ":"))
+    action = request.get("action")
+    if action == "initialize" and not _text(request.get("verified_new_task_reference")):
+        return {"decision": "BLOCKED", "reason": "invalid initialization reference"}
+    try:
+        data = _read(directory, "attempts.json")
+    except FileNotFoundError:
+        try:
+            os.stat("run-summary.md", dir_fd=directory, follow_symlinks=False)
+        except FileNotFoundError:
+            if action != "initialize":
+                return {"decision": "BLOCKED", "reason": "missing ledger/history"}
+            data = {"schema_version": 1, "task_id": identity[0], "entries": {}}
+        else:
+            return {"decision": "BLOCKED", "reason": "verified locked migration required"}
+    if (not isinstance(data, dict) or type(data.get("schema_version")) is not int
+            or data["schema_version"] != 1 or data.get("task_id") != identity[0]
+            or not isinstance(data.get("entries"), dict)):
+        raise ValueError("Ledger identity/schema mismatch")
+    if action == "initialize":
+        if key in data["entries"]:
+            return {"decision": "BLOCKED", "reason": "initialization cannot replace history"}
+        data["entries"][key] = {"count": 0, "caller_stop": False, "breaker": "clear",
+                                "ralph": "none", "ralph_evidence": None,
+                                "active": None, "history": [], "observations": [],
+                                "initialization_reference": request["verified_new_task_reference"]}
+        _save(directory, data)
+        return {"decision": "INITIALIZED", "count": 0}
+    entry = data["entries"].get(key)
+    if not isinstance(entry, dict):
+        return {"decision": "BLOCKED", "reason": "missing prior record"}
+    # Known exhaustion forbids new reservations even with incomplete history.
+    if action == "reserve" and type(entry.get("count")) is int and entry["count"] >= 5:
+        return {"decision": "FAILED", "count": entry["count"]}
+    if action in ("reserve", "start"):
+        if entry.get("caller_stop") is True:
+            return {"decision": "BLOCKED", "reason": "known caller stop retained"}
+        if entry.get("breaker") in ("open", "tripped") and _text(entry.get("ralph_evidence")):
+            return {"decision": "FAILED", "reason": "evidenced breaker retained"}
+    if not _coherent(entry) or not isinstance(entry.get("observations"), list):
+        return {"decision": "BLOCKED", "reason": "invalid history/active ownership; retained"}
+    if action in ("reserve", "start"):
+        if not _saved_state(entry):
+            return {"decision": "BLOCKED", "reason": "missing/invalid saved state; retained"}
+        if not _refresh(entry, identity, observe):
+            return {"decision": "BLOCKED", "reason": "missing/unverified current observation"}
+        _save(directory, data)  # Retain observed stops even when admission is blocked.
+    active = entry["active"]
+    if action == "reserve":
+        stop = _stop(entry, True)
+        if stop:
+            return {"decision": stop, "count": entry.get("count")}
+        if active is not None:
+            return {"decision": "BLOCKED", "reason": "active reservation retained"}
+        entry["count"] += 1
+        active = {"token": uuid.uuid4().hex, "owner": request["owner"],
+                  "attempt": entry["count"], "phase": "reserved"}
+        entry["active"] = active
+        _save(directory, data)
+        return {"decision": "RESERVED", **active}
+    if (active is None or active["token"] != request.get("token")
+            or active["owner"] != request["owner"]):
+        return {"decision": "BLOCKED", "reason": "reservation ownership mismatch"}
+    if action == "finish":
+        if (request.get("outcome") not in ("PASSED", "FAILED", "BLOCKED")
+                or (request.get("outcome") == "PASSED" and active["phase"] != "started")
+                or not _text(request.get("evidence")) or request.get("no_pending_verified") is not True):
+            return {"decision": "BLOCKED", "reason": "completion uncertain; marker retained"}
+        entry["history"].append({**active, "outcome": request["outcome"],
+                                 "evidence": request["evidence"]})
+        entry["active"] = None
+        _save(directory, data)
+        return {"decision": "RECORDED", "count": entry["count"]}
+    if action == "observe" and active["phase"] == "started":
+        return {"decision": "OBSERVE_ONLY", **active}  # Inspection, no execution authority.
+    stop = _stop(entry, False)  # The owner may start its reserved fifth attempt.
+    if stop or action != "start" or active["phase"] != "reserved":
+        return {"decision": stop or "BLOCKED", "reason": "do not start or replay"}
+    active["phase"] = "started"
+    _save(directory, data)
+    return {"decision": "START_ONCE", **active}
+```
+<!-- atomic-ledger-reference:end -->

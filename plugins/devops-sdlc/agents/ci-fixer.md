@@ -76,44 +76,42 @@ but its final report must retain the blocked or skipped requirements.
 ## Iteration discipline
 
 MAX_ITERATIONS=5. One attempt is one diagnosis, scoped correction or review,
-and verification cycle. The caller owns the stage record, keyed by task, agent,
-target and environment. Reuse the task's recorded ledger path; for a genuinely
-new task without one, the caller creates it using the agent guide's new-task
-ledger rule. A new stage entry never replaces an existing task ledger. Use the
-caller-provided stage key and preserve identity, count and breaker in every handoff.
+and verification cycle. The caller owns the record keyed by task, stage, agent,
+target and environment. Reuse the task's recorded ledger path and exact identity;
+a genuinely new task follows the agent guide's UTC date/slug rule. The human
+`run-summary.md` references adjacent `attempts.json`; never maintain a second
+counter. Read the [atomic caller transaction](../skills/AI-AGENT-GUIDE.md#atomic-attempt-reservation).
 
-Only the caller may initialize a verified new task record. The caller must
-explicitly confirm no prior attempt under this identity, no caller stop directive,
-and no associated active, pending or uncertain Ralph run. Before the first
-attempt, persist that confirmation, count 0, an explicitly clear breaker and
-no-active-Ralph state. Initialization never creates a replacement identity or
-resets another stage.
+Only the caller may initialize a verified new task record. It must confirm no
+prior history, caller stop, breaker or active/pending/uncertain run before
+persisting count 0 and explicit clear/no-run state under the lock. Existing
+history with no sidecar is BLOCKED pending verified locked migration, not zero.
+A new stage entry never replaces an existing task ledger or another budget.
 
-Apply this precedence before any new attempt: a known caller stop directive,
-a known open/tripped Ralph breaker, or a count at five or more means ESCALATED,
-even if supporting history is incomplete. Otherwise, if resuming without its prior
-count, report BLOCKED instead of assuming zero. When no stop is known, a
-resumption with a saved count is BLOCKED if any of these conditions applies:
+For a NEW reservation, a known count at five or more means FAILED, even when
+history is incomplete. Otherwise a known caller stop means BLOCKED; a verified
+open/tripped Ralph breaker with its retained log means FAILED. Otherwise, if
+resuming without its prior count, report BLOCKED instead of assuming zero.
+Missing, invalid or unknown saved count, breaker state, Ralph-run state or
+required run evidence means BLOCKED. A verified initialization with no Ralph run
+needs no nonexistent log. Escalation is an action, never a persisted status.
+Neither FAILED nor BLOCKED starts a new attempt.
 
-- The saved count is invalid or unknown.
-- The saved breaker state is missing, invalid or unknown.
-- The saved Ralph-run state is missing, invalid or unknown.
+The caller must verify a real atomic host reservation primitive. Under its shared
+lock it reloads and validates state, then persists count+1 and active reservation
+ownership together before starting. Missing/unverified capability, lock conflict
+or another active/uncertain reservation means BLOCKED. The caller passes this
+agent the exact task/stage/agent/target/environment key, owner and token; the
+agent never increments again. Only the matching owner may start the reserved
+attempt once, including attempt 5/5, subject to current stop/state checks.
+Observe an already-started attempt without starting or reserving again; a saved
+active marker is not proof of successful completion. Pending or uncertain effects
+block a replacement until actual resolution is recorded.
 
-Do not assume a missing or unknown state is clear. Neither BLOCKED nor ESCALATED
-starts an attempt.
-
-Ralph is the autonomous implementation loop launched by BMALPH. For an actual
-reported run, retain its observed state and log source/path; absent run evidence
-is BLOCKED unless the known-stop precedence above requires ESCALATED. For a caller
-stop directive, retain its source/reference with the escalation and identify any
-missing source. A verified initialization with no Ralph run needs no nonexistent
-Ralph log. Observe an already-started run without incrementing or starting a
-replacement; pending or uncertain effects block a new attempt until resolved and
-recorded.
-
-Only with verified clear state and a count below five, increment and persist the
-count exactly once before the next attempt, then report `attempt N/5` with the
-unmet condition. Restate that count in every progress update and final report.
+Report `attempt N/5` before the procedure and retain that count in progress and
+final evidence. Only verified terminal completion by the owner closes its marker;
+crashes/timeouts retain active ownership and block replay. Never auto-expire or
+take over a reservation, decrement a count, or rename a key to evade the limit.
 Never automatically reset or clear a breaker, discard prior attempts, rename a
 task or change backend to evade the budget or stop condition. Re-entry preserves
 both count and breaker state. Continue using the same record.

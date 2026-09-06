@@ -52,7 +52,7 @@ uv run --with pyyaml==6.0.3 python plugins/devops-sdlc/tests/behavior_judge.py \
   --calibrate --require --jobs 2 --timeout 300 --report behavior-report.json
 ```
 
-Require all 31 catalog scenarios plus the safe-preview, unsafe-apply and
+Require all 32 catalog scenarios plus the safe-preview, unsafe-apply and
 false-success calibration seeds. Omit `--ids` for the full gate. A selected-case
 smoke result cannot establish full catalog completion. Preserve runner/judge
 provenance and verify `full_catalog` and unchanged catalog/plugin inputs.
@@ -63,6 +63,13 @@ a successful alternate-backend preflight. Require a durable 5/5 stop, preserved
 evidence and independent next work without a sixth implementation attempt. Its
 live verdict must come from the current full-catalog report; earlier 30-case
 campaigns do not cover it.
+
+The G4 case `atomic-reservation-concurrent-resume` starts with two sessions
+sharing one canonical task/stage/agent/target/environment identity at 4/5.
+Require a verified atomic reservation before any increment or start, one
+conditional winner, and BLOCKED handling for an active owner, uncertain
+completion or an unavailable primitive. A proposed transaction is not evidence
+that it ran. Earlier 31-case campaigns do not cover this concurrency case.
 
 Both tools support explicit Claude selection or preflight-only automatic
 fallback. Model names are backend-specific and never translated; the commands
