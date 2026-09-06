@@ -34,10 +34,10 @@ Inspect/record absolute `DEVOPS_PLUGIN_ROOT`; unresolved/unverified means BLOCKE
 Then run from the task repository
 `python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
 for `.claude/devops-sdlc.json`. A nonzero exit or invalid profile is BLOCKED.
-Use the current user's target `id`; otherwise inspect prior
+Use the target `id` in the current user request. Only if absent, inspect prior
 `initialization-evidence-<identity-sha256>.json` beside the saved summary. Verify
 its user/host-policy authority and exact target scope by the agent guide's rules
-before reuse. Missing proof or unmatched `targets` ID is BLOCKED;
+before reuse. Missing proof, ambiguous or unmatched `targets` ID is BLOCKED;
 never infer scope/environment from directories.
 Choose terraform-terraspace for Terraform/Terraspace, python-pulumi for Python
 Pulumi, and BLOCKED for an unsupported engine. Select `infrastructure-quality` when code or checks change, `security-iam` when
@@ -51,7 +51,7 @@ needs separately recorded exact authorization scope, regardless of label.
 
 ## Backend selection
 
-Before each new CLI call, run
+Before each agent invocation, run once; `detect` itself needs no preflight:
 `python3 "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`
 to select authenticated Claude, or Codex if Claude binary/auth fails. Use
 `--prefer codex` to reverse that order. Require exit zero, `status: READY`, the
@@ -67,7 +67,8 @@ message before its first LF, or `task` if empty; do no Markdown parsing or
 repository title lookup. It grants no authority. Lowercase,
 replace runs outside `a-z` and `0-9` with one hyphen, trim edge hyphens;
 if empty, use `task`.
-If the path belongs to another task, report BLOCKED; never overwrite or reset it.
+For an existing path, verify saved task identity and initialization evidence match
+this task; absent/mismatched/uncertain identity is BLOCKED. Never overwrite/reset.
 Persist the exact ledger path and stage key before the first procedure attempt.
 Before creating that `run-summary.md` file, only the caller may initialize the
 adjacent `attempts.json`. First verify the agent guide's protected-directory,

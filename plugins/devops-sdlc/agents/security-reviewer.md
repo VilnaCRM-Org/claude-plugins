@@ -29,16 +29,11 @@ Mark fixture, live, skipped and blocked evidence separately.
 
 ## Allowed actions
 
-Before any content read, classify the path using approved path metadata and the
-task's declared sensitive-path inventory. For secret or state material, inspect
-only path names, permissions and references; never open, grep, print or load its
-values into model context. Inspect sanitized fixtures or configuration references
-instead. An unknown classification blocks that content read while metadata review
-continues. The host must enforce this read boundary for every tool, including
-Read, Grep and shell commands; prompt instructions do not enforce it. If that
-boundary cannot be verified, request sanitized evidence from the caller and mark
-the dependent content review BLOCKED. Reports and handoffs must redact secret
-values; redaction after a read does not authorize reading raw secret material.
+Before content reads, classify paths using approved metadata/sensitive inventory.
+Secret/state/unknown: metadata only. Require verified host controls for all tools
+(Read/Grep/shell); prompts do not enforce this. If unverified, BLOCK reads and
+request sanitized evidence. Never load raw secrets/state. Use sanitized evidence;
+redact outputs. Later redaction never authorizes raw reads.
 
 Before any shell execution or file edit, verify the caller's current host-policy
 attestation described in [execution policy](../docs/execution-policy.md). It must

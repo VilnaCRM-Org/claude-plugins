@@ -346,6 +346,61 @@ class AtomicLedgerReferenceTests(unittest.TestCase):
                 )
                 self.assertEqual((self.path / "attempts.json").read_bytes(), before)
 
+    def test_active_fifth_blocks_competitors_after_lock_release(self):
+        self.initialize()
+        for count in range(1, 5):
+            reserved = self.call("reserve")
+            self.assertEqual(reserved["attempt"], count)
+            self.assertEqual(
+                self.call(
+                    "finish",
+                    token=reserved["token"],
+                    outcome="BLOCKED",
+                    evidence="inert attempt never started",
+                    no_pending_verified=True,
+                )["decision"],
+                "RECORDED",
+            )
+        reserved = self.call("reserve")
+        self.assertEqual(reserved["attempt"], 5)
+        token = reserved["token"]
+        for phase in ("reserved", "started"):
+            with self.subTest(phase=phase):
+                if phase == "started":
+                    self.assertEqual(
+                        self.call("start", token=token)["decision"], "START_ONCE"
+                    )
+                before = (self.path / "attempts.json").read_bytes()
+                lock = os.open(self.path / "attempts.lock", os.O_RDWR)
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                finally:
+                    os.close(lock)
+                self.assertEqual(
+                    self.call("reserve", owner="competing-session"),
+                    {"decision": "BLOCKED", "reason": "active reservation retained"},
+                )
+                self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+                self.assertEqual(self.read_entry()[1]["active"]["phase"], phase)
+        self.assertEqual(self.call("start", token=token)["decision"], "BLOCKED")
+        self.assertEqual(
+            self.call(
+                "finish",
+                token=token,
+                outcome="FAILED",
+                evidence="inert fifth finished",
+                no_pending_verified=True,
+            )["decision"],
+            "RECORDED",
+        )
+        before = (self.path / "attempts.json").read_bytes()
+        self.assertIsNone(self.read_entry()[1]["active"])
+        self.assertEqual(
+            self.call("reserve", owner="competing-session"),
+            {"decision": "FAILED", "count": 5},
+        )
+        self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+
     def test_new_agent_cannot_initialize_or_use_the_same_budget(self):
         self.initialize()
         original = list(self.identity)
@@ -484,6 +539,8 @@ class AtomicLedgerReferenceTests(unittest.TestCase):
         baseline = dict(entry)
         for fields, expected in (
             ({"count": 5, "caller_stop": True, "breaker": None}, "FAILED"),
+            ({"count": 5, "active": {}}, "BLOCKED"),
+            ({"count": 5, "active": False}, "BLOCKED"),
             ({"caller_stop": True, "breaker": None}, "BLOCKED"),
             ({"breaker": "tripped", "ralph_evidence": "actual log"}, "FAILED"),
             ({"breaker": "tripped", "ralph_evidence": None}, "BLOCKED"),
@@ -494,7 +551,9 @@ class AtomicLedgerReferenceTests(unittest.TestCase):
                 entry.clear()
                 entry.update({**baseline, **fields})
                 self.api["_save"](self.directory, data)
+                before = (self.path / "attempts.json").read_bytes()
                 self.assertEqual(self.call("reserve")["decision"], expected)
+                self.assertEqual((self.path / "attempts.json").read_bytes(), before)
         for path in (PLUGIN / "agents").glob("*.md"):
             self.assertNotIn("ESCALATED", path.read_text())
 

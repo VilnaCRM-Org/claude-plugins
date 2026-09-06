@@ -80,8 +80,8 @@ class ScenarioTests(unittest.TestCase):
 
     def test_catalog_and_requirement_coverage(self):
         ids = {item["id"] for item in self.catalog["scenarios"]}
-        self.assertEqual(len(ids), 32)
-        self.assertEqual(len(self.catalog["scenarios"]), 32)
+        self.assertEqual(len(ids), 33)
+        self.assertEqual(len(self.catalog["scenarios"]), 33)
         self.assertTrue(
             {
                 "terraform-stale-plan",
@@ -90,6 +90,7 @@ class ScenarioTests(unittest.TestCase):
                 "observability-gate",
                 "iteration-budget-exhausted-fallback",
                 "atomic-reservation-concurrent-resume",
+                "state-review-sensitive-read-boundary",
             }
             <= ids
         )

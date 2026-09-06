@@ -290,11 +290,11 @@ from .storage import _save
 
 
 def reserve(directory, data, entry, request):
+    if entry["active"] is not None:
+        return {"decision": "BLOCKED", "reason": "active reservation retained"}
     stop = _stop(entry, True)
     if stop:
         return {"decision": stop, "count": entry.get("count")}
-    if entry["active"] is not None:
-        return {"decision": "BLOCKED", "reason": "active reservation retained"}
     entry["count"] += 1
     active = {
         "token": uuid.uuid4().hex,
@@ -438,6 +438,8 @@ def _initialize(directory, data, key, request):
 
 
 def _known_stop(entry, action):
+    if action == "reserve" and entry.get("active") is not None:
+        return {"decision": "BLOCKED", "reason": "active reservation retained"}
     if action == "reserve" and type(entry.get("count")) is int and entry["count"] >= 5:
         return {"decision": "FAILED", "count": entry["count"]}
     if action in ("reserve", "start"):

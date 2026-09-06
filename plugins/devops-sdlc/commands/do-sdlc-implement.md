@@ -10,10 +10,10 @@ argument-hint: "[specs-directory]"
 Inputs are the command argument, repository guidance and
 `specs/<task>/run-summary.md` when resuming. That summary records task/repository
 identity, target/environment selections, source/profile hashes, artifact paths,
-check outcomes and copied counter observations. Each counter observation names
-the authoritative adjacent `attempts.json` path and exact
-`[task_id, stage_key, agent, target, environment]` entry key; the summary is never
-an independent counter writer. For a verified fresh task, the caller
+check outcomes and copied counter observations. Before owned start, copy count/5,
+remaining attempts, authoritative `attempts.json` path, exact
+`[task, stage, agent, target, environment]` key and owner/token; summary never
+writes counters. For a verified fresh task, the caller
 initializes its new sidecar under lock before creating the first human summary,
 following the agent guide's atomic transaction. An existing summary with no
 sidecar requires verified locked migration; never reset it to zero.
@@ -124,9 +124,10 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    Keep the Ralph run FAILED/BLOCKED; do not reset its breaker, replay uncertain
    actions, relax sandbox policy or label parent completion as Ralph success.
    If the blocker cannot be fixed within authorization, keep dependent work blocked.
-7. Report changed files, tests, exact source SHA, backend/model, residual risks,
-   Ralph exit and any parent/operator handoff evidence. Preserve story and stage
-   counters; route failures back to implementation without weakening gates.
+7. After each local test, write actual exit, source SHA, failure/output path and
+   canonical attempts path/key, count/remaining to `run-summary.md`. Report changed
+   files/tests, backend/model, residual risks, Ralph exit and parent/operator handoff
+   evidence; preserve counters and route failures back without weakening gates.
 
 ## Loop & exit condition
 
@@ -135,26 +136,26 @@ evidence and source identity. Only PASSED satisfies a required gate.
 
 ## Iteration guard
 
-MAX_ITERATIONS=5 per stage. Reuse the saved `specs/<task>/run-summary.md` as
-a human report; its adjacent `attempts.json` is the only counter authority.
-Use the [atomic caller transaction](../skills/AI-AGENT-GUIDE.md#atomic-attempt-reservation),
+MAX_ITERATIONS=5 per stage. Reuse saved `specs/<task>/run-summary.md` as human
+report; adjacent `attempts.json` is sole counter authority. Use the
+[atomic caller transaction](../skills/AI-AGENT-GUIDE.md#atomic-attempt-reservation),
 keyed by task, stage, agent, target and environment. Verify actual host locking;
 missing/unverified capability or a conflicting active reservation means BLOCKED.
 The caller atomically validates state and persists count+1 with an active owner
 and token before execution. A delegate receives the same reservation and never
-increments again. For a NEW reservation, count >=5 means FAILED before missing
-history; caller stop means BLOCKED; an evidenced open/tripped Ralph breaker means
-FAILED; missing required state/log means BLOCKED. The matching owner may start or
-observe its already-reserved fifth attempt, subject to current stop/state checks,
-without taking another reservation. Inspection grants no execution authority.
-Print `stage: <name> n/5` from the saved record and restate it at every handoff.
-Only verified terminal completion closes ownership; crashes or uncertain effects
-retain the marker and block replay. Existing history with no sidecar requires
-verified locked migration, never initialization to zero. Preserve the exact key,
-count, owner and token across QA loop-backs, sessions and backend changes.
-Never automatically reset counters or a tripped Ralph circuit breaker. Escalate
-with evidence while retaining PASSED, FAILED, SKIPPED or BLOCKED as the status.
-Continue independent authorized work only; do not retry a missing prerequisite.
+increments again. For a NEW
+reservation, count >=5 means FAILED before missing history; caller stop means BLOCKED;
+evidenced open/tripped Ralph breaker FAILED; missing required state/log means BLOCKED.
+The matching owner may start/observe its already-reserved fifth attempt, subject to
+current stop/state, without another reservation. Inspection grants no execution
+authority. Print `stage: <name> n/5` from saved record and restate it at every
+handoff. Only verified terminal completion closes ownership; crashes or uncertain
+effects retain marker and block replay. Existing history with no sidecar requires
+verified locked migration, never initialization to zero. Preserve exact key, count and
+owner/token across QA loop-backs, sessions and backend changes. Never automatically
+reset counters or a tripped Ralph circuit breaker. Escalate with evidence while retaining
+PASSED, FAILED, SKIPPED or BLOCKED as status. Continue independent authorized work
+only; do not retry a missing prerequisite.
 
 ## Failure escalation
 

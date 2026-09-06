@@ -8,11 +8,11 @@ from .storage import _save
 
 
 def reserve(directory, data, entry, request):
+    if entry["active"] is not None:
+        return {"decision": "BLOCKED", "reason": "active reservation retained"}
     stop = _stop(entry, True)
     if stop:
         return {"decision": stop, "count": entry.get("count")}
-    if entry["active"] is not None:
-        return {"decision": "BLOCKED", "reason": "active reservation retained"}
     entry["count"] += 1
     active = {
         "token": uuid.uuid4().hex,

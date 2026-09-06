@@ -7,6 +7,19 @@ but Makefiles, Python, providers and subprocesses still execute code.
 cloud authority. The evaluation adapter's tool-disabled sessions are a separate
 proposal-testing boundary, not the operational execution driver.
 
+## Sensitive-content reads
+
+Before any content read, classify the path using approved path metadata and the
+task's declared sensitive-path inventory. For secret or state material, inspect
+only path names, permissions and references; never open, grep, print or load its
+values into model context. Inspect sanitized fixtures or configuration references
+instead. An unknown classification blocks that content read while metadata review
+continues. The host must enforce this read boundary for every tool, including
+Read, Grep and shell commands; prompt instructions do not enforce it. If that
+boundary cannot be verified, request sanitized evidence from the caller and mark
+the dependent content review BLOCKED. Reports and handoffs must redact secret
+values; redaction after a read does not authorize reading raw secret material.
+
 ## Required host evidence
 
 Before delegated shell execution or edits, the caller supplies an attestation

@@ -29,6 +29,12 @@ Mark fixture, live, skipped and blocked evidence separately.
 
 ## Allowed actions
 
+Before content reads, classify paths using approved metadata/sensitive inventory.
+Secret/state/unknown: metadata only. Require verified host controls for all tools
+(Read/Grep/shell); prompts do not enforce this. If unverified, BLOCK reads and
+request sanitized evidence. Never load raw secrets/state. Use sanitized evidence;
+redact outputs. Later redaction never authorizes raw reads.
+
 Before any shell execution or file edit, verify the caller's current host-policy
 attestation described in [execution policy](../docs/execution-policy.md). It must
 bind this session, source SHA, assigned paths, tool/argv surface, credential
