@@ -30,12 +30,12 @@ Failure: BLOCKED; no repository commands. Read
   review or null required argv blocks execution; no substitutes. Execute only
   required checks; analysis/plans report commands unexecuted.
 
-The caller (host orchestrator, including direct use) keeps one acceptance checklist
+The caller (host orchestrator) keeps one acceptance checklist
 in `specs/<task-id>/run-summary.md`: derive outcomes/required CI checks from
-accepted request/requirements, including drill scope and expiry; absent expiry: `none`.
+accepted request/requirements, including drill scope and expiry.
 Each row records requirement source, target/environment/resources, check/expected
 result, CI/config paths/hashes, owner/destination, authorized drill scope, evidence
-path, helper stage/intention path, UTC evidence expiry or `none`. Explain
+path, helper stage/intention path, UTC evidence expiry (`none` if absent). Explain
 inapplicable fields. Rows are gates, not authorization; required gaps are BLOCKED.
 
 Read CI jobs (`.github/workflows/` for GitHub Actions), invoked scripts,
@@ -61,9 +61,9 @@ Independent review requires a different agent/session from the author; else BLOC
    runbook context. Preserve redaction; avoid sensitive high-cardinality labels.
 3. Before a configured check, select its `targets[].commands` key: `validate`,
    `test`, `check`, `security` or `preview` (helper, not counter stage).
-   Record stage/unused INTENTION `.artifacts/devops-sdlc/obs-<nonce>.json`.
-   Substitute path/TARGET/HELPER_STAGE; add `--environment NAME` to `plan` when selected.
-   No `--execute`:
+   Record this key as HELPER_STAGE and the selected target ID as TARGET.
+   Record a new, unused path under `.artifacts/devops-sdlc/` as INTENTION.
+   Substitute these values; add `--environment NAME` to `plan` when selected:
 
    ```sh
    helper="$DEVOPS_PLUGIN_ROOT/scripts/devops.py"

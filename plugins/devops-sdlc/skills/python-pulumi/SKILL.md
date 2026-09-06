@@ -1,6 +1,6 @@
 ---
 name: python-pulumi
-description: "Use when creating or editing Python Pulumi programs and their engine-specific tests. Use terraform-terraspace for HCL; add state-migration for imports and environment-lifecycle for project onboarding."
+description: "Use when creating, editing or previewing Python Pulumi programs and their engine-specific tests. Use terraform-terraspace for HCL; add state-migration for imports and environment-lifecycle for project onboarding."
 ---
 
 # Python Pulumi
@@ -56,14 +56,14 @@ skill receives a verdict; no silent skips.
 
 ## Procedure
 
-1. Before any helper proposal or invocation, explicitly include a plugin-path
-   verification row in the returned checklist: inspect
-   `$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json` and verify
+1. Before helper proposals or calls, return a verification row even with
+   host proof. List the resolved native Claude manifest
+   `$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json` and regular readable Python
    `$DEVOPS_PLUGIN_ROOT/scripts/devops.py` and
-   `$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py` are regular readable Python files.
-   Invoke them with `python3`; executable bits are not required. Record the exact
-   paths and observed readability, or the proposed checks when simulating. A
-   `.codex-plugin` or root-level manifest is not this distribution's manifest.
+   `$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py`. Use `python3`, no executable-bit
+   check. Record paths/readability and cite supplied proof or label observed
+   or proposed checks; never invent execution. Neither `.codex-plugin` nor a
+   root-level manifest substitutes.
    Read `Pulumi.yaml`/`Pulumi.yml`, Python version, pyproject/uv lock,
    component layout, policy pack, tests and stack configuration filenames.
    Resolve the actual project root; do not assume a root-level program.

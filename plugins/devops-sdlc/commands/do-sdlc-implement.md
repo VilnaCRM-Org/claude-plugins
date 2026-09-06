@@ -57,22 +57,21 @@ Never infer approval from labels, timeouts, profile flags or passing tests.
 
 ## Procedure
 
-Before any procedure execution, apply the Iteration guard under the verified
-shared lock: reload the exact entry, apply its stop/exhaustion precedence, then
-validate complete history/count and current caller stop/breaker/run state before
-allocation. Repeat locked state/ownership checks before owner start, without a NEW
-reservation. Emit checks/results in step 3's handoff.
+Before execution, emit step 3's admission checklist. Under the verified shared
+lock, reload the exact entry, apply Iteration guard precedence and validate those
+history/state checks before allocation. Repeat locked state/ownership checks before
+owner start, without a NEW reservation.
 
-1. Resolve the supplied specs directory or its recorded run-summary entry.
+1. Resolve supplied specs or their recorded run-summary entry.
    Require independent PASS in its readiness.md, matching the six artifact hashes,
    profile, accepted source baseline and scope in run-summary.md. Changed planning
    artifacts, requirements or target/profile identity require renewed readiness;
    an implementation diff within the approved stories does not reset planning.
-   Missing, ambiguous or stale readiness is BLOCKED. Read all story dependencies. Follow
+   Missing/ambiguous/stale readiness is BLOCKED. Read story dependencies. Follow
    [Terraform/Terraspace](../skills/terraform-terraspace/SKILL.md) or
    [Python/Pulumi](../skills/python-pulumi/SKILL.md) for the selected target.
-2. Resolve installed BMAD `planning_artifacts`; if different from the supplied
-   specs directory, mirror the selected finalized bundle there, preserving unrelated
+2. Resolve installed BMAD `planning_artifacts`; if it differs from supplied specs,
+   mirror the finalized bundle there, preserving unrelated
    files and checking every artifact hash. Reject ambiguous/stale bundles.
    Confirm `bmalph implement` reads this task's complete bundle before running. Inspect
    `.ralph/@fix_plan.md`. Recheck selected binary/authentication before starting;
@@ -91,15 +90,19 @@ reservation. Emit checks/results in step 3's handoff.
    of `commands/do-sdlc-implement.md`, `skills/AI-AGENT-GUIDE.md` and each applicable
    `SKILL.md` selected by that guide, with each inspected path and current SHA-256.
    Record content/hashes before evaluation; `--plugin-root` alone is insufficient.
-   Proposals specify payload/unknown hashes without claiming injection.
-3. Emit a filled payload with those checks/results to the named
-   `infrastructure-implementer` session:
-   `ledger_path`, exact `[task,stage,agent,target,environment]` key, owner/token
-   and independent file scope. Instruct: start once only after successful ownership
-   admission; never reserve or increment again. Proposals use saved/supplied values
-   or explicit unknowns. Serialize shared IAM/backend/state work; preserve others'
-   edits. Add meaningful regression tests before or with fixes under repository gates.
-4. Helper `plan` defaults to command intention; require
+   Proposals give payload/unknown hashes, never claim injection.
+3. Emit the proposal/handoff to `infrastructure-implementer` with `attempts.json` beside the saved summary,
+   exact `[task,stage,agent,target,environment]` key, owner/token and independent file scope.
+   Include an admission checklist: lock proof; reloaded count; complete coherent history/count
+   validation; current caller stop, breaker and running/pending/uncertain-run checks;
+   active ownership; decision. For EACH check give its supplied/observed value,
+   evidence and next action under that same lock before reserve/start, including
+   revalidation in proposals. Unknowns block execution. Checks bypassed by
+   stop/exhaustion precedence state that reason, not PASS. Start once only after
+   ownership admission; never reserve/increment again. Serialize shared IAM/backend/
+   state work, preserve others' edits and add meaningful regression tests before or with fixes
+   under repository gates.
+4. `plan` creates a command intention; require
    `--stage validate|test|check|security|preview` and explicit `--target`.
    Use the agent guide's exact recipes and reviewed profile argv. Execute local
    validation only after reviewing repository code, using `--execute --trust-repo`.
@@ -111,13 +114,13 @@ reservation. Emit checks/results in step 3's handoff.
    `--preview-authorization` with the protected host grant specified in the agent
    guide: trusted non-fork source, actor, exact backend/operation, temporary role,
    expiry, protected paths and full STS identity must pass before execution.
-5. Require actual test output and completed stories. A CLI exit code alone is
-   insufficient when the tool reported SKIPPED, a placeholder or a breaker trip.
+5. Require actual test output and completed stories; a CLI exit alone cannot pass
+   SKIPPED, placeholders or breaker trips.
    Cloud changes, shared state, imports, refresh, stack initialization and
    production execution require separate operational scope.
 6. If an external prerequisite stops Ralph, follow the agent guide's handoff rules.
-   Retain exit/log/breaker evidence and freeze
-   the partial diff/story checklist. Only after a permitted fix may an authorized
+   Retain exit/log/breaker evidence and freeze the partial diff/story checklist.
+   Only after a permitted fix may an authorized
    parent/operator explicitly own the remaining work/verification in its permitted
    environment. Record handoff, source hashes, actions, tool/backend and independent
    checks. Ralph stays FAILED/BLOCKED; never reset its breaker, replay uncertain
@@ -141,13 +144,11 @@ evidence and source identity. Only PASSED satisfies a required gate.
 
 ## Iteration guard
 
-MAX_ITERATIONS=5 per stage. Reuse saved `specs/<task>/run-summary.md` as human
-report; adjacent `attempts.json` is sole counter authority. Use the
-[atomic caller transaction](../skills/AI-AGENT-GUIDE.md#atomic-attempt-reservation),
-keyed by task, stage, agent, target and environment. Verify actual host locking;
+MAX_ITERATIONS=5 per stage. Use the
+[atomic caller transaction](../skills/AI-AGENT-GUIDE.md#atomic-attempt-reservation).
+Verify actual host locking;
 missing/unverified capability or a conflicting active reservation means BLOCKED.
-Under verified lock, reload exact entry. For a NEW
-reservation, count >=5 means FAILED before missing history; caller stop means BLOCKED;
+For a NEW reservation, count >=5 means FAILED before missing history; caller stop means BLOCKED;
 evidenced open/tripped Ralph breaker FAILED; missing required state/log means BLOCKED.
 The caller atomically validates state
 and persists count+1 with an active owner and token before execution. Before owner
