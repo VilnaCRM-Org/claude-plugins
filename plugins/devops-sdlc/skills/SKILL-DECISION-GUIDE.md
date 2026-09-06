@@ -54,10 +54,12 @@ Use the exact invoked command identifier as the stage key, for example
 for example `terraform-terraspace`. A stage has five procedure attempts.
 The task ledger is the existing task's `run-summary.md`; reuse its exact saved
 repository-relative path. For new work without a ledger, create it once at
-`specs/YYYY-MM-DD-<slug>/run-summary.md`: use the task creation date, lowercase
+`specs/YYYY-MM-DD-<slug>/run-summary.md`: use the UTC calendar date from the host
+clock when the caller first creates this task ledger, and record that date in it.
+Keep the recorded date and path across resumed sessions. For `<slug>`, lowercase
 the task title, replace each run of characters outside `a-z` and `0-9` with one
 hyphen, and trim leading/trailing hyphens. Use `task` if the slug is empty.
-For example, a task titled "Add Cache" created on 2026-09-06 uses
+For example, "Add Cache" with its ledger first created on 2026-09-06 UTC uses
 `specs/2026-09-06-add-cache/run-summary.md`. If that path already belongs to a
 different task, report BLOCKED; never overwrite it or reset its counter.
 Persist the exact ledger path and stage key before the first procedure attempt.

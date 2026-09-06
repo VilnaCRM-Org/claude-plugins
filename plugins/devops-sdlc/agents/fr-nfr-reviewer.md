@@ -85,22 +85,39 @@ but its final report must retain the blocked or skipped requirements.
 
 MAX_ITERATIONS=5. One attempt is one diagnosis, scoped correction or review,
 and verification cycle. The caller owns the stage record, keyed by task, agent,
-target and environment; persist the attempt count in each handoff report and
-carry it forward in the next invocation. Start at zero only for a new task; if
-resuming without its prior count, report BLOCKED instead of assuming zero.
+target and environment. Reuse the task's recorded ledger path; for a genuinely
+new task without one, the caller creates it using the agent guide's new-task
+ledger rule. A new stage entry never replaces an existing task ledger. Use the
+caller-provided stage key and preserve identity, count and breaker in every handoff.
 
-Before each attempt, increment the persisted count by one and visibly restate
-`attempt N/5` with the unmet condition, where N is the updated count. Restate the current count in every progress
-update and final report. If the count is already five, do not start another
-attempt; end as ESCALATED with evidence and the next action. A tripped circuit
-breaker exists when the caller-provided persisted stage record contains a caller
-stop directive, or an open/tripped breaker reported by Ralph, the autonomous
-implementation loop launched by BMALPH, with its log source/path and state;
-exhaustion of this budget also trips it. If required stop
-state or source is absent, report BLOCKED rather than assuming it clear. If any
-breaker is tripped, stop and return ESCALATED without another attempt. Never
-automatically reset, clear, bypass or rename a task to evade a tripped breaker.
-Re-entry preserves both count and breaker state.
+Only the caller may initialize a verified new task record. The caller must
+explicitly confirm no prior attempt under this identity, no caller stop directive,
+and no associated active, pending or uncertain Ralph run. Before the first
+attempt, persist that confirmation, count 0, an explicitly clear breaker and
+no-active-Ralph state. Initialization never creates a replacement identity or
+resets another stage.
+
+Apply this precedence before any new attempt: a known caller stop directive,
+a known open/tripped Ralph breaker, or a count at five or more means ESCALATED,
+even if supporting history is incomplete. If none of those stops is known,
+resumption with missing, invalid or unknown saved count, breaker or Ralph-run
+state is BLOCKED, never assumed zero or clear. Neither outcome starts an attempt.
+
+Ralph is the autonomous implementation loop launched by BMALPH. For an actual
+reported run, retain its observed state and log source/path; absent run evidence
+is BLOCKED unless the known-stop precedence above requires ESCALATED. For a caller
+stop directive, retain its source/reference with the escalation and identify any
+missing source. A verified initialization with no Ralph run needs no nonexistent
+Ralph log. Observe an already-started run without incrementing or starting a
+replacement; pending or uncertain effects block a new attempt until resolved and
+recorded.
+
+Only with verified clear state and a count below five, increment and persist the
+count exactly once before the next attempt, then report `attempt N/5` with the
+unmet condition. Restate that count in every progress update and final report.
+Never automatically reset or clear a breaker, discard prior attempts, rename a
+task or change backend to evade the budget or stop condition. Re-entry preserves
+the same record.
 
 ## Smoke prompt
 

@@ -74,6 +74,12 @@ imports the ready stories and `bmalph run --driver codex` or
 CLI. Planning and skill selection do not start implementation.
 
 Before a new CLI invocation, run the shared `scripts/agent_cli.py detect` helper.
+Successful preflight means that command exits zero and its JSON reports
+`status: READY`, the selected `backend`, `available: true`, `authenticated: true`
+and a nonempty `version`. Record that result in the task ledger. A nonzero exit,
+missing field, malformed result or `BLOCKED` status blocks the dependent call;
+an installed binary alone is insufficient. Preflight confirms CLI readiness only,
+not permission to execute the proposed task.
 Use `--backend auto --prefer claude` or `--prefer codex` for preference; an explicit
 backend remains blocked when its binary/authentication is unavailable. Auto mode
 may select the other authenticated CLI only before execution. Carry its actual
@@ -113,11 +119,16 @@ schema file and prompt file, the proposed form is:
 python3 "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" run --backend "$BACKEND" --prefer "$PREFERENCE" --schema "$SCHEMA_PATH" --plugin-root "$DEVOPS_PLUGIN_ROOT" --cwd . --timeout 300 < "$PROMPT_PATH"
 ```
 
-Pass `--model "$MODEL"` only when an approved model value is available. The
-prompt is supplied on standard input; `--schema`, `--plugin-root`, `--cwd`,
+Pass `--model "$MODEL"` only when the user task instruction or the caller's
+existing configuration supplies an explicit model identifier for that backend.
+Record the exact value and its instruction/configuration source in the task
+ledger before invocation. Otherwise omit `--model`, use the CLI's configured
+default and record `requested_model: null`; report an observed model
+only when the CLI response identifies it. Do not infer a cross-backend alias.
+The prompt is supplied on standard input; `--schema`, `--plugin-root`, `--cwd`,
 `--model` and `--timeout` are options. Here `BACKEND` is the detected selected
 backend, `PREFERENCE` is the requested preference, `SCHEMA_PATH` and `PROMPT_PATH`
-are inspected local files, and `MODEL` is an explicitly approved value when used.
+are inspected local files, and `MODEL` is the recorded explicit identifier when used.
 This recipe does not authorize code implementation, cloud access or an unreviewed
 invocation.
 
@@ -191,7 +202,9 @@ Use the exact invoked command identifier as the stage key. For direct skill use,
 use the skill's frontmatter `name`. A stage has five procedure attempts. Reuse
 the existing task ledger's exact saved repository-relative `run-summary.md` path.
 For new work without a ledger, create it once at
-`specs/YYYY-MM-DD-<slug>/run-summary.md`: use the task creation date, lowercase
+`specs/YYYY-MM-DD-<slug>/run-summary.md`: use the UTC calendar date from the host
+clock when the caller first creates this task ledger, and record that date in it.
+Keep the recorded date and path across resumed sessions. For `<slug>`, lowercase
 the task title, replace each run of characters outside `a-z` and `0-9` with one
 hyphen, and trim leading/trailing hyphens. Use `task` if the slug is empty. If
 that path already belongs to a different task, report BLOCKED; never overwrite
