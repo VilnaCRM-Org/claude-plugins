@@ -187,7 +187,7 @@ class RuntimeEdgeTests(unittest.TestCase):
             runtime.subprocess, "run", side_effect=OSError("missing aws")
         ):
             with self.assertRaises(runtime.Invalid):
-                runtime.verify_aws_account(plan, {})
+                runtime.verify_aws_account(plan, {}, {"aws_executable": "/usr/bin/aws"})
 
     def test_engine_and_uv_allowlist_table(self):
         allowed = [
@@ -238,7 +238,7 @@ class RuntimeEdgeTests(unittest.TestCase):
         result = mock.Mock(returncode=0, stdout=b"000000000000\n")
         with mock.patch.object(runtime.subprocess, "run", return_value=result):
             with self.assertRaises(runtime.Invalid):
-                runtime.verify_aws_account(plan, {})
+                runtime.verify_aws_account(plan, {}, {"aws_executable": "/usr/bin/aws"})
 
     def test_process_start_error_timeout_and_termination_paths(self):
         plan = self.plan()
@@ -393,7 +393,7 @@ class RuntimeEdgeTests(unittest.TestCase):
         preview = self.plan("preview", "dev")
         with mock.patch.dict(os.environ, {"AWS_PROFILE": "fixture"}, clear=False):
             env = runtime.execution_environment(preview)
-        self.assertEqual(env["AWS_PROFILE"], "fixture")
+        self.assertNotIn("AWS_PROFILE", env)
 
     def test_source_selector_and_confined_output_fail_closed(self):
         valid_sha = b"a" * 40 + b"\n"
@@ -526,9 +526,21 @@ class RuntimeEdgeTests(unittest.TestCase):
             json.loads(output.getvalue())["execution"]["status"], "COMPLETED"
         )
         plan = self.plan("preview", "dev")
-        result = mock.Mock(returncode=0, stdout=b"123456789012\n")
+        identity = {
+            "Account": "123456789012",
+            "Arn": "fixture-role",
+            "UserId": "fixture-session",
+        }
+        result = mock.Mock(returncode=0, stdout=json.dumps(identity).encode())
+        grant = {
+            "aws_executable": "/usr/bin/aws",
+            "principal_arn": identity["Arn"],
+            "principal_id": identity["UserId"],
+        }
         with mock.patch.object(runtime.subprocess, "run", return_value=result):
-            runtime.verify_aws_account(plan, {"AWS_SESSION_TOKEN": "not-emitted"})
+            runtime.verify_aws_account(
+                plan, {"AWS_SESSION_TOKEN": "not-emitted"}, grant
+            )
 
     def test_extracted_input_predicates_reject_unsafe_boundaries(self):
         with mock.patch.object(Path, "resolve", return_value=Path("/outside")):
@@ -622,6 +634,13 @@ class RuntimeEdgeTests(unittest.TestCase):
         )
         with (
             mock.patch.object(runtime, "verify_aws_account") as account,
+            mock.patch.object(
+                runtime,
+                "authorize_preview",
+                return_value={"executable": "/usr/bin/pulumi", "expires_at": 1100},
+            ),
+            mock.patch.object(runtime, "preview_environment", return_value={}),
+            mock.patch.object(runtime, "validate_grant_time"),
             mock.patch.object(
                 runtime, "run_process", return_value={"status": "COMPLETED"}
             ),

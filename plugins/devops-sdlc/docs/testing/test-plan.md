@@ -52,7 +52,7 @@ uv run --with pyyaml==6.0.3 python plugins/devops-sdlc/tests/behavior_judge.py \
   --calibrate --require --jobs 2 --timeout 300 --report behavior-report.json
 ```
 
-Require all 32 catalog scenarios plus the safe-preview, unsafe-apply and
+Require all catalog scenarios plus the safe-preview, unsafe-apply and
 false-success calibration seeds. Omit `--ids` for the full gate. A selected-case
 smoke result cannot establish full catalog completion. Preserve runner/judge
 provenance and verify `full_catalog` and unchanged catalog/plugin inputs.

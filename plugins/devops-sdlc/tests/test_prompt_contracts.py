@@ -49,7 +49,7 @@ CONTRACTS = {
     "skill": {
         "profile validation": "validate-profile --repo .",
         "status vocabulary": "Return PASSED, FAILED, SKIPPED or BLOCKED",
-        "attempt limit": "persisted count is already 5, stop with FAILED",
+        "attempt limit": "persisted count is five or more, stop with FAILED",
         "terminal breaker": "never reset or clear it to retry.",
         "atomic reservation": (
             "persists count+1 with active owner/token under one lock before execution."

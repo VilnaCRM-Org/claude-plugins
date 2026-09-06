@@ -803,6 +803,7 @@ class PromptJudgeTests(unittest.TestCase):
             with self.subTest(jobs=jobs), self.assertRaises(subject.AssessmentError):
                 subject.validate_settings(subject.Settings(jobs=jobs), "fixture")
         lock = threading.Lock()
+        first_pair_started = threading.Event()
         active = maximum = 0
 
         def runner(*args, **kwargs):
@@ -810,8 +811,11 @@ class PromptJudgeTests(unittest.TestCase):
             with lock:
                 active += 1
                 maximum = max(maximum, active)
+                if active == 2:
+                    first_pair_started.set()
             try:
-                time.sleep(0.005)
+                if not first_pair_started.wait(timeout=5):
+                    raise AssertionError("two fixture workers did not start")
                 return fake_agent(*args, **kwargs)
             finally:
                 with lock:

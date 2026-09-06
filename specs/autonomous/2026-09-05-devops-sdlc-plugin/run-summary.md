@@ -107,8 +107,10 @@ exhaust possible failures or establish actual deployment, rollback or recovery.
 No cloud resources or shared state were changed. Terraform/Terraspace helper
 preview execution stays blocked until backend identity can be attested; use the
 reviewed protected repository plan workflow. Pulumi preview requires explicit
-backend/stack selection and a live account identity check; this does not attest
-repository-wrapper behavior or prove provider execution succeeded. A zero exit code records COMPLETED/UNVERIFIED,
+backend/stack selection, protected host authorization for source/actor/backend,
+temporary role identity and expiry checks. Its issuer must verify IAM permissions
+and isolation; passing the guard does not prove provider execution succeeded.
+A zero exit code records COMPLETED/UNVERIFIED,
 not semantic PASS. Actual operational 90% automation and human-time reduction remain unmeasured.
 The reporter requires a matching frozen identity/applicability baseline before
 reporting a supplied automation target; it always records external verification
@@ -120,7 +122,7 @@ operational achievement is asserted.
 CodeRabbit and Cubic completed the initial review of b59ccd4. Their findings are
 being reconciled with independent source checks, fixes and focused regressions.
 Qodo reported its trial ended and did not run; no completed Qodo review is claimed.
-Current source requires the final zero-exclusion runtime gate, 31-scenario live
+Current source requires the final zero-exclusion runtime gate, complete live
 catalog with three calibration controls, and a fresh 31-artifact prompt gate.
 The prior version-twelve verification record remains historical until replaced
 by validated evidence for the reviewed source. Final delivery also requires
@@ -161,7 +163,7 @@ bounded-workflow evidence without claiming the failed original run succeeded.
 
 <!-- final-local-verification:start -->
 
-Current local campaign: v18. This source-bound record supersedes earlier final labels; earlier reports remain historical evidence.
+Historical local campaign: v18. These results describe the v18 source snapshot. Later review repairs require fresh full acceptance; this block does not describe the current source.
 
 - 175 deterministic tests passed; 100% of 1,156 statements and 476 branches, with 0 excluded lines. Every recorded deterministic quality gate passed.
 - 33 baseline local operator checks and 10 followup operator checks passed. 2 unrun cloud rows remain BLOCKED.
@@ -171,7 +173,7 @@ Current local campaign: v18. This source-bound record supersedes earlier final l
 
 Model provenance: codex codex-cli 0.153.4: requested model `gpt-5.5`, observed model `None`, model source `requested`. Packaging and synthetic CLI tests do not establish authenticated native Claude execution.
 
-Historical v12 coverage used six excluded entry-point lines under the old configuration; its 100% figure applied to that measured denominator. Final zero-exclusion coverage does not retroactively change that report. Incremental v7/v8 reuse claims remain superseded; v9 made no model calls after detecting the omitted input-label dependency. This current campaign uses fresh full assessments.
+Historical v12 coverage used six excluded entry-point lines under the old configuration; its 100% figure applied to that measured denominator. V18 zero-exclusion coverage does not retroactively change that report. Incremental v7/v8 reuse claims remain superseded; v9 made no model calls after detecting the omitted input-label dependency. V18 used fresh full assessments of its own source snapshot.
 
 Current-head CI, actual reviewer completion, complete pagination, zero unresolved findings and a same-head quiet window remain separate delivery gates. This local record does not assert them. Actual operational automation percentage and human-time savings remain unmeasured; no cloud or shared-state mutation is inferred.
 

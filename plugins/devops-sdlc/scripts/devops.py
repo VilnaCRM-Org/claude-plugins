@@ -13,6 +13,7 @@ import json
 import os
 import re
 import signal
+import stat
 
 # Bounded argv execution is this helper's purpose.
 import subprocess  # nosec B404
@@ -30,6 +31,38 @@ MAX_FILE_BYTES = 2_000_000
 MAX_SOURCE_BYTES = 50_000_000
 MAX_FILES = 10_000
 MAX_AGE = 3600
+MAX_GRANT_BYTES = 16_384
+PREVIEW_AUTHORITY_ROOTS = (
+    Path("/etc/devops-sdlc/preview"),
+    Path("/run/devops-sdlc/preview"),
+)
+GRANT_KEYS = {
+    "schema_version",
+    "kind",
+    "issuer",
+    "actor_uid",
+    "actor",
+    "fork",
+    "repo_path",
+    "repository",
+    "git_sha",
+    "operation_sha256",
+    "backend",
+    "account_id",
+    "principal_arn",
+    "principal_id",
+    "access_key_id",
+    "issued_at",
+    "expires_at",
+    "credentials_expire_at",
+    "source_trusted",
+    "read_only_role_verified",
+    "execution_isolation",
+    "aws_executable",
+    "executable",
+    "path",
+    "home",
+}
 ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$")
 MAKE_TARGET = re.compile(r"^([A-Za-z0-9][A-Za-z0-9_.-]*):(?!=)")
 FORBIDDEN_WORDS = {
@@ -164,6 +197,10 @@ def relative_parts(value: Any) -> PurePosixPath:
 def load_json(path: Path) -> dict:
     if not path.is_file() or path.stat().st_size > MAX_FILE_BYTES:
         raise Invalid("JSON input is missing, not a regular file, or too large.")
+    return decode_json(path.read_bytes())
+
+
+def decode_json(raw: bytes) -> dict:
 
     def pairs(items: list[tuple[str, Any]]) -> dict:
         result = {}
@@ -175,7 +212,7 @@ def load_json(path: Path) -> dict:
 
     try:
         value = json.loads(
-            path.read_text(encoding="utf-8"),
+            raw.decode("utf-8"),
             object_pairs_hook=pairs,
             parse_constant=lambda _: (_ for _ in ()).throw(
                 Invalid("Non-finite JSON numbers are prohibited.")
@@ -610,19 +647,27 @@ def validate_command(command: Any, stage: str, engine: str) -> None:
 
 
 def git_output(root: Path, args: list[str]) -> bytes:
+    executable = "/usr/bin/git" if os.name == "posix" else "git"
+    if os.name == "posix":
+        check_protected(Path(executable))
     command = [
-        "git",
+        executable,
         "--no-optional-locks",
         "-c",
         "core.fsmonitor=false",
+        "-c",
+        "core.hooksPath=" + os.devnull,
+        "-c",
+        "safe.directory=" + str(root),
         "-C",
         str(root),
         *args,
     ]
     try:
-        # Fixed Git metadata commands; PATH/toolchain are part of reviewed local trust.
+        # Metadata never receives ambient credentials or Git configuration overrides.
         result = subprocess.run(  # nosec B603
             command,
+            env=git_environment(),
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -633,6 +678,22 @@ def git_output(root: Path, args: list[str]) -> bytes:
     if result.returncode:
         raise Invalid("Command intentions require a repository with a Git commit.")
     return result.stdout
+
+
+def git_environment() -> dict[str, str]:
+    env = {
+        "PATH": os.defpath,
+        "HOME": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_TERMINAL_PROMPT": "0",
+        "LC_ALL": "C",
+    }
+    if os.name != "posix":
+        env["PATH"] = os.environ.get("PATH", os.defpath)
+        if "SYSTEMROOT" in os.environ:
+            env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+    return env
 
 
 def source_identity(root: Path, profile_path: str) -> dict:
@@ -771,6 +832,9 @@ def build_plan(
         "executed": False,
         "source": source_identity(root, profile_path),
     }
+    plan["operation_sha256"] = canonical_hash(
+        {key: value for key, value in plan.items() if key != "created_at"}
+    )
     plan["intention_sha256"] = canonical_hash(plan)
     return plan
 
@@ -917,6 +981,7 @@ def verify_plan(
             "executed",
             "source",
             "intention_sha256",
+            "operation_sha256",
         },
     )
     created = integer(stored["created_at"], 1, 2**53)
@@ -960,6 +1025,7 @@ def execute_plan(
     trust_repo: bool,
     read_only_credentials: bool,
     timeout: int = 300,
+    preview_authorization: str | None = None,
 ) -> dict:
     integer(timeout, 1, 3600)
     if plan["argv"] is None:
@@ -997,14 +1063,261 @@ def execute_plan(
                 "Terraform/Terraspace preview execution requires backend attestation "
                 "through the reviewed repository or CI handoff."
             )
-        verify_aws_account(plan, env)
+        grant = authorize_preview(root, plan, preview_authorization, timeout)
+        env = preview_environment(env, grant)
+        verify_aws_account(plan, env, grant)
+        validate_grant_time(grant, timeout)
+        if (
+            build_plan(
+                root,
+                plan["profile"],
+                plan["target"],
+                plan["stage"],
+                plan["environment"],
+                now=plan["created_at"],
+            )
+            != plan
+        ):
+            raise Invalid("Preview source changed during identity verification.")
+        execution = {**plan, "argv": [grant["executable"], *plan["argv"][1:]]}
+        validate_grant_time(grant, timeout)
+        result = run_process(execution, cwd, env, timeout, deadline=grant["expires_at"])
+        result["authorization_sha256"] = canonical_hash(grant)
+        return result
     return run_process(plan, cwd, env, timeout)
+
+
+def protected_descriptor(path: Path, *, directory: bool = False) -> int:
+    if os.name != "posix" or not path.is_absolute():
+        raise Invalid("Preview authority requires absolute protected POSIX paths.")
+    descriptor = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        protected_metadata(os.fstat(descriptor), directory=True)
+        if path == Path("/") and not directory:
+            raise Invalid("A regular protected file is required.")
+        for index, name in enumerate(path.parts[1:]):
+            is_directory = directory or index < len(path.parts) - 2
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+            if is_directory:
+                flags |= os.O_DIRECTORY
+            child = os.open(name, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+            protected_metadata(os.fstat(descriptor), directory=is_directory)
+        return descriptor
+    except (OSError, Invalid):
+        os.close(descriptor)
+        raise
+
+
+def protected_metadata(metadata: os.stat_result, *, directory: bool) -> None:
+    expected = (
+        stat.S_ISDIR(metadata.st_mode)
+        if directory
+        else (stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1)
+    )
+    if not expected or metadata.st_uid != 0 or metadata.st_mode & 0o022:
+        raise Invalid(
+            "Preview input must be root-owned and protected from caller writes."
+        )
+
+
+def check_protected(path: Path, *, directory: bool = False) -> None:
+    descriptor = protected_descriptor(path, directory=directory)
+    os.close(descriptor)
+
+
+def read_preview_grant(path: str | None, root: Path) -> dict:
+    if os.name != "posix" or os.geteuid() == 0 or os.getuid() != os.geteuid():
+        raise Invalid(
+            "Credentialed preview requires a non-root, non-setuid POSIX caller."
+        )
+    value = string(path, maximum=4096)
+    absolute = grant_path(value)
+    permitted = any(
+        absolute.is_relative_to(parent) for parent in PREVIEW_AUTHORITY_ROOTS
+    )
+    if not permitted or absolute.is_relative_to(root):
+        raise Invalid(
+            "Preview authorization requires a protected issuer directory "
+            "outside the checkout."
+        )
+    descriptor = protected_descriptor(absolute)
+    try:
+        if os.fstat(descriptor).st_size > MAX_GRANT_BYTES:
+            raise Invalid("Preview authorization exceeds its size limit.")
+        raw = os.read(descriptor, MAX_GRANT_BYTES + 1)
+        if len(raw) > MAX_GRANT_BYTES:
+            raise Invalid("Preview authorization grew beyond its size limit.")
+        return exact_keys(decode_json(raw), GRANT_KEYS)
+    finally:
+        os.close(descriptor)
+
+
+def validate_grant_time(grant: dict, timeout: int) -> None:
+    issued = integer(grant["issued_at"], 1, 2**53)
+    expires = integer(grant["expires_at"], 1, 2**53)
+    credentials = integer(grant["credentials_expire_at"], 1, 2**53)
+    now = time.time()
+    if not issued <= now < expires <= issued + 900:
+        raise Invalid("Preview authorization is expired, future-dated or overlong.")
+    if not expires <= credentials <= issued + 3600 or now + timeout >= expires:
+        raise Invalid(
+            "Preview timeout must end before grant and temporary credential expiry."
+        )
+
+
+def validate_grant_identity(root: Path, plan: dict, grant: dict) -> None:
+    expected = {
+        "schema_version": 1,
+        "kind": "credentialed-pulumi-preview",
+        "actor_uid": os.getuid(),
+        "repo_path": str(root),
+        "repository": plan["project"]["repo"],
+        "git_sha": plan["source"]["git_sha"],
+        "operation_sha256": plan["operation_sha256"],
+        "backend": plan["environment_config"]["backend"],
+        "account_id": plan["environment_config"]["account_id"],
+        "source_trusted": True,
+        "fork": False,
+        "read_only_role_verified": True,
+        "execution_isolation": "protected-toolchain-and-read-only-checkout",
+    }
+    if any(
+        type(grant[key]) is not type(value) or grant[key] != value
+        for key, value in expected.items()
+    ):
+        raise Invalid(
+            "Host preview authorization does not match caller/source/backend scope."
+        )
+    string(grant["issuer"], maximum=160)
+    string(grant["actor"], maximum=160)
+    account = plan["environment_config"]["account_id"]
+    if not re.fullmatch(
+        rf"arn:aws(?:-cn|-us-gov)?:sts::{account}:assumed-role/[^/\s]+/[^/\s]+",
+        string(grant["principal_arn"]),
+    ):
+        raise Invalid("Preview requires an authorized temporary assumed-role identity.")
+    string(grant["principal_id"], maximum=256)
+
+
+def verify_preview_source(root: Path, plan: dict) -> None:
+    check_protected(root, directory=True)
+    verify_git_metadata(root)
+    status = git_output(
+        root, ["status", "--porcelain", "--untracked-files=all", "--ignored"]
+    )
+    if status.strip():
+        raise Invalid(
+            "Credentialed preview requires a clean checkout without ignored inputs."
+        )
+    origin = git_output(root, ["config", "--get", "remote.origin.url"]).decode().strip()
+    repository_name = re.escape(plan["project"]["repo"])
+    if not re.fullmatch(
+        rf"(?:https://github\.com/|git@github\.com:){repository_name}(?:\.git)?", origin
+    ):
+        raise Invalid("Preview origin differs from the authorized GitHub repository.")
+    paths = git_output(root, ["ls-files", "--cached", "-z"]).split(b"\0")
+    if len(paths) > MAX_FILES + 1:
+        raise Invalid("Preview checkout exceeds the source file limit.")
+    for raw in filter(None, paths):
+        check_protected(contained(root, source_filename(raw)))
+
+
+def grant_path(value: Any) -> Path:
+    name = string(value, maximum=4096)
+    path = Path(name)
+    if path.anchor != "/" or str(path) != name or ".." in path.parts:
+        raise Invalid("Host toolchain paths must be canonical absolute paths.")
+    return path
+
+
+def verify_git_metadata(root: Path) -> None:
+    directory = root / ".git"
+    check_protected(directory, directory=True)
+    for relative in ("commondir", "objects/info/alternates", "config.worktree"):
+        if (directory / relative).exists():
+            raise Invalid("Preview rejects linked or alternate Git metadata.")
+    protected_tree(directory)
+    keys = git_output(
+        root, ["config", "--local", "--no-includes", "--name-only", "--list"]
+    )
+    for key in keys.lower().splitlines():
+        if key.startswith((b"include.", b"includeif.")):
+            raise Invalid("Preview Git configuration cannot include external files.")
+
+
+def protected_tree(root: Path) -> None:
+    pending = [root]
+    count = 0
+    while pending:
+        with os.scandir(pending.pop()) as entries:
+            for entry in entries:
+                count += 1
+                if count > MAX_FILES:
+                    raise Invalid("Protected metadata tree exceeds its entry limit.")
+                directory = entry.is_dir(follow_symlinks=False)
+                path = Path(entry.path)
+                check_protected(path, directory=directory)
+                if directory:
+                    pending.append(path)
+
+
+def verify_preview_tools(grant: dict, plan: dict) -> None:
+    for key in ("aws_executable", "executable"):
+        path = grant_path(grant[key])
+        check_protected(path)
+        if not os.access(path, os.X_OK):
+            raise Invalid("Authorized preview tool is not executable.")
+    if Path(grant["executable"]).name != plan["argv"][0]:
+        raise Invalid("Authorized executable differs from planned tool.")
+    paths = grant["path"]
+    if type(paths) is not list or not 1 <= len(paths) <= 16:
+        raise Invalid("Host toolchain PATH must contain 1–16 protected directories.")
+    for value in paths:
+        path = grant_path(value)
+        if os.pathsep in str(path):
+            raise Invalid("Host PATH entries cannot contain a path separator.")
+        check_protected(path, directory=True)
+    check_protected(grant_path(grant["home"]), directory=True)
+
+
+def authorize_preview(root: Path, plan: dict, path: str | None, timeout: int) -> dict:
+    grant = read_preview_grant(path, root)
+    validate_grant_identity(root, plan, grant)
+    validate_grant_time(grant, timeout)
+    verify_preview_source(root, plan)
+    verify_preview_tools(grant, plan)
+    return grant
+
+
+def preview_environment(env: dict[str, str], grant: dict) -> dict[str, str]:
+    names = ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")
+    if any(not os.environ.get(name) for name in names):
+        raise Invalid(
+            "Preview requires explicit temporary session credentials from the host."
+        )
+    if os.environ["AWS_ACCESS_KEY_ID"] != string(grant["access_key_id"]):
+        raise Invalid(
+            "Temporary credential identifier differs from host authorization."
+        )
+    env.update({name: os.environ[name] for name in names})
+    env.update(
+        {
+            "PATH": ":".join(grant["path"]),
+            "HOME": grant["home"],
+            "AWS_CONFIG_FILE": os.devnull,
+            "AWS_SHARED_CREDENTIALS_FILE": os.devnull,
+            "AWS_EC2_METADATA_DISABLED": "true",
+        }
+    )
+    return env
 
 
 def execution_environment(plan: dict) -> dict[str, str]:
     env = {
         name: os.environ[name]
-        for name in ("PATH", "HOME", "USER", "TMPDIR", "SYSTEMROOT")
+        for name in ("PATH", "HOME", "USER", "SYSTEMROOT")
         if name in os.environ
     }
     env.update(
@@ -1033,29 +1346,16 @@ def execution_environment(plan: dict) -> dict[str, str]:
                 "env": plan["environment"],
             }
         )
-    if plan["requires_credentials"]:
-        for name in (
-            "AWS_ACCESS_KEY_ID",
-            "AWS_SECRET_ACCESS_KEY",
-            "AWS_SESSION_TOKEN",
-            "AWS_PROFILE",
-            "AWS_WEB_IDENTITY_TOKEN_FILE",
-            "AWS_ROLE_ARN",
-        ):
-            if name in os.environ:
-                env[name] = os.environ[name]
     return env
 
 
-def verify_aws_account(plan: dict, env: dict[str, str]) -> None:
+def verify_aws_account(plan: dict, env: dict[str, str], grant: dict) -> None:
     command = [
-        "aws",
+        grant["aws_executable"],
         "sts",
         "get-caller-identity",
-        "--query",
-        "Account",
         "--output",
-        "text",
+        "json",
     ]
     try:
         # Fixed metadata-only STS command; output is compared, never echoed.
@@ -1070,13 +1370,31 @@ def verify_aws_account(plan: dict, env: dict[str, str]) -> None:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Invalid("AWS account metadata preflight could not complete.") from exc
-    expected = plan["environment_config"]["account_id"].encode()
-    if result.returncode or result.stdout.strip() != expected:
-        raise Invalid("AWS caller account does not match the selected environment.")
+    if result.returncode or len(result.stdout) > MAX_GRANT_BYTES:
+        raise Invalid("AWS identity metadata preflight failed or exceeded its limit.")
+    observed = decode_json(result.stdout)
+    expected = {
+        "Account": plan["environment_config"]["account_id"],
+        "Arn": grant["principal_arn"],
+        "UserId": grant["principal_id"],
+    }
+    if any(observed.get(key) != value for key, value in expected.items()):
+        raise Invalid(
+            "AWS caller account/role/session differs from host authorization."
+        )
 
 
-def run_process(plan: dict, cwd: Path, env: dict[str, str], timeout: int) -> dict:
+def run_process(
+    plan: dict,
+    cwd: Path,
+    env: dict[str, str],
+    timeout: int,
+    *,
+    deadline: float | None = None,
+) -> dict:
     started = time.monotonic()
+    if deadline is not None and time.time() >= deadline:
+        raise Invalid("Preview authorization expired before process start.")
     try:
         # Revalidated allowlisted argv, explicit trust, no shell, suppressed output.
         process = subprocess.Popen(  # nosec B603
@@ -1094,7 +1412,12 @@ def run_process(plan: dict, cwd: Path, env: dict[str, str], timeout: int) -> dic
         ) from exc
     timed_out = False
     try:
-        exit_code = process.wait(timeout=timeout)
+        remaining = (
+            timeout
+            if deadline is None
+            else min(timeout, max(0, deadline - time.time()))
+        )
+        exit_code = process.wait(timeout=remaining)
     except subprocess.TimeoutExpired:
         timed_out = True
         terminate_process_tree(process)
@@ -1142,6 +1465,7 @@ def argument_parser() -> argparse.ArgumentParser:
             subparser.add_argument("--execute", action="store_true")
             subparser.add_argument("--trust-repo", action="store_true")
             subparser.add_argument("--read-only-credentials", action="store_true")
+            subparser.add_argument("--preview-authorization")
             subparser.add_argument("--timeout", type=int, default=300)
         if name == "verify-plan":
             subparser.add_argument("--plan", required=True)
@@ -1179,6 +1503,7 @@ def main(argv: list[str] | None = None) -> int:
                     trust_repo=args.trust_repo,
                     read_only_credentials=args.read_only_credentials,
                     timeout=args.timeout,
+                    preview_authorization=args.preview_authorization,
                 )
         print(json.dumps(result, indent=2, sort_keys=True))
         outcome = result.get("execution", result.get("intention", result))

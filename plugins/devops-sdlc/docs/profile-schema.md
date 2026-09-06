@@ -107,13 +107,14 @@ It does not sandbox Make, pytest, Python imports, providers, Docker or the host.
 Even a target named `test` can run arbitrary repository code. The runtime never
 interprets a profile as permission to run it.
 
-Pulumi preview execution additionally requires `--environment NAME` and
-`--read-only-credentials`. Before starting the preview it runs the fixed
-metadata-only command `aws sts get-caller-identity --query Account --output text`
-and rejects an account mismatch or failed preflight. The flag acknowledges
-appropriate read-only credential scope; STS identity does not prove IAM
-permissions are read-only. Use short-lived credentials already provided by
-the authorized workflow.
+Pulumi preview execution additionally requires `--environment NAME`,
+`--read-only-credentials` and `--preview-authorization PATH`. The
+[protected host grant](preview-authorization.md) must bind this actor, trusted
+non-fork source/head, operation, backend and short-lived assumed role. The helper
+validates protected source/toolchain paths and expiry, then uses the authorized
+AWS executable for `sts get-caller-identity --output json`. It rejects mismatched
+Account, Arn or UserId before preview. STS does not prove read-only IAM: the
+trusted issuer must independently verify permissions and execution isolation.
 
 Terraform and Terraspace preview intentions are supported. Their runtime
 `--execute` preview path is blocked because this helper cannot safely attest the
@@ -145,7 +146,8 @@ environment through `TS_ENV` and `env`, and the selected stack through
 Direct engine stack arguments must match the selected stack.
 
 These supplied values are a command contract, not independent proof of a
-provider's destination. Reviewed repository code must honor them. A Pulumi
+provider's destination. The host grant authorizes the exact backend URI;
+reviewed repository code must honor the selection. A Pulumi
 program can define additional providers; STS preflight only attests the caller
 identity used by that preflight.
 

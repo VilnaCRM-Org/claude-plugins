@@ -7,6 +7,12 @@ but Makefiles, Python, providers and subprocesses still execute code.
 cloud authority. The evaluation adapter's tool-disabled sessions are a separate
 proposal-testing boundary, not the operational execution driver.
 
+Credentialed Pulumi previews additionally enforce the
+[protected host authorization contract](preview-authorization.md). The issuer
+must authorize actor, trusted non-fork source, operation, backend and short-lived
+read-only role. The runtime validates that grant and full identity before preview;
+it cannot discover effective IAM permissions or create the required host isolation.
+
 ## Sensitive-content reads
 
 Before any content read, classify the path using approved path metadata and the

@@ -76,15 +76,19 @@ skill receives a verdict; no silent skips.
    unit/integration, coverage, mutation and CLI gates for every changed Python file and every existing required repository gate. Use
    Pulumi mocks for resource wiring and negative configuration tests, while
    recording that mocks do not validate actual IAM, provider or cloud behavior.
-4. Propose the exact reviewed profile preview mapping for the selected target.
-   Helper execution uses `plan --stage preview --target "$TARGET_ID"
-   --environment "$ENVIRONMENT" --execute --trust-repo --read-only-credentials`
-   after `validate-profile --repo .`; include `--repo .` and the inspected
-   Python helper path as in the agent guide. Never omit the required stage.
-   Verify effective backend/stack/account/region and the correct role purpose;
-   the live STS account check does not itself prove the role has read-only IAM.
-   Execute preview through the repository's reviewed mapping. Keep shared secrets
-   KMS-encrypted; never use `--show-secrets`, raw exports or plaintext state.
+4. Propose the reviewed profile preview mapping for the selected target.
+   Use the authenticated Python helper with `plan --repo . --stage preview
+   --target "$TARGET_ID" --environment "$ENVIRONMENT" --execute --trust-repo
+   --read-only-credentials --preview-authorization "$PREVIEW_AUTHORIZATION"`
+   after profile validation. The trusted host supplies that protected grant for
+   the exact actor, trusted non-fork source/head, operation, backend and temporary
+   role. Require its issuer to verify read-only IAM and isolate execution;
+   caller flags do not sandbox Python or prove permissions. The helper checks
+   grant bindings, protected source/toolchain, expiry and full STS identity before
+   preview. Follow the [authorization contract](../../docs/preview-authorization.md);
+   absent/mismatched proof is BLOCKED, never a reason to self-issue a grant or run
+   fork code with credentials. Keep shared secrets KMS-encrypted; never use
+   `--show-secrets`, raw exports or plaintext state.
 5. Require actual preview and saved-plan provenance; reject placeholder preview
    files and metadata-only programs as deployment proof. Preserve test-to-prod
    promotion at one source SHA and protected environment reviewers.
@@ -114,7 +118,7 @@ Reuse the task's recorded `specs/<task-id>/run-summary.md`. If no task record ex
 select its date/task-title slug path, initialize the verified new sidecar under
 lock before creating the first human summary, and preserve that path.
 One attempt means one execution of this procedure. For a NEW reservation, if its
-persisted count is already 5, stop with FAILED and the unmet exit condition.
+persisted count is five or more, stop with FAILED and the unmet exit condition.
 Use the [atomic caller transaction](../AI-AGENT-GUIDE.md#atomic-attempt-reservation):
 the verified host primitive persists count+1 with active owner/token under one
 lock before execution. Missing capability or active/uncertain ownership conflicts

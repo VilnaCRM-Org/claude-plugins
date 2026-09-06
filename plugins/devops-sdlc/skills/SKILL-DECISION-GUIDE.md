@@ -30,7 +30,8 @@ Caller means host orchestrator. Before routing, read [the agent guide](AI-AGENT-
 follow “Claude and Codex backend contract” for paths/preflight/role delivery and
 “Atomic attempt reservation” for ledger mutations. Without it, routing, CLI calls
 and ledger writes are BLOCKED; only authorized document/inventory reads may continue.
-Inspect/record absolute `DEVOPS_PLUGIN_ROOT`; unresolved/unverified means BLOCKED.
+Authenticate the expected root/helper hashes by that contract before execution;
+missing/mismatched proof is BLOCKED.
 Then run from the task repository
 `python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
 for `.claude/devops-sdlc.json`. A nonzero exit or invalid profile is BLOCKED.

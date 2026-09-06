@@ -32,9 +32,9 @@ reviewers and QA remain independent. Preserve other agents' edits.
 
 ## Shared rules
 
-Read `.claude/devops-sdlc.json` only after
+Authenticate helpers by the backend contract, then run
 `python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
-returns a valid profile; otherwise stop dependent work as BLOCKED.
+before reading `.claude/devops-sdlc.json`; failure/invalid profile is BLOCKED.
 Use the [decision guide](SKILL-DECISION-GUIDE.md) for action-based routing.
 Carry source SHA, target/environment, file ownership and remaining iteration
 budget in each handoff. A root is the selected profile target's repository-relative directory. Two roots
@@ -56,10 +56,13 @@ requires independently verified current-source evidence, not an agent's claim.
 
 ## Claude and Codex backend contract
 
-Resolve and record `DEVOPS_PLUGIN_ROOT` as the inspected plugin's absolute
-installation/source path. Native Claude can obtain it from `CLAUDE_PLUGIN_ROOT`;
-Codex receives the explicit path and reads command, agent and skill files from
-there. Claude aliases and frontmatter model names do not register Codex commands
+Before helpers, use trusted host read/hash tools to match resolved absolute
+`DEVOPS_PLUGIN_ROOT` and `.claude-plugin/plugin.json`, `scripts/devops.py`,
+`scripts/agent_cli.py` SHA-256 to user/trusted-host reviewed directory plus hashes
+(or exact commit blobs). Record/recheck before execution; missing/mismatched proof
+is BLOCKED. No candidate self-attestation.
+Claude may use `CLAUDE_PLUGIN_ROOT`; Codex needs the explicit root.
+Claude aliases and frontmatter model names do not register Codex commands
 or authorize model alias translation. BMAD is the installed planning workflow
 that produces requirements, architecture, stories and a readiness decision.
 BMALPH is the installed command-line integration that consumes those approved
@@ -182,11 +185,9 @@ successful.
 
 ## Exact plugin paths and helper recipes
 
-This distribution uses `.claude-plugin/plugin.json` in both CLI modes. Verify
-that manifest and the readable `scripts/devops.py` and `scripts/agent_cli.py`
-files beneath the recorded `DEVOPS_PLUGIN_ROOT`. Invoke them with `python3`;
-their executable bit is not required. Do not guess a `.codex-plugin` manifest,
-a root-level manifest, or a native Codex installation from source-context mode.
+Use `python3` with the readable helpers under that authenticated root; executable
+bits are unnecessary. Do not infer `.codex-plugin`, root-level manifests or native
+Codex installation from source-context mode.
 
 The helper subcommand `plan` always requires `--stage`; it means command intention,
 not automatically a cloud plan. Run `validate-profile` against the selected
@@ -204,28 +205,24 @@ python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_
 ```
 
 Only `plan --stage validate --execute --trust-repo` executes reviewed validation;
-`plan --stage validate` and `plan --stage preview` record intentions. Before any
-credentialed preview, verify the selected profile,
-the exact emitted argv and its source binding. For this helper's AWS targets,
-the caller's reviewed read-only preflight is `aws sts get-caller-identity --output
-json`, run with the same effective credential source and environment as the
-proposed command. Require exit zero and inspect its `Account`, `Arn` and `UserId`.
-Compare `Account` with the selected profile environment's `account_id`; compare
-the principal/assumed-role identity in `Arn` with the exact permitted principal or
-role recorded in the task's authorization evidence. The profile does not itself
-define that role permission. Record the authorization reference, command, returned
-identity fields and comparison result without credentials. The helper checks only the account, not role permission.
-For another read-only identity probe, the caller must inspect and record its exact argv,
-expected fields and comparison rule at the current source revision. That rule
-must enforce the same account and authorized-principal/role checks above.
-Missing review proof, or absent, mismatched or uncertain identity, role, mapping
-or authorization, means BLOCKED; record the required authorized confirmation.
-Only after all profile, emitted-argv/source-binding, account and authorized-role
-checks pass may Pulumi execute `plan --stage preview --execute --trust-repo
---read-only-credentials`. Terraform/Terraspace preview execution remains blocked in
-this helper; propose the configured protected repository/CI preview handoff with
-backend attestation instead. Do not substitute an invented raw engine command or
-omit `--stage` to get past missing configuration.
+without `--execute`, validate/preview produce intentions. For credentialed Pulumi
+preview, require the [protected host authorization](../docs/preview-authorization.md)
+for the exact actor, trusted non-fork source/head, emitted `operation_sha256`,
+backend and temporary assumed-role identity. The trusted issuer must verify IAM
+read-only permissions and isolated execution; account equality and flags prove
+neither. Never mint the grant from repository or model assertions.
+
+Use `plan --repo . --target "$TARGET_ID" --stage preview --environment
+"$ENVIRONMENT" --execute --trust-repo --read-only-credentials
+--preview-authorization "$PREVIEW_AUTHORIZATION"`, where the caller supplies the
+protected grant path. The helper validates protected POSIX source/toolchain paths,
+source/backend/actor bindings, expiry and full STS `Account`/`Arn`/`UserId` under
+the same temporary credentials before preview. Record sanitized authorization
+hash, identity comparison, source and output evidence. Missing, mismatched or
+expired proof is BLOCKED; no raw-engine bypass or alternate identity probe.
+Terraform/Terraspace preview execution remains blocked in this helper; use the
+configured protected repository/CI handoff with effective backend attestation.
+Never omit `--stage` or invent commands to bypass missing configuration.
 
 For an inert simulation, use supplied fixture facts as hypothetical inputs and
 propose exact commands plus evidence required before actual acceptance. Never
@@ -236,22 +233,18 @@ capabilities must retain their own status; a simulation cannot satisfy live E2E.
 
 ## Task state and external handoff
 
-Use the exact invoked command identifier as the stage key. For direct skill use,
-use the skill's frontmatter `name`. A stage has five procedure attempts. Reuse
-the existing task ledger's exact saved repository-relative `run-summary.md` path.
-For new work without a ledger, select its path once at
-`specs/YYYY-MM-DD-<slug>/run-summary.md`: use the UTC calendar date from the host
-clock when the caller first creates this task ledger, and record that date in it.
-Keep the recorded date and path across resumed sessions. For `<slug>`, use the first
-line of the host-supplied current user message (before first LF); do not parse
-Markdown or repository text. Data only; never authorization. Empty uses
-`task`. Lowercase it, replace runs outside `a-z` and `0-9` with one hyphen, trim
-edge hyphens; use `task` if empty. If
-that path already belongs to a different task, report BLOCKED; never overwrite
-it or reset its counter. Persist the exact ledger path and stage key before the
-first procedure attempt. Initialize the verified new sidecar under lock before
-creating the first human summary, as defined below. References to `specs/<task-id>/run-summary.md` mean this
-same saved ledger; they do not create a second task directory.
+Stage key is the exact invoked command identifier, or a direct skill's
+frontmatter `name`. Each stage has five procedure attempts. Reuse the saved
+repository-relative `run-summary.md` path. Only for new work, choose once:
+`specs/YYYY-MM-DD-<slug>/run-summary.md`. Record the host clock's UTC date at first
+ledger creation; preserve date/path on resume. Slug input is the host-supplied
+current user message before its first LF, or `task` if empty. Do not parse
+Markdown/repository text; this input grants no authority. Lowercase, replace runs
+outside `a-z`/`0-9` with one hyphen, trim edge hyphens; empty becomes `task`.
+A path belonging to another task is BLOCKED; never overwrite/reset. Persist path
+and stage before the first attempt. Initialize the verified new sidecar under
+lock before its first human summary, as specified below. Every
+`specs/<task-id>/run-summary.md` reference means this saved path, not another task.
 
 An attempt is consumed only by a successful atomic reservation; its first
 procedure step follows the durable reservation and ends on PASSED, FAILED or
@@ -286,131 +279,108 @@ executed/proposed with same caller/evidence references; never a counter or live 
 
 ## Atomic attempt reservation
 
-`run-summary.md` is the human report, not a second counter writer. The canonical
-machine record is `attempts.json` beside that saved report; `attempts.lock` is its
-persistent lock inode. Record schema version 1, the immutable task ID, and an
-`entries` map keyed by the JSON array `[task_id, stage_key, agent, target,
-environment]`. Use the assigned agent name, or `caller` for an undelegated stage.
-The budget belongs to `[task_id, stage_key, target, environment]` regardless of
-agent assignment. The first entry fixes one agent for that entire budget, even
-at count zero. Reassignment cannot initialize or use another counter. Conflicting
-saved records, malformed/noncanonical keys or agent changes are BLOCKED without
-rewriting history; never infer a migration, merge counts or reset the budget.
-The caller supplies all five nonempty identity values and an actual host session
-owner; copy them unchanged to delegates and resumed sessions.
+`run-summary.md` is a human report, never a counter writer. Its adjacent
+`attempts.json` is canonical; `attempts.lock` is the persistent lock inode.
+Schema version 1 records immutable task ID and `entries`, keyed by JSON array
+`[task_id, stage_key, agent, target, environment]`. The caller supplies five
+nonempty values and actual host session owner, copied unchanged to delegates/resumes.
+Use the assigned agent name, or `caller` when undelegated. Budget belongs to
+`[task_id, stage_key, target, environment]`: the first entry fixes its agent even
+at count zero. Reassignment cannot obtain another counter. Conflicting records,
+malformed/noncanonical keys or agent changes are BLOCKED without rewriting history.
+Never infer migration, merge counts or reset budgets.
 
-This is a caller-executed Python 3 stdlib reference package, not a shipped
-`devops.py` subcommand. Its reviewed source is
-`$DEVOPS_PLUGIN_ROOT/tests/ledger_reference/`; the
-[exact-file implementation reference](../docs/atomic-ledger-reference.md) displays
-the same package files. That supporting resource remains shipped and hash-bound;
-read it when inspecting the caller implementation. After inspecting every package file and recording its
-path and SHA-256, the caller may copy those exact files without modification into
-a caller-owned protected directory as `ledger_reference/`: a directory the
-caller created or selected, whose retained descriptor, owner/access controls and
-host write isolation it has verified. Verify the copied bytes against the
-recorded hashes and use that parent directory as the explicit Python import path
-in the permitted host session; never add unreviewed repository paths to it.
-Import with `from ledger_reference import transaction`, then call
-`transaction(directory, identity, request, observe)` as specified below. Do not
-extract or execute Python from Markdown. Missing files, a hash mismatch or an
-unverified import path is BLOCKED. Before using it, the caller must verify `fcntl.flock`,
-`os.replace` and directory `fsync` on the actual shared filesystem using two
-contending inert processes. Verify both sessions use the same protected lock
-inode and task directory; advisory locks require every caller/writer to obey this
-protocol. If that capability or host write isolation cannot be verified, report
-BLOCKED without incrementing or starting. Inspect host inventory and the actual
-probe result; importing `fcntl` alone is insufficient. This mechanism coordinates
-cooperating callers; it is not protection against arbitrary authorized repository
-code or a malicious process with write access.
+This caller-executed Python 3 stdlib package is not a `devops.py` subcommand.
+Inspect every file in `$DEVOPS_PLUGIN_ROOT/tests/ledger_reference/` and its matching
+[exact-file reference](../docs/atomic-ledger-reference.md); record paths/SHA-256.
+The resource remains shipped and hash-bound. Copy the package unchanged as
+`ledger_reference/` into a caller-owned protected directory. Verify its retained
+descriptor, owner/access controls and host write isolation, then compare copied
+bytes with those hashes. In the permitted host session, use only that parent as
+the explicit import path; never add unreviewed repository paths. Import
+`from ledger_reference import transaction`; call
+`transaction(directory, identity, request, observe)`. Never execute Markdown.
+Missing files, differing hashes or an unverified import path mean BLOCKED.
 
-Open the repository root as a retained directory descriptor; traverse each
-recorded task-directory component with `os.open(component, os.O_DIRECTORY |
-os.O_NOFOLLOW, dir_fd=parent)`, rejecting empty, `.` and `..` components and
-symlinks. Pass the resulting descriptor as `directory` below; keep it open until
-the transaction returns. Create a genuinely new task directory only within the
-reviewed repository scope. Never unlink/replace the lockfile or assume a local
-lock coordinates separate hosts without an observed shared-filesystem probe.
+Before use, inspect host inventory and a two-process inert contention probe on
+the actual shared filesystem proving `fcntl.flock`, `os.replace`, directory
+`fsync`, and the same protected lock inode/task directory in both sessions.
+Importing `fcntl` is insufficient. Unverified primitives or write isolation mean
+BLOCKED before increment/start. Every writer must obey these advisory locks:
+they coordinate cooperating callers, not malicious writers or arbitrary
+repository code with write access.
 
-Only the caller may issue `initialize`. First save an inspected JSON evidence
-file beside the planned sidecar, before creating `run-summary.md`. Its filename
-is `initialization-evidence-<identity-sha256>.json`: compute lowercase SHA-256 hex
-from the UTF-8 bytes of `json.dumps(identity, ensure_ascii=False,
-separators=(",", ":"))`, where `identity` is the exact five-string JSON array
-`[task_id, stage_key, agent, target, environment]` with no added whitespace or
-newline. Create it exclusively; never overwrite an existing evidence file. A
-collision or an existing record means BLOCKED for initialization until the caller
-verifies the retained history; it does not authorize a zero-count reset. This
-keeps each entry's evidence immutable across later entries. The file must record the exact five-part identity, repository and task
-directory, host/session owner, UTC observation time, and the inspected paths or
-host queries with their results proving: no prior summary/sidecar entry or other
-known task history; no caller stop; no Ralph breaker; and no active, pending or
-uncertain execution for this identity. Record the two-process filesystem probe's
-log path and SHA-256 there too. An operator assertion without those observed
-results is insufficient; absent or uncertain history is BLOCKED. Pass that
-repository-relative evidence path plus its SHA-256 as the nonempty
-`verified_new_task_reference` string in the initialize request. The caller must
-verify its contents and bytes before invoking the transaction; the reference
-algorithm stores this string but does not validate the external file's claims.
-Initialize before creating the first human report. If a historical
-`run-summary.md` exists but the sidecar is missing, BLOCK pending an authorized,
-locked migration that imports its verified count, states, evidence and any active
-owner. Missing sidecar is never permission to initialize zero. A new entry also
-requires verified absence of prior history for that exact key; it cannot replace
-an existing entry or let a backend change create another budget.
+Retain a repository-root directory descriptor. Traverse each recorded task path
+component with `os.open(component, os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)`;
+reject empty, `.`, `..` and symlinks. Pass the final descriptor as `directory` and
+retain it until return. Create new task directories only within reviewed scope.
+Never unlink/replace the lockfile or assume cross-host locking without the
+observed shared-filesystem probe.
 
-The caller invokes `transaction(directory, identity, request, observe)` with `owner` and
-one `action`: `initialize`, `reserve`, `start`, `observe` or `finish`. After
-`reserve` returns RESERVED, pass its token and attempt number to the one assigned
-executor. `start` durably records started before returning START_ONCE; launch the
-procedure only once on that return. A caller that already started a delegated
-attempt passes the existing execution handle; its agent may inspect that same
-process rather than calling `start` or `reserve` again. OBSERVE_ONLY never
-permits new procedural work, replay or executable continuation after a stop.
-Any existing live execution remains subject to the host's stop enforcement;
-a marker alone cannot recreate its execution handle. Before `reserve`, report
-the saved count as `stage: n/5` attempts already used; after RESERVED, or when
-the matching owner reuses that recorded reservation, the saved count includes
-the attempt. Report that unchanged post-reserve `stage: n/5` in every
-handoff/outcome. Transaction decisions such as RESERVED are coordination results,
-not successful task gates.
+Only the caller may `initialize`. Before the first summary, exclusively create
+`initialization-evidence-<identity-sha256>.json` beside the planned sidecar.
+The digest is lowercase SHA-256 of the UTF-8 bytes of
+`json.dumps(identity, ensure_ascii=False, separators=(",", ":"))`, without added
+whitespace/newline. `identity` is the exact five-string array
+`[task_id, stage_key, agent, target, environment]`. Never overwrite evidence;
+collisions/existing records BLOCK initialization pending retained-history review,
+not a zero-count reset. Each entry's evidence stays immutable.
 
-State observations (`caller_stop`, `breaker`, `ralph`, `ralph_evidence`) are
-caller-verified evidence, not values guessed by the executor. `observe` is a
-trusted caller-supplied callable invoked under the held lock before admission
-to reserve/start. Already-known terminal stops return without needing a new
-observation. Missing/invalid saved state or required evidence blocks before the
-callback; a fresh clear observation cannot reconstruct unknown history. Otherwise
-the callback receives `(identity, copied_entry)`. It must actually collect current host/caller state
-and return `verified: true`, the exact `identity`, nonempty `evidence` reference,
-boolean `caller_stop`, `breaker` (`clear`, `open`, `tripped`), and `ralph` (`none`,
-`active`, `pending`, `completed`, `uncertain`). A true caller stop requires a
-nonempty `caller_stop_evidence`; any run or non-clear breaker requires a nonempty
-`ralph_evidence` log/reference. The caller must inspect and verify this callback's
-implementation and host access; a model-created always-clear stub is not valid
-live evidence. Missing, throwing or unverified callbacks BLOCK without starting.
-The reference rejects duplicate JSON keys at every nesting before mutation.
-It validates exact integer counts, token/owner/phase fields and sequential history
-before using or closing active ownership. It stores validated observations even
-when a newly observed stop blocks work;
-it never automatically clears a known stop/breaker or erases a past run. For
-`finish`, only the verified owner may provide the actual terminal outcome and
-nonempty evidence after proving no child process, pending or uncertain effect
-remains. That transaction appends history and clears active ownership without
-changing the count. A reserved attempt that never safely starts is still spent.
-An exception, crash, timeout or uncertain persistence/start outcome means BLOCKED:
-retain/re-read the marker and evidence, never retry the action blindly. There is
-no TTL takeover, automatic marker clearing, replay, decrement or breaker reset.
-A hard kill may leave an exact `.attempts-<32 lowercase hex>` candidate snapshot.
-Under the lock, any such leftover blocks further transactions without opening,
-promoting or deleting it. It may contain an uncommitted count or stop observation;
-automatic sweeping could erase uncertain history. This halt prevents retries from
-accumulating more snapshots. Preserve the candidate, canonical ledger and lock;
-only separately authorized recovery may reconcile verified history and remove a
-leftover after proving no execution can continue. Never choose a snapshot by its
-filename or age, or treat a missing canonical ledger as permission to reset.
-A separately authorized operator may resolve ownership only after proving the
-previous execution cannot continue, preserving its consumed count and history.
+Record exact identity, repository/task directory, host/session owner, UTC time,
+and inspected paths/host-query results proving no prior summary/sidecar entry or
+other known history, caller stop, Ralph breaker, or active/pending/uncertain run.
+Include the two-process probe log path/SHA-256. Assertions without observed
+results, absent history or uncertainty are BLOCKED. Verify contents/bytes, then
+pass its repository-relative path plus SHA-256 as nonempty
+`verified_new_task_reference`. The algorithm stores this string; it does not
+verify the external claims. Initialize before creating the human report.
+An existing summary with no sidecar BLOCKS pending an authorized locked migration
+of verified count, states, evidence and active owner; never initialize zero.
+Every new entry requires verified absence of prior history for its exact key.
+No entry replacement or backend change may create a fresh budget.
+
+Call `transaction(directory, identity, request, observe)` with `owner` and one
+`action`: `initialize`, `reserve`, `start`, `observe` or `finish`. RESERVED returns
+a token/attempt number for one assigned executor. `start` durably marks started
+before START_ONCE; only that return permits one procedure launch. If already
+started, pass its actual execution handle for inspection, never another
+`start`/`reserve`. OBSERVE_ONLY grants no new work, replay or continuation after
+a stop. The host must stop existing execution; a marker cannot recreate a handle.
+Before reserve, report saved `stage: n/5` attempts used. After RESERVED or reuse
+by its matching owner, that unchanged count includes the attempt: report it in
+every handoff/outcome. Coordination results such as RESERVED are not task PASS.
+
+State fields (`caller_stop`, `breaker`, `ralph`, `ralph_evidence`) require verified
+caller evidence, never executor guesses. Apply the reference's action-specific
+ownership/stop checks first; missing/invalid saved state or required evidence
+BLOCKS before the callback. Fresh clear observations cannot recreate history.
+Otherwise invoke trusted `observe(identity, copied_entry)` under the held lock.
+The caller must inspect its implementation/host access and verify it collects
+current host/caller state; an always-clear model stub is not live evidence.
+Require `verified: true`, exact `identity`, nonempty `evidence`, boolean
+`caller_stop`, `breaker` (`clear`, `open`, `tripped`) and `ralph` (`none`, `active`,
+`pending`, `completed`, `uncertain`). A true stop needs `caller_stop_evidence`;
+any run or non-clear breaker needs `ralph_evidence`, each a nonempty log/reference.
+Absent, throwing or unverified callbacks BLOCK without starting.
+
+Reject duplicate JSON keys at every nesting before mutation. Validate exact
+integer counts, token/owner/phase and sequential history before using/closing
+ownership. Persist validated observations even when they reveal a stop; never
+clear known stop/breaker or erase a past run automatically. Only the verified
+owner may `finish`, supplying actual terminal outcome and nonempty evidence after
+proving no child, pending or uncertain effect remains. Append history and clear
+active ownership without changing count. A reserved but unstarted attempt is spent.
+
+Exceptions, crashes, timeouts or uncertain persistence/start mean BLOCKED:
+retain/re-read marker/evidence; no blind retry, TTL takeover, automatic clearing,
+replay, decrement or breaker reset. A hard kill may leave an exact
+`.attempts-<32 lowercase hex>` candidate snapshot. Under lock, any leftover blocks
+all transactions without opening/promoting/deleting it; it may hold an uncommitted
+count or stop. Never sweep or choose by filename/age, accumulate more snapshots,
+or treat absent canonical data as permission to reset. Preserve candidate,
+canonical ledger and lock. Only separately authorized recovery may reconcile
+verified history/remove leftovers or resolve ownership after proving prior
+execution cannot continue and preserving consumed count/history.
 
 The executable reference is bounded to ledger coordination; it runs no workflow,
 CLI backend or cloud command. The caller must treat any raised exception as

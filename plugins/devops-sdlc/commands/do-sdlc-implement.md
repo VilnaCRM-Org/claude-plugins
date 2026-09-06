@@ -108,8 +108,10 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    `--read-only-credentials`; that acknowledgement cannot restrict actual IAM.
    The helper blocks Terraform/Terraspace preview execution until effective
    backend identity can be attested. Use the repository's reviewed protected
-   plan workflow for that handoff; never bypass the block. Pulumi preview also
-   requires live STS account verification.
+   plan workflow for that handoff; never bypass the block. Pulumi also requires
+   `--preview-authorization` with the protected host grant specified in the agent
+   guide: trusted non-fork source, actor, exact backend/operation, temporary role,
+   expiry, protected paths and full STS identity must pass before execution.
 5. Require actual test output and completed stories. A CLI exit code alone is
    insufficient when the tool reported SKIPPED, a placeholder or a breaker trip.
    Changes to cloud resources, shared state, imports, refresh, stack initialization

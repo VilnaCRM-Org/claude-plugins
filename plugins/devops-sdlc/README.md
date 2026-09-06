@@ -92,15 +92,18 @@ python3 "$PLUGIN/scripts/devops.py" verify-plan --repo . \
 `plan` creates a **command intention**, not an engine saved plan or deployment
 approval. Local execution additionally requires `--execute --trust-repo` after
 reviewing the repository code. Preview additionally requires
-`--read-only-credentials`; the caller must actually supply a restricted IAM role.
-The flag cannot reduce credential privileges. See the exact
+`--read-only-credentials` and a
+[protected host authorization](docs/preview-authorization.md) binding the trusted
+source, actor, operation, backend and restricted temporary role. The flag cannot
+reduce credential privileges. See the exact
 [profile and CLI contract](docs/profile-schema.md).
 
 Terraform and Terraspace preview execution is currently blocked by the helper
 because a profile string cannot attest the effective cached backend. It still
 prepares preview intentions; the engine skills use the repository's protected,
-reviewed plan workflow. Pulumi preview additionally verifies the current AWS
-account through STS and sets the selected backend and stack.
+reviewed plan workflow. Pulumi preview verifies the protected source/toolchain,
+authorization expiry and full AWS STS identity before using the approved backend
+and stack. An ordinary editable checkout cannot pass this credentialed gate.
 
 The helper rejects direct apply/destroy and state/credential mutation commands.
 It does not sandbox Makefiles, Python programs, providers, binaries or either CLI.

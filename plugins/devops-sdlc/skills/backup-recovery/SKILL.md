@@ -88,7 +88,7 @@ Reuse the task's recorded `specs/<task-id>/run-summary.md`. If no task record ex
 select its date/task-title slug path, initialize the verified new sidecar under
 lock before creating the first human summary, and preserve that path.
 One attempt means one execution of this procedure. For a NEW reservation, if its
-persisted count is already 5, stop with FAILED and the unmet exit condition.
+persisted count is five or more, stop with FAILED and the unmet exit condition.
 Use the [atomic caller transaction](../AI-AGENT-GUIDE.md#atomic-attempt-reservation):
 the verified host primitive persists count+1 with active owner/token under one
 lock before execution. Missing capability or active/uncertain ownership conflicts

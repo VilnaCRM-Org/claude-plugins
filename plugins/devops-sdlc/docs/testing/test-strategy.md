@@ -29,7 +29,7 @@ or an earlier diagnostic cannot substitute for the final complete campaign.
 
 ## Behavioral simulation
 
-`tests/behavior_judge.py` evaluates 32 catalog scenarios in an inert disposable
+`tests/behavior_judge.py` evaluates every catalog scenario in an inert disposable
 fixture and requires three calibration seeds for a full gate. The fixture has
 minimal Terraform, Terraspace and Pulumi metadata, with no credentials, state,
 provider configuration or cloud resources. The runner proposes decisions; an
@@ -46,6 +46,14 @@ verified atomic primitive must block another start. Neither caller nor delegate
 may increment separately or claim a reservation occurred in the simulation.
 These cases need fresh live evidence; earlier 30- and 31-scenario results are
 historical and do not satisfy the expanded catalog.
+
+Credentialed-preview cases require a trusted host authorization for the exact
+source, actor, operation, backend and temporary role. Negative cases reject a
+backend mismatch and fork code offered write-capable credentials; caller flags
+do not prove isolation or IAM permissions. A separate case blocks all plugin
+helper execution without an independent approved source baseline. The positive
+preview fixture supplies hypothetical trusted-host prerequisites and requires
+runtime verification before execution; it does not claim a live cloud result.
 
 Claude uses native plugin loading for the runner. Codex uses bounded command,
 agent and skill Markdown supplied by `scripts/agent_cli.py`; it does not natively
