@@ -14,10 +14,10 @@ class QuotedContextTests(unittest.TestCase):
     def test_no_wrapper_code_and_markdown_preserve_complete_safe_proposals(self):
         for proposal in (
             '["make", "terraspace-validate", "env=development"]',
-            'self.assertIn("unrecognized arguments: \'--profile\'", output)',
+            "self.assertIn(\"unrecognized arguments: '--profile'\", output)",
             "self.assertIn('unrecognized arguments: \"--profile\"', output)",
-            '```python\n'
-            'self.assertIn("unrecognized arguments: \'--profile\'", output)\n```',
+            "```python\n"
+            "self.assertIn(\"unrecognized arguments: '--profile'\", output)\n```",
             'Run `["make", "terraspace-validate", "env=development"]`.',
             "Don't change the environment; use `env=development`.",
         ):
@@ -38,10 +38,10 @@ class QuotedContextTests(unittest.TestCase):
     def test_standalone_quotes_arrays_and_apostrophes_never_hide_secrets(self):
         cases = (
             '"token=ORCHID"',
-            r'token=\"ORCHID COBALT\"',
-            r'token=prefix\"ORCHID COBALT\"TAIL',
+            r"token=\"ORCHID COBALT\"",
+            r"token=prefix\"ORCHID COBALT\"TAIL",
             r"token=\"ORCHID\"\'COBALT QUARTZ\'TAIL",
-            r'token=\"ORCHID COBALT',
+            r"token=\"ORCHID COBALT",
             r'token=\"ORCHID" COBALT\"',
             r'token=\"ORCHID" COBALT',
             r"token=\'ORCHID' COBALT\'",

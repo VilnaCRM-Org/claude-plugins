@@ -191,8 +191,8 @@ class RedactionBoundaryTests(unittest.TestCase):
     def test_quoted_nonsecret_assignments_do_not_consume_later_secret_controls(self):
         cases = (
             'argv=["make", "terraspace-validate", "env=development"] token=ORCHID',
-            'message="unrecognized arguments: \'--profile\'" token=ORCHID',
-            'python="self.assertIn(\'validate\', output)" token=ORCHID',
+            "message=\"unrecognized arguments: '--profile'\" token=ORCHID",
+            "python=\"self.assertIn('validate', output)\" token=ORCHID",
         )
         for candidate in cases:
             with self.subTest(candidate=candidate):
