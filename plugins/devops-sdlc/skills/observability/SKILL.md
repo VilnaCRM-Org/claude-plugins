@@ -15,16 +15,19 @@ Failure: BLOCKED; no repository commands. Read
 - Match `project.repo` to requested owner/repository, else Git origin verified
   against this checkout. Mismatch blocks remote work. Record local-only:
   no GitHub query.
-- Select request's target ID, else verified initialization evidence plus its
-  target authorization record, never a saved summary. Require one `targets[].id`
+- Take target ID and environment name from the current request. If either is absent,
+  reuse it only from verified initialization evidence and its scoped authorization,
+  never a saved summary or default. Require one `targets[].id`
   match and an existing root inside the repository without symlinks; otherwise
   BLOCKED; contained roots permit inspection.
 - Terraform uses inspected HCL/configured validation and preview argv; Terraspace
   uses stack-aware wrappers/environment binding; Pulumi uses Python/uv argv and
   explicit stack/backend binding. Other engines are BLOCKED. Engine-specific
   skills skip other engines with reasons; route to their sibling.
-- Static work may omit environment. Preview/operations need an existing
-  target environment and identity fields; otherwise BLOCKED.
+- If an environment is named, set NAME to that name. Require a matching key in the
+  selected target's `environments` and its identity fields; otherwise BLOCKED.
+  Preview/operations require NAME. Only local static work with no environment may
+  omit it.
 - Review configured argv and all local wrappers for side effects with an agent
   other than their author; record review/source hash before execution. Missing
   review or null required argv blocks execution; no substitutes. Execute only
@@ -63,7 +66,8 @@ Independent review requires a different agent/session from the author; else BLOC
    `test`, `check`, `security` or `preview` (helper, not counter stage).
    Record this key as HELPER_STAGE and the selected target ID as TARGET.
    Record a new, unused path under `.artifacts/devops-sdlc/` as INTENTION.
-   Substitute these values; add `--environment NAME` to `plan` when selected:
+   Substitute recorded values. Add `--environment NAME` to `plan` if NAME is defined;
+   otherwise omit that flag:
 
    ```sh
    helper="$DEVOPS_PLUGIN_ROOT/scripts/devops.py"

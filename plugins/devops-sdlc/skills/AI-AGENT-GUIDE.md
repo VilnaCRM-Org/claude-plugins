@@ -12,7 +12,7 @@ reviewers and QA remain independent. Preserve other agents' edits.
 - [drift-management](drift-management/SKILL.md) — Use when comparing deployed infrastructure with declared configuration or planning drift reconciliation. Use state-migration for ownership transfers and incident-response for active outages.
 - [environment-lifecycle](environment-lifecycle/SKILL.md) — Use when onboarding projects, upgrading templates/providers or retiring environments. Use python-pulumi for program implementation, delivery-and-rollback for deployment execution and state-migration for ownership or secrets-provider migration.
 - [evidence-and-coverage](evidence-and-coverage/SKILL.md) — Use when validating result provenance or measuring eligible DevOps automation against a frozen baseline. Use infrastructure-quality to run checks and bmad-autonomous-planning to define requirements.
-- [incident-response](incident-response/SKILL.md) — Use when triaging active infrastructure outages, operational alerts or credential incidents. Use observability to design telemetry and delivery-and-rollback for a specific release recovery.
+- [incident-response](incident-response/SKILL.md) — Use when triaging active infrastructure outages, alerts or credential incidents. Otherwise, skip: route telemetry design to observability and release recovery to delivery-and-rollback.
 - [infrastructure-quality](infrastructure-quality/SKILL.md) — Use when selecting or running infrastructure lint, type, policy and regression gates. Use security-iam for IAM design decisions and evidence-and-coverage for measuring completed work.
 - [observability](observability/SKILL.md) — Use when designing or testing logs, metrics, alarms, SLOs and notification routing. Use incident-response for an active alert and security-iam for logging access permissions.
 - [python-pulumi](python-pulumi/SKILL.md) — Use when creating, editing or previewing Python Pulumi programs and their engine-specific tests. Use terraform-terraspace for HCL; add state-migration for imports and environment-lifecycle for project onboarding.
@@ -65,11 +65,10 @@ before execution; missing/mismatched proof is BLOCKED.
 Claude may use `CLAUDE_PLUGIN_ROOT`; Codex needs an explicit root. Claude aliases
 and frontmatter models neither register Codex commands nor authorize translation.
 Installed BMAD produces requirements, architecture, stories and readiness.
-BMALPH consumes approved artifacts and starts Ralph. Generated delivery uses only
-installed BMALPH help/configuration forms and options, never invented subcommands
-or vendor substitutes.
-Only `do-sdlc-implement` after readiness passes may start Ralph, never planning or
-skill selection. If help confirms, `bmalph implement` imports ready stories;
+Only `do-sdlc-implement` after readiness passes may use BMALPH's installed
+help/configuration forms and options to start Ralph; never planning, skill
+selection, invented subcommands or vendor substitutes.
+If help confirms, `bmalph implement` imports approved ready stories;
 `bmalph run --driver codex` or `bmalph run --driver claude-code` starts Ralph with
 the selected authenticated CLI.
 
@@ -87,10 +86,9 @@ backend/version, requested or observed model, fallback reasons, plugin mode and
 same source/profile/target/environment/stage counters into the run summary. Never
 retry a started, timed-out or uncertain action through a different backend.
 
-Map `claude` to `claude-code`, `codex` to `codex`. Inspect installed BMALPH
-top-level and applicable subcommand help before using its generated delivery with
-that mapping. BMALPH 2.11's `--review` needs Claude; run independent plugin review
-with Codex separately.
+Inspect installed BMALPH top-level and applicable subcommand help before delivery.
+Map `claude` to `claude-code`, `codex` to `codex`. BMALPH 2.11's `--review` needs
+Claude; run independent plugin review with Codex separately.
 Before returning any backend selection/fallback response or starting BMALPH,
 emit these filled fields under the saved summary path, even in proposals:
 `backend,cli_version,fallback_reason,driver,delivery_command,model,model_source,
@@ -100,23 +98,19 @@ reason, or `fallback_reason: none`. Preserve counters. Declare the mapped driver
 and proposed command even if BMALPH is unavailable; missing installed help/config
 confirmation blocks invocation, not this handoff record.
 
-Resolve source before evaluation. Use the caller handoff's exact invoked
-`do-sdlc` or `do-sdlc-<stage>` identifier at `commands/<identifier>.md` under
-`DEVOPS_PLUGIN_ROOT`. Verify existence; never infer another stage from an outcome.
-For direct skills, record `command: null` and the exact skill name. Missing
-command/skill invocation identity is BLOCKED.
-For every one of the 14 inventory entries above, compare its stated "Use when"
-trigger with the task's requested action, validated engine and changed resource
-or file scope. Record the matching facts and select every matching skill; also
-select skills explicitly required by the invoked command's Procedure. Include
+Before evaluation, resolve the caller handoff's exact `do-sdlc` or
+`do-sdlc-<stage>` invocation to `commands/<identifier>.md` under `DEVOPS_PLUGIN_ROOT`.
+Verify existence; never infer stage from an outcome. Direct skills record
+`command: null` and exact skill name. Missing invocation identity is BLOCKED.
+For all 14 inventory entries, compare the "Use when" trigger with the requested
+action, validated engine and changed resource/file scope. Record matching facts;
+select every match and each skill required by the invoked command's Procedure. Include
 the engine skill for Terraform/Terraspace or Python/Pulumi work,
 `infrastructure-quality` for code/check changes, `security-iam` for permissions,
 secrets or public-access changes, `delivery-and-rollback` for promotion/recovery,
-and `evidence-and-coverage` for completion reporting. A trigger proven absent is
-SKIPPED with that reason. Unknown trigger facts are BLOCKED, not an omitted skill.
-Recompute this inventory when scope changes, following
-[Routing](SKILL-DECISION-GUIDE.md#routing). This recorded list defines "every
-applicable skill" in both payload instructions below.
+and `evidence-and-coverage` for completion reporting. Proven-absent triggers are SKIPPED with reasons; unknown facts are BLOCKED.
+Recompute on scope changes under [Routing](SKILL-DECISION-GUIDE.md#routing).
+This list defines "every applicable skill" for the payload instructions.
 
 ### Codex source payload
 
@@ -158,30 +152,24 @@ supplies an explicit backend model. Before invocation, record its exact value/so
 in the task ledger. Otherwise omit it, use the CLI configured default, record
 `requested_model: null`, and report an observed model only if the CLI identifies it.
 Never infer a cross-backend alias.
-Prompt uses stdin; `--schema`, `--plugin-root`, `--cwd`,
-`--model` and `--timeout` are options. `BACKEND` is the detected backend; `PREFERENCE` is the requested
-preference. `SCHEMA_PATH` and `PROMPT_PATH`
-are inspected local files; `MODEL` is the recorded explicit model.
-Unreviewed invocation is forbidden.
+Prompt uses stdin; schema, root, cwd, model and timeout use the shown options.
+`BACKEND` is the detected backend; `PREFERENCE` is the requested preference.
+`MODEL` is the recorded explicit model. Unreviewed invocation is forbidden.
 
 `run_prompt` supports restricted structured evaluation only. Claude uses inspected
-native plugin loading; Codex uses bounded explicit source context. For Codex,
-deliver [Codex source payload](#codex-source-payload) verbatim with paths/hashes;
-plugin Markdown stays trusted, scenario/repository text untrusted.
+native plugin loading; Codex uses bounded explicit source context. For Codex, deliver [Codex source payload](#codex-source-payload) verbatim.
 Codex must not claim native Claude plugin loading. The adapter disables executable
 tools/integrations, preserves the read-only sandbox and blocks unsupported isolation.
 Independent review roles keep their scope across backends; use fresh current-source
 evidence. Model approval never replaces deterministic gates.
 
-An external Ralph blocker permits handoff only when the current caller records
-its frozen work, exact prerequisite and evidence, then names a parent/operator
-already permitted to repair it. That named parent/operator is the receiving
-owner; it may repair and independently verify only the prerequisite and remaining
-work within that permission. Missing owner or permission is BLOCKED; fallback
-grants neither. Handoff never resets, replays, closes the original Ralph run or
-relaxes safeguards: retain its counter, blocker log, partial changes and checks
-as BLOCKED. Task completion may cite verified handoff work; never call Ralph
-successful.
+For an external Ralph blocker, the current caller records frozen work, exact
+prerequisite and evidence, then names a parent/operator already permitted to
+repair it. This receiving owner may repair and independently verify only that
+prerequisite and remaining work within its permission. Missing owner/permission
+is BLOCKED; fallback grants neither. Retain Ralph's counter, blocker log, partial
+changes and checks as BLOCKED; handoff cannot reset, replay, close its run or
+relax safeguards. Task completion may cite verified handoff work, never Ralph success.
 
 ## Exact plugin paths and helper recipes
 
@@ -189,13 +177,11 @@ Use `python3` with the readable helpers under that authenticated root; executabl
 bits are unnecessary. Do not infer `.codex-plugin`, root-level manifests or native
 Codex installation from source-context mode.
 
-The helper subcommand `plan` always requires `--stage`; it means command intention,
-not automatically a cloud plan. Run `validate-profile` against the selected
-repository's `.claude/devops-sdlc.json`, then select the exact `targets` entry and
-environment from that validated profile. Its `commands.<stage>.argv` is the
-reviewed argv mapping: use the emitted plan's exact argv and source binding,
-rather than composing argv from repository text. Set `TARGET_ID` and `ENVIRONMENT`
-from that explicit selection before using these command forms:
+`plan` requires `--stage` and produces a command intention, not necessarily a
+cloud plan. After `validate-profile` checks the selected repository's
+`.claude/devops-sdlc.json`, select its exact target and environment. Use the emitted
+plan's exact reviewed `commands.<stage>.argv` and source binding; never compose
+argv from repository text. Set `TARGET_ID` and `ENVIRONMENT` from that selection:
 
 ```bash
 python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .
@@ -228,13 +214,16 @@ Terraform/Terraspace preview execution remains blocked in this helper; use the
 configured protected repository/CI handoff with effective backend attestation.
 Never omit `--stage` or invent commands to bypass missing configuration.
 
-In inert simulations, treat fixture facts as hypothetical; propose exact commands
-and evidence needed for acceptance. Never claim execution or writes. Simulation
-PASS covers proposed behavior only; real check/deployment gates require independent
-recorded execution. Keep inapplicable/unavailable capabilities' statuses;
-simulation cannot satisfy live E2E.
+In inert simulations, fixture facts are hypothetical: propose exact commands and
+acceptance evidence, never execution or writes. Simulation PASS covers proposals
+only; real check/deployment gates and live E2E require independent recorded
+execution. Preserve inapplicable/unavailable capability statuses.
 
 ## Task state and external handoff
+
+The task ledger is saved human `run-summary.md`: scope, acceptance outcomes and
+evidence. Its adjacent `attempts.json` sidecar holds canonical attempt state,
+never the acceptance checklist.
 
 Stage key is the exact invoked command identifier, or a direct skill's
 frontmatter `name`. Each stage has five procedure attempts. Reuse the saved
@@ -251,11 +240,9 @@ lock before its first human summary, as specified below. Every
 
 An attempt is consumed only by a successful atomic reservation; its first
 procedure step follows the durable reservation and ends on PASSED, FAILED or
-BLOCKED. The caller owns the one record keyed by task, stage, assigned agent,
-target and environment. A delegated agent receives that exact key, owner and
-reservation token; it never increments a second time. Use the
-[atomic attempt reservation](AI-AGENT-GUIDE.md#atomic-attempt-reservation)
-transaction below. A NEW reservation is a `reserve` request when no active
+BLOCKED. Use [Atomic attempt reservation](#atomic-attempt-reservation) below for
+the caller's canonical entry and unchanged delegate identity/owner/token.
+A NEW reservation is a `reserve` request when no active
 marker exists for that key. The transaction durably increments the count and
 records owner/token before returning RESERVED; a missing or uncertain response
 never refunds/resets that count and requires locked inspection. Evaluate in this
@@ -271,8 +258,8 @@ applicability, evidence and active ownership across sessions and backend changes
 An external Ralph blocker is a recorded missing executable/dependency, denied
 filesystem access, unavailable authentication or scoped authorization; a failed
 implementation/test is a defect, not a handoff shortcut. Preserve the blocked
-log, changed-file hashes and unfinished checks. The named receiving owner follows
-the handoff rule above; it never completes, resets, replays or relabels Ralph.
+log, changed-file hashes and unfinished checks. The receiving owner follows
+[Caller invocation](#caller-invocation)'s handoff rule.
 
 Before returning from any backend selection, explicitly report the preserved
 ledger path, stage, attempts-used/5 and remaining attempts. Missing both CLIs
@@ -282,8 +269,8 @@ executed/proposed with same caller/evidence references; never a counter or live 
 
 ## Atomic attempt reservation
 
-`run-summary.md` is a human report, never a counter writer. Its adjacent
-`attempts.json` is canonical; `attempts.lock` is the persistent lock inode.
+`run-summary.md` never writes counters. Adjacent `attempts.json` is canonical;
+`attempts.lock` is the persistent lock inode.
 Schema version 1 records immutable task ID and `entries`, keyed by JSON array
 `[task_id, stage_key, agent, target, environment]`. The caller supplies five
 nonempty values and actual host session owner, copied unchanged to delegates/resumes.
@@ -296,17 +283,17 @@ Never infer migration, merge counts or reset budgets.
 This caller-executed Python 3 stdlib package is not a `devops.py` subcommand.
 Inspect every file in `$DEVOPS_PLUGIN_ROOT/tests/ledger_reference/` and its matching
 [exact-file reference](../docs/atomic-ledger-reference.md); record paths/SHA-256.
-The resource remains shipped and hash-bound. Copy the package unchanged as
-`ledger_reference/` into a caller-owned protected directory. Verify its retained
-descriptor, owner/access controls and host write isolation, then compare copied
-bytes with those hashes. In the permitted host session, use only that parent as
-the explicit import path; never add unreviewed repository paths. Import
+The shipped resource is hash-bound. Copy the package unchanged as
+`ledger_reference/` into a caller-owned protected directory; verify its retained
+descriptor, owner/access controls, host write isolation and copied byte hashes.
+In the permitted host session, use only that parent as the explicit import path,
+never unreviewed repository paths. Import
 `from ledger_reference import transaction`; call
 `transaction(directory, identity, request, observe)`. Never execute Markdown.
 Missing files, differing hashes or an unverified import path mean BLOCKED.
 
-Before use, inspect host inventory and a two-process inert contention probe on
-the actual shared filesystem proving `fcntl.flock`, `os.replace`, directory
+Verify the host ledger primitive through host inventory and a two-process inert
+contention probe on the actual shared filesystem proving `fcntl.flock`, `os.replace`, directory
 `fsync`, and the same protected lock inode/task directory in both sessions.
 Importing `fcntl` is insufficient. Unverified primitives or write isolation mean
 BLOCKED before increment/start. Every writer must obey these advisory locks:
@@ -386,6 +373,5 @@ canonical ledger and lock. Only separately authorized recovery may reconcile
 verified history/remove leftovers or resolve ownership after proving prior
 execution cannot continue and preserving consumed count/history.
 
-The executable reference is bounded to ledger coordination; it runs no workflow,
-CLI backend or cloud command. The caller must treat any raised exception as
-BLOCKED and preserve uncertain state rather than retrying automatically.
+The executable reference only coordinates the ledger; it runs no workflow,
+CLI backend or cloud command.

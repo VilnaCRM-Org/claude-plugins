@@ -1,6 +1,6 @@
 ---
 name: incident-response
-description: "Use when triaging active infrastructure outages, operational alerts or credential incidents. Use observability to design telemetry and delivery-and-rollback for a specific release recovery."
+description: "Use when triaging active infrastructure outages, alerts or credential incidents. Otherwise, skip: route telemetry design to observability and release recovery to delivery-and-rollback."
 ---
 
 # Incident Response

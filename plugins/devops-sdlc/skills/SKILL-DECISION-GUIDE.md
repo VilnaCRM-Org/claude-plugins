@@ -14,7 +14,7 @@ Reassess on scope/source changes.
 - [drift-management](drift-management/SKILL.md) — Use when comparing deployed infrastructure with declared configuration or planning drift reconciliation. Use state-migration for ownership transfers and incident-response for active outages.
 - [environment-lifecycle](environment-lifecycle/SKILL.md) — Use when onboarding projects, upgrading templates/providers or retiring environments. Use python-pulumi for program implementation, delivery-and-rollback for deployment execution and state-migration for ownership or secrets-provider migration.
 - [evidence-and-coverage](evidence-and-coverage/SKILL.md) — Use when validating result provenance or measuring eligible DevOps automation against a frozen baseline. Use infrastructure-quality to run checks and bmad-autonomous-planning to define requirements.
-- [incident-response](incident-response/SKILL.md) — Use when triaging active infrastructure outages, operational alerts or credential incidents. Use observability to design telemetry and delivery-and-rollback for a specific release recovery.
+- [incident-response](incident-response/SKILL.md) — Use when triaging active infrastructure outages, alerts or credential incidents. Otherwise, skip: route telemetry design to observability and release recovery to delivery-and-rollback.
 - [infrastructure-quality](infrastructure-quality/SKILL.md) — Use when selecting or running infrastructure lint, type, policy and regression gates. Use security-iam for IAM design decisions and evidence-and-coverage for measuring completed work.
 - [observability](observability/SKILL.md) — Use when designing or testing logs, metrics, alarms, SLOs and notification routing. Use incident-response for an active alert and security-iam for logging access permissions.
 - [python-pulumi](python-pulumi/SKILL.md) — Use when creating, editing or previewing Python Pulumi programs and their engine-specific tests. Use terraform-terraspace for HCL; add state-migration for imports and environment-lifecycle for project onboarding.
@@ -29,9 +29,8 @@ follow “Claude and Codex backend contract” for paths/preflight/role delivery
 “Atomic attempt reservation” for ledger mutations. Without it, routing, CLI calls
 and ledger writes are BLOCKED. Only document/inventory reads within the user's
 task authorization and host policy may continue.
-Authenticate the expected root/helper hashes by that contract before execution;
-missing/mismatched proof is BLOCKED.
-Then run from the task repository
+Authenticate root/helper hashes by that contract before execution;
+missing/mismatched proof is BLOCKED. From the task repository, run
 `python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
 for `.claude/devops-sdlc.json`. A nonzero exit or invalid profile is BLOCKED.
 Use the target `id` in the current user request. Only if absent, inspect prior
@@ -63,9 +62,8 @@ Record backend/version/fallback reason and proposed implementation handoff in
 response/saved summary: Claude → `bmalph run --driver claude-code`;
 Codex → `bmalph run --driver codex`. Include it while implementation is BLOCKED. Apply the agent
 guide's model rules; no cross-backend translation.
-The stage key is the invoked command file's basename without `.md`, e.g.
-`do-sdlc-plan`; for a directly invoked skill, use its frontmatter `name`.
-Each stage allows five procedure attempts.
+Stage key is the invoked command basename without `.md`, e.g. `do-sdlc-plan`,
+or the direct skill's frontmatter `name`. Each stage allows five procedure attempts.
 Reuse the saved repository-relative `run-summary.md` path. For new work, choose
 `specs/YYYY-MM-DD-<slug>/run-summary.md` once using the host clock's UTC date at
 first ledger creation. Keep that date/path on resume. For `<slug>`, take the host-supplied current user
@@ -112,16 +110,14 @@ uncertain reservation blocks every competing session. Preserve counts,
 applicability, evidence and active ownership across sessions and backend changes.
 
 BMAD yields requirements, architecture, stories and readiness. Only
-`do-sdlc-implement`, after readiness passes, may import stories with
-`bmalph implement` and start Ralph with the mapped driver; planning
-and skill selection cannot. Its breaker stops repeated failures/lack of progress;
-open/tripped in `.ralph/logs/` ends the run: keep failed log and partial work,
-never reset to retry.
+`do-sdlc-implement` after readiness passes may import stories with `bmalph implement`
+and start Ralph with the mapped driver, never planning or skill selection.
+Repeated failures/lack of progress trip its breaker: open/tripped in `.ralph/logs/`
+ends the run. Keep failed log and partial work; never reset to retry.
 
 Required checks are the acceptance checks recorded in that task summary.
-A native Claude-plugin check requires observing Claude load and invoke the
-installed plugin; Codex source context cannot satisfy it. Require this check only
-when the task explicitly requests native behavior. A live infrastructure check
-requires observing the specified real provider/backend operation with scoped
-authorization; local mocks cannot satisfy it. Missing prerequisites leave required
-checks BLOCKED while independent local work continues. Fallback cannot grant PASS.
+Only an explicit native-behavior request requires observing Claude load and invoke
+the installed plugin; Codex source context cannot satisfy it. A live infrastructure
+check requires the specified real provider/backend operation under scoped
+authorization, never local mocks. Missing prerequisites keep required checks BLOCKED
+while independent local work continues. Fallback cannot grant PASS.

@@ -59,9 +59,13 @@ skill receives a verdict; no silent skips.
 1. Map principal, trust issuer/audience/subject, role purpose, action,
    resource and conditions. Separate read-only preview, deployment and bootstrap
    privileges; fork/untrusted code never receives privileged credentials. For each
-   privileged principal, review escalation paths: direct or indirect
-   `iam:PassRole`, `sts:AssumeRole`, policy/trust-policy create or edit actions,
-   permissions-boundary changes, and access to roles that can perform them. State
+   privileged principal, provide a filled escalation-path table, even in proposals:
+   principal -> action chain -> reachable privilege; policy/trust references and
+   hashes, resources/conditions, controls, tests/expected outcomes and reviewer status.
+   Trace `iam:PassRole` plus workload control, `sts:AssumeRole`/trust chains,
+   policy/trust creation or edits and boundary changes, directly or via reachable
+   roles. Use `UNKNOWN_<field>` for missing facts and name the exact checks needed;
+   mark unexecuted checks proposed and block acceptance on missing facts. State
    required paths; deny all others by action/resource and record those denials.
    When rejecting unnecessary
    privilege or public-access expansion, record a security finding in
