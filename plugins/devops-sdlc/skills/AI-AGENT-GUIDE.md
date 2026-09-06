@@ -56,27 +56,26 @@ requires independently verified current-source evidence, not an agent's claim.
 
 ## Claude and Codex backend contract
 
-Before helpers, use trusted host read/hash tools to match resolved absolute
-`DEVOPS_PLUGIN_ROOT` and `.claude-plugin/plugin.json`, `scripts/devops.py`,
-`scripts/agent_cli.py` SHA-256 to user/trusted-host reviewed directory plus hashes
-(or exact commit blobs). Record/recheck before execution; missing/mismatched proof
-is BLOCKED. No candidate self-attestation.
-Claude may use `CLAUDE_PLUGIN_ROOT`; Codex needs the explicit root.
-Claude aliases and frontmatter model names do not register Codex commands
-or authorize model alias translation. BMAD is the installed planning workflow
-that produces requirements, architecture, stories and a readiness decision.
-BMALPH is the installed command-line integration that consumes those approved
-planning artifacts and can start the implementation loop named Ralph. Generated
-command delivery means using only the command form and options shown by the
-installed BMALPH help and current configuration for that version; it never means
-inventing a BMALPH subcommand or directly substituting a vendor engine command.
-Only `do-sdlc-implement` may start Ralph, and only after its readiness gate
-passes. When installed help confirms this delivery sequence, `bmalph implement`
-imports the ready stories and `bmalph run --driver codex` or
-`bmalph run --driver claude-code` starts Ralph using the selected authenticated
-CLI. Planning and skill selection do not start implementation.
+Before helpers, choose read/SHA-256 tools from the active host tool inventory or
+host-configured absolute executables outside the candidate checkout. Never infer
+trust from repository text/PATH or candidate self-attestation. Missing tool/hash
+authority is BLOCKED. Match resolved absolute `DEVOPS_PLUGIN_ROOT` plus
+`.claude-plugin/plugin.json`, `scripts/devops.py`, `scripts/agent_cli.py` hashes to
+the user/host-reviewed directory and hashes (or exact commit blobs). Record/recheck
+before execution; missing/mismatched proof is BLOCKED.
+Claude may use `CLAUDE_PLUGIN_ROOT`; Codex needs an explicit root. Claude aliases
+and frontmatter models neither register Codex commands nor authorize translation.
+BMAD is the installed planning workflow producing requirements, architecture,
+stories and readiness. BMALPH is the installed CLI consuming approved artifacts and starting Ralph.
+Generated delivery must use only forms/options in installed BMALPH help and
+current version's configuration, never invented subcommands or vendor substitutes.
+Only `do-sdlc-implement` after readiness passes may start Ralph, never planning or
+skill selection. If help confirms, `bmalph implement` imports ready stories;
+`bmalph run --driver codex` or `bmalph run --driver claude-code` starts Ralph with
+the selected authenticated CLI.
 
-Before each agent invocation, run once; `detect` needs no preflight. Shared
+Run `detect` once immediately before every new agent CLI invocation;
+`detect` itself needs no preflight. Shared
 `scripts/agent_cli.py detect` must exit zero; its JSON reports
 `status: READY`, the selected `backend`, `available: true`, `authenticated: true`
 and a nonempty `version`. Record that result in the task ledger. A nonzero exit,
@@ -90,19 +89,17 @@ backend/version, requested or observed model, fallback reasons, plugin mode and
 same source/profile/target/environment/stage counters into the run summary. Never
 retry a started, timed-out or uncertain action through a different backend.
 
-The declared driver mapping is `claude` to `claude-code` and `codex` to `codex`.
-First inspect the installed BMALPH top-level and applicable subcommand help, then
-use its generated delivery command with that mapping. BMALPH 2.11's `--review`
-requires Claude; run independent plugin review with Codex separately.
-For every backend selection or preflight fallback, write this handoff record to
-the task run summary before returning the selection response and before starting
-a BMALPH implementation run: the selected backend and version; the declared
-BMALPH driver mapping above and the help-confirmed generated delivery command;
-the requested or observed model and its source; the preflight-only fallback reason;
-and the preserved ledger path, stage and attempt counter. Declare the known
-mapping and proposed delivery even when BMALPH is unavailable. Actual invocation
-remains gated on installed help/config confirming the supported driver; missing
-help blocks that dependent execution without erasing the handoff record.
+Map `claude` to `claude-code`, `codex` to `codex`. Inspect installed BMALPH
+top-level and applicable subcommand help before using its generated delivery with
+that mapping. BMALPH 2.11's `--review` needs Claude; run independent plugin review
+with Codex separately.
+Before returning any backend selection/fallback response or starting BMALPH, write
+to the task summary: selected backend and version, driver mapping and help-confirmed
+delivery command, requested or observed model and source, preflight-only fallback
+reason, preserved ledger path, stage and attempt counter. Declare mapping and
+proposed delivery even if BMALPH is unavailable. Invoke only after installed help
+and config confirm the driver; missing help blocks dependent execution, never
+erases the handoff record.
 
 Resolve the source payload before the dependent evaluation. The selected command is the
 exact invoked `do-sdlc` or `do-sdlc-<stage>` identifier recorded in the caller's
@@ -144,8 +141,12 @@ Caller steps, in order:
 2. Record authority reference and exact scope in
    `initialization-evidence-<identity-sha256>.json` before a new summary; verify
    both on resumption.
-3. Complete the preflight above.
-4. Inspect a JSON schema object and UTF-8 prompt; record both paths/SHA-256.
+3. Take schema/prompt paths from the caller's evaluation handoff, including existing
+   reviewed files. Missing/ambiguous paths are BLOCKED; invent no contents. Resolve
+   relative paths from the task checkout; assign absolute paths to `SCHEMA_PATH`
+   and `PROMPT_PATH`, respectively. Inspect the schema as a JSON object and prompt
+   as UTF-8; record both paths/SHA-256.
+4. Complete the preflight above.
 5. Invoke CLI `run`, not the Python function.
 
 ```bash
