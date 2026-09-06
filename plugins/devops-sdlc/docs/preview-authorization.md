@@ -56,7 +56,9 @@ field with its required JSON type; extra fields are rejected. The issuer records
 | `execution_isolation` | `protected-toolchain-and-read-only-checkout`, backed by actual host controls. |
 | `aws_executable`, `executable`, `path`, `home` | Approved absolute protected tool paths, a list of 1–16 protected PATH directories without `:` separators, and protected HOME. The selected executable must match the planned tool. |
 
-Generate the intention without execution first. `operation_sha256` hashes its
+Generate a schema-2 command intention without execution first; profile and grant
+schemas remain version 1. Regenerate historical schema-1 intentions from current
+reviewed inputs, preserving the old evidence. `operation_sha256` hashes its
 canonical JSON fields before either hash is added, excluding only `created_at`.
 The separate `intention_sha256` includes time and the operation hash. The broker
 must inspect the actual operation and source; copying a worker-supplied hash

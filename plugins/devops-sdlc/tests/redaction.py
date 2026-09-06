@@ -48,8 +48,8 @@ def _redact_json_string(value: str, start: int) -> tuple[int, str] | None:
         decoded = json.loads(value[start:end])
     except (ValueError, RecursionError):
         return None
-    if not json_string_tail_is_valid(value, end) and _has_secret_assignment(decoded):
-        # A premature quote can strand the secret outside this decoded prefix.
+    if not json_string_tail_is_valid(value, end):
+        # A malformed tail can hide an escaped secret key outside this prefix.
         return len(value), '"[REDACTED]"'
     redacted = _redact_assignments(decoded, decode_strings=False)
     rendered = (

@@ -710,24 +710,67 @@ class AtomicLedgerReferenceTests(unittest.TestCase):
                     self.assertEqual(calls, [])
                     self.assertEqual((self.path / "attempts.json").read_bytes(), before)
 
+    def test_invalid_observation_block_is_retained_before_reserve_or_start(self):
+        self.initialize()
+        initial, _ = self.read_entry()
+        token = self.call("reserve")["token"]
+        reserved, _ = self.read_entry()
+        for action, original in (("reserve", initial), ("start", reserved)):
+            for blocked in (None, 0, 1, "false", [], {}, True):
+                with self.subTest(action=action, blocked=blocked):
+                    data = copy.deepcopy(original)
+                    entry = next(iter(data["entries"].values()))
+                    entry["observation_blocked"] = blocked
+                    self.api["_save"](self.directory, data)
+                    before = (self.path / "attempts.json").read_bytes()
+                    calls = []
+
+                    def fresh(identity, entry):
+                        calls.append(identity)
+                        return self.observe(identity, entry)
+
+                    self.assertEqual(
+                        self.call(action, callback=fresh, token=token)["decision"],
+                        "BLOCKED",
+                    )
+                    self.assertEqual(calls, [])
+                    self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+
+    def test_invalid_observer_block_cannot_override_valid_saved_state(self):
+        self.initialize()
+        before = (self.path / "attempts.json").read_bytes()
+        for blocked in (None, 0, 1, "false", [], {}, True):
+            with self.subTest(blocked=blocked):
+                self.observation["observation_blocked"] = blocked
+                self.assertEqual(self.call("reserve")["decision"], "BLOCKED")
+                self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+        self.observation["observation_blocked"] = False
+        self.assertEqual(self.call("reserve")["decision"], "RESERVED")
+
     def test_lost_run_observation_keeps_prior_reference_and_can_be_resolved(self):
         self.initialize()
-        data, entry = self.read_entry()
-        entry.update(ralph="completed", ralph_evidence="original run log")
-        self.api["_save"](self.directory, data)
-        self.assertEqual(self.call("reserve")["decision"], "BLOCKED")
-        _, saved = self.read_entry()
-        self.assertEqual(saved["ralph"], "completed")
-        self.assertEqual(saved["ralph_evidence"], "original run log")
-        self.assertEqual(saved["count"], 0)
-        self.assertTrue(saved["observation_blocked"])
-        self.observation.update(
-            ralph="completed", ralph_evidence="verified completion log"
-        )
-        self.assertEqual(self.call("reserve")["decision"], "RESERVED")
-        self.assertEqual(
-            self.read_entry()[1]["ralph_evidence"], "verified completion log"
-        )
+        original, _ = self.read_entry()
+        for state in ("active", "pending", "uncertain", "completed"):
+            with self.subTest(state=state):
+                data = copy.deepcopy(original)
+                entry = next(iter(data["entries"].values()))
+                entry.update(ralph=state, ralph_evidence="original run log")
+                self.api["_save"](self.directory, data)
+                self.observation.update(ralph="none", ralph_evidence=None)
+                for _ in range(2):
+                    self.assertEqual(self.call("reserve")["decision"], "BLOCKED")
+                    _, saved = self.read_entry()
+                    self.assertEqual(saved["ralph"], state)
+                    self.assertEqual(saved["ralph_evidence"], "original run log")
+                    self.assertEqual(saved["count"], 0)
+                    self.assertTrue(saved["observation_blocked"])
+                self.observation.update(
+                    ralph="completed", ralph_evidence="verified completion log"
+                )
+                self.assertEqual(self.call("reserve")["decision"], "RESERVED")
+                saved = self.read_entry()[1]
+                self.assertEqual(saved["ralph_evidence"], "verified completion log")
+                self.assertFalse(saved["observation_blocked"])
 
     def test_valid_pending_state_can_resolve_through_verified_callback(self):
         self.initialize()

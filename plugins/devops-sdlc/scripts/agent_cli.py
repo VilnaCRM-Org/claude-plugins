@@ -81,7 +81,7 @@ def probe_backend(name: str) -> dict[str, Any]:
             if authenticated
             else "authentication-unavailable"
         )
-    except (OSError, subprocess.TimeoutExpired, ValueError):
+    except (OSError, subprocess.TimeoutExpired, ValueError, RecursionError):
         result["reason"] = "preflight-unavailable"
     return result
 
@@ -492,7 +492,7 @@ def run_prompt(
         result.update(
             status="TIMEOUT", reason="Evaluation timed out; no fallback was attempted."
         )
-    except (AdapterError, OSError, ValueError, TypeError):
+    except (AdapterError, OSError, ValueError, TypeError, RecursionError):
         result.update(
             status="BLOCKED",
             reason="Invalid input, CLI capability, or response; no retry attempted.",
@@ -533,7 +533,7 @@ def run_selected(
             }
         try:
             answer, observed_model = decode_answer(backend, raw, temporary)
-        except (AdapterError, ValueError, TypeError):
+        except (AdapterError, ValueError, TypeError, RecursionError):
             return {
                 **result,
                 "status": "BLOCKED",
@@ -617,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
                 plugin_root=args.plugin_root,
                 timeout=args.timeout,
             )
-    except (AdapterError, OSError, ValueError):
+    except (AdapterError, OSError, ValueError, RecursionError):
         result = {"status": "BLOCKED", "reason": "Invalid evaluation request."}
     print(json.dumps(result, sort_keys=True))
     return 0 if result["status"] in {"READY", "COMPLETED"} else 2

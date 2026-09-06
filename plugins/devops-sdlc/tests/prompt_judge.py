@@ -40,6 +40,7 @@ VOTES = 3
 EXPECTED_ARTIFACTS = 31
 MAX_FILES = 500
 MAX_FILE_BYTES = 2_000_000
+MAX_SNAPSHOT_BYTES = 2_000_000
 MAX_CITATIONS = 512
 SKIPPED_DIRECTORIES = {"__pycache__", ".pytest_cache", ".ruff_cache"}
 CONTEXT = (
@@ -80,8 +81,20 @@ def safe_root(root: Path) -> Path:
     return root
 
 
+def snapshot_bytes(path: Path, remaining: int) -> bytes:
+    size = path.stat().st_size
+    if size > min(MAX_FILE_BYTES, remaining):
+        raise AssessmentError("Plugin inputs exceed assessment bounds.")
+    with path.open("rb") as stream:
+        raw = stream.read(size + 1)
+    if len(raw) != size:
+        raise AssessmentError("Plugin input size changed during snapshot.")
+    return raw
+
+
 def plugin_snapshot(root: Path) -> dict[str, str]:
     hashes: dict[str, str] = {}
+    total = 0
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
         if any(part in SKIPPED_DIRECTORIES for part in relative.parts):
@@ -90,9 +103,11 @@ def plugin_snapshot(root: Path) -> dict[str, str]:
             raise AssessmentError("Plugin inputs must not contain symlinks.")
         if not path.is_file():
             continue
-        if len(hashes) >= MAX_FILES or path.stat().st_size > MAX_FILE_BYTES:
+        if len(hashes) >= MAX_FILES:
             raise AssessmentError("Plugin inputs exceed assessment bounds.")
-        hashes[relative.as_posix()] = digest(path.read_bytes())
+        raw = snapshot_bytes(path, MAX_SNAPSHOT_BYTES - total)
+        total += len(raw)
+        hashes[relative.as_posix()] = digest(raw)
     return hashes
 
 

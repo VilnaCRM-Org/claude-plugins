@@ -108,6 +108,25 @@ class AgentCliTests(unittest.TestCase):
         self.assertEqual(result["reason"], "preflight-unavailable")
         self.assertEqual(probe.call_count, 1)
 
+    def test_deep_auth_response_is_unavailable(self):
+        raw = "[" * 2000 + "0" + "]" * 2000
+        with (
+            mock.patch.object(adapter.shutil, "which", return_value="claude"),
+            mock.patch.object(
+                adapter,
+                "probe_command",
+                side_effect=[
+                    subprocess.CompletedProcess([], 0, "1.2.3", ""),
+                    subprocess.CompletedProcess([], 0, raw, ""),
+                ],
+            ),
+        ):
+            result = adapter.probe_backend("claude")
+        self.assertFalse(result["authenticated"])
+        self.assertIn(
+            result["reason"], {"preflight-unavailable", "authentication-unavailable"}
+        )
+
     def test_probe_command_is_fixed_argv_no_shell(self):
         with mock.patch.object(adapter.subprocess, "run") as run:
             adapter.probe_command(["cli", "--version"])
@@ -565,6 +584,41 @@ class AgentCliTests(unittest.TestCase):
         ):
             result = adapter.run_prompt("question", SCHEMA, self.root)
         self.assertEqual(result["reason"], "no auth")
+
+    def test_deep_manifest_or_schema_blocks_without_execution(self):
+        plugin = self.plugin()
+        self.put("plugin/.claude-plugin/plugin.json", "[" * 2000 + "0" + "]" * 2000)
+        with mock.patch.object(adapter, "select_backend") as select:
+            result = adapter.run_prompt(
+                "question", SCHEMA, self.root, plugin_root=plugin
+            )
+        self.assertEqual(result["status"], "BLOCKED")
+        select.assert_not_called()
+        schema = {"type": "object"}
+        schema["nested"] = schema
+        with (
+            mock.patch.object(adapter, "select_backend", return_value=self.ready()),
+            mock.patch.object(adapter.shutil, "which", return_value="codex"),
+            mock.patch.object(adapter, "invoke") as invoke,
+        ):
+            result = adapter.run_prompt("question", schema, self.root)
+        self.assertEqual(result["status"], "BLOCKED")
+        invoke.assert_not_called()
+
+    def test_deep_cli_schema_returns_blocked_json_and_exit_two(self):
+        raw = "[" * 2000 + "0" + "]" * 2000
+        schema = self.put("schema-deep.json", raw)
+        result = subprocess.run(
+            [adapter.sys.executable, str(ENTRYPOINT), "run", "--schema", str(schema)],
+            input="inert request",
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout)["status"], "BLOCKED")
+        self.assertEqual(result.stderr, "")
 
     def test_model_provenance(self):
         self.assertEqual(adapter.model_provenance("actual", "alias"), "observed")

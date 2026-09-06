@@ -181,6 +181,12 @@ currently requires POSIX and uses descriptor-anchored directory traversal with
 no-follow flags and exclusive creation, including protection against parent
 symlink swaps. File mode is `0600`.
 
+New command intentions use `schema_version: 2` and include `operation_sha256`.
+Profile and host-grant schemas remain version 1. `verify-plan` rejects older or
+unknown intention schemas with a regeneration instruction, even within their age
+window. Preserve the old file and generate a new intention from current reviewed
+inputs; never add the new field to old evidence or reuse its authorization.
+
 The intention binds the profile content hash, Git HEAD, selected target,
 environment configuration, stage, argv, source snapshot and creation time.
 `verify-plan` rebuilds the intention from current inputs and compares it exactly.

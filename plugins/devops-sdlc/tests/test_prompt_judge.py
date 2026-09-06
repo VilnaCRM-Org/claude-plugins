@@ -49,6 +49,109 @@ def fake_agent(prompt, schema, cwd, **kwargs):
     }
 
 
+class SnapshotBoundsTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+
+    def write(self, name, raw):
+        path = self.root / name
+        path.write_bytes(raw)
+        return path
+
+    def test_exact_aggregate_boundary_accepts_multiple_utf8_files(self):
+        first = self.write("a", "é".encode())
+        second = self.write("b", b"xyz")
+        with mock.patch.object(subject, "MAX_SNAPSHOT_BYTES", 5):
+            self.assertEqual(
+                subject.plugin_snapshot(self.root),
+                {
+                    "a": subject.digest(first.read_bytes()),
+                    "b": subject.digest(second.read_bytes()),
+                },
+            )
+
+    def test_one_byte_over_aggregate_rejects_before_reading_next_file(self):
+        self.write("a", b"abc")
+        blocked = self.write("b", b"def")
+        original_open = Path.open
+        opened = []
+
+        def observe(path, *args, **kwargs):
+            opened.append(path)
+            return original_open(path, *args, **kwargs)
+
+        with (
+            mock.patch.object(subject, "MAX_SNAPSHOT_BYTES", 5),
+            mock.patch.object(Path, "open", observe),
+            self.assertRaisesRegex(subject.AssessmentError, "bounds"),
+        ):
+            subject.plugin_snapshot(self.root)
+        self.assertEqual(opened, [self.root / "a"])
+        self.assertNotIn(blocked, opened)
+
+    def test_first_file_over_aggregate_is_not_opened(self):
+        self.write("a", b"abcd")
+        with (
+            mock.patch.object(subject, "MAX_SNAPSHOT_BYTES", 3),
+            mock.patch.object(Path, "open") as opened,
+            self.assertRaisesRegex(subject.AssessmentError, "bounds"),
+        ):
+            subject.plugin_snapshot(self.root)
+        opened.assert_not_called()
+
+    def test_cumulative_three_files_cannot_each_reuse_full_budget(self):
+        for name in ("a", "b", "c"):
+            self.write(name, b"xx")
+        with (
+            mock.patch.object(subject, "MAX_SNAPSHOT_BYTES", 5),
+            self.assertRaisesRegex(subject.AssessmentError, "bounds"),
+        ):
+            subject.plugin_snapshot(self.root)
+
+    def test_second_snapshot_rechecks_aggregate_after_source_growth(self):
+        self.write("a", b"ab")
+        self.write("b", b"cd")
+        with mock.patch.object(subject, "MAX_SNAPSHOT_BYTES", 4):
+            self.assertEqual(len(subject.plugin_snapshot(self.root)), 2)
+            self.write("b", b"cde")
+            with self.assertRaisesRegex(subject.AssessmentError, "bounds"):
+                subject.plugin_snapshot(self.root)
+
+    def test_stat_read_growth_is_bounded_and_rejected(self):
+        path = self.write("a", b"ab")
+        reader = mock.MagicMock()
+        reader.__enter__.return_value.read.return_value = b"abc"
+        with (
+            mock.patch.object(Path, "open", return_value=reader),
+            self.assertRaisesRegex(subject.AssessmentError, "size changed"),
+        ):
+            subject.plugin_snapshot(self.root)
+        reader.__enter__.return_value.read.assert_called_once_with(3)
+        self.assertEqual(path.read_bytes(), b"ab")
+
+    def test_stat_read_shrink_is_rejected(self):
+        self.write("a", b"ab")
+        with (
+            mock.patch.object(Path, "open", return_value=io.BytesIO(b"a")),
+            self.assertRaisesRegex(subject.AssessmentError, "size changed"),
+        ):
+            subject.plugin_snapshot(self.root)
+
+    def test_file_size_and_count_bounds_remain_independent(self):
+        self.write("a", b"abc")
+        for bounds in ({"MAX_FILE_BYTES": 2}, {"MAX_FILES": 0}):
+            with (
+                self.subTest(bounds=bounds),
+                mock.patch.multiple(subject, **bounds),
+                mock.patch.object(Path, "open") as opened,
+                self.assertRaisesRegex(subject.AssessmentError, "bounds"),
+            ):
+                subject.plugin_snapshot(self.root)
+            opened.assert_not_called()
+
+
 class PromptJudgeTests(unittest.TestCase):
     def test_importlib_loader_finds_shared_redaction_from_foreign_directory(self):
         code = "\n".join(

@@ -346,6 +346,35 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(runtime.Invalid):
             runtime.write_plan(self.root, "outside.json", plan)
 
+    def test_intention_schema_upgrade_requires_regeneration(self):
+        plan = self.plan()
+        self.assertEqual(plan["schema_version"], 2)
+        self.assertEqual(self.profile["schema_version"], 1)
+        filename = runtime.ARTIFACT_ROOT + "/legacy.json"
+        for version in (1, True, None, 3, "2"):
+            for operation_present in (False, True):
+                legacy = copy.deepcopy(plan)
+                legacy["schema_version"] = version
+                if not operation_present:
+                    legacy.pop("operation_sha256")
+                self.put(filename, json.dumps(legacy))
+                with (
+                    self.subTest(version=version, operation=operation_present),
+                    mock.patch.object(runtime, "build_plan") as rebuild,
+                    self.assertRaisesRegex(runtime.Invalid, "schema 2.*regenerate"),
+                ):
+                    runtime.verify_plan(self.root, filename, now=1001)
+                rebuild.assert_not_called()
+        missing_operation = copy.deepcopy(plan)
+        missing_operation.pop("operation_sha256")
+        self.put(filename, json.dumps(missing_operation))
+        with self.assertRaises(runtime.Invalid):
+            runtime.verify_plan(self.root, filename, now=1001)
+        self.put(filename, json.dumps(plan))
+        self.assertEqual(
+            runtime.verify_plan(self.root, filename, now=1001)["status"], "VERIFIED"
+        )
+
     def test_evidence_detects_source_profile_sha_and_argv_changes(self):
         plan = self.plan()
         filename = runtime.ARTIFACT_ROOT + "/intent.json"

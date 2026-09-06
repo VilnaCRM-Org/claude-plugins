@@ -814,7 +814,7 @@ def build_plan(
     command = target["commands"][stage]
     argv = command_argv(root, target, command, stage, environment, env)
     plan = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "command-intention",
         "created_at": int(time.time()) if now is None else now,
         "profile": profile_path,
@@ -960,6 +960,10 @@ def verify_plan(
 ) -> dict:
     integer(max_age, 1, 86400)
     stored = load_json(contained(root, filename))
+    if type(stored.get("schema_version")) is not int or stored["schema_version"] != 2:
+        raise Invalid(
+            "Only command-intention schema 2 is supported; regenerate the intention."
+        )
     exact_keys(
         stored,
         {
@@ -1301,6 +1305,7 @@ def preview_environment(env: dict[str, str], grant: dict) -> dict[str, str]:
         raise Invalid(
             "Temporary credential identifier differs from host authorization."
         )
+    env.pop("TMPDIR", None)
     env.update({name: os.environ[name] for name in names})
     env.update(
         {
@@ -1317,7 +1322,7 @@ def preview_environment(env: dict[str, str], grant: dict) -> dict[str, str]:
 def execution_environment(plan: dict) -> dict[str, str]:
     env = {
         name: os.environ[name]
-        for name in ("PATH", "HOME", "USER", "SYSTEMROOT")
+        for name in ("PATH", "HOME", "USER", "TMPDIR", "SYSTEMROOT")
         if name in os.environ
     }
     env.update(

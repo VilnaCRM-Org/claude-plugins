@@ -29,7 +29,15 @@ def _ready(entry, count, observed):
     )
 
 
+def _saved_observation_state(entry):
+    # Initial records and observer payloads may omit this derived flag.
+    blocked = entry.get("observation_blocked", False)
+    return type(blocked) is bool and (not blocked or entry.get("ralph") != "none")
+
+
 def _saved_state(entry):
+    if not _saved_observation_state(entry):
+        return False
     if type(entry.get("caller_stop")) is not bool:
         return False
     if entry.get("breaker") not in ("clear", "open", "tripped"):

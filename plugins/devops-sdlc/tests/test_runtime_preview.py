@@ -147,9 +147,19 @@ class PreviewAuthorizationTests(unittest.TestCase):
         with self.assertRaises(runtime.Invalid):
             runtime.protected_metadata(regular, directory=True)
 
-    def test_actual_caller_owned_grant_is_rejected_without_reading(self):
+    @staticmethod
+    def worker_owned_stat(descriptor):
+        metadata = os.stat(descriptor)
+        return types.SimpleNamespace(
+            st_mode=metadata.st_mode, st_uid=1000, st_nlink=metadata.st_nlink
+        )
+
+    def test_worker_owned_grant_is_rejected_without_reading(self):
         grant = self.fixture.put("grant.json", json.dumps(self.grant))
-        with mock.patch.object(runtime.os, "read") as reader:
+        with (
+            mock.patch.object(runtime.os, "fstat", side_effect=self.worker_owned_stat),
+            mock.patch.object(runtime.os, "read") as reader,
+        ):
             with self.assertRaises(runtime.Invalid):
                 runtime.read_preview_grant(str(grant), self.root / "other-checkout")
         reader.assert_not_called()
@@ -299,6 +309,22 @@ class PreviewAuthorizationTests(unittest.TestCase):
             self.assertRaises(runtime.Invalid),
         ):
             runtime.preview_environment({}, self.grant)
+
+    def test_local_tmpdir_survives_but_preview_removes_it(self):
+        variables = {
+            "TMPDIR": "/caller/local-temp",
+            "AWS_ACCESS_KEY_ID": self.grant["access_key_id"],
+            "AWS_SECRET_ACCESS_KEY": "inert-secret",
+            "AWS_SESSION_TOKEN": "inert-session",
+        }
+        with mock.patch.dict(os.environ, variables, clear=True):
+            local = runtime.execution_environment(self.fixture.plan("validate"))
+            self.assertEqual(local["TMPDIR"], variables["TMPDIR"])
+            preview = runtime.preview_environment(
+                runtime.execution_environment(self.plan), self.grant
+            )
+        self.assertNotIn("TMPDIR", preview)
+        self.assertEqual(preview["HOME"], self.grant["home"])
 
     def test_full_identity_role_session_and_account_are_compared(self):
         identity = {
@@ -477,7 +503,10 @@ class PreviewAuthorizationTests(unittest.TestCase):
             self.assertRaises(runtime.Invalid),
         ):
             runtime.protected_tree(tree)
-        with self.assertRaises(runtime.Invalid):
+        with (
+            mock.patch.object(runtime.os, "fstat", side_effect=self.worker_owned_stat),
+            self.assertRaises(runtime.Invalid),
+        ):
             runtime.protected_tree(tree)
 
     def test_git_external_metadata_and_includes_are_blocked(self):

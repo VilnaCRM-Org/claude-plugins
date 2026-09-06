@@ -74,8 +74,17 @@ if mode == "timeout":
     time.sleep(30)
 if name == "codex":
     answer = Path(args[args.index("--output-last-message") + 1])
-    answer.write_text(json.dumps({"ok": True, "fixture": "synthetic-cli"}))
+    payload = (
+        "[" * 2000 + "0" + "]" * 2000
+        if mode == "nested"
+        else json.dumps({"ok": True, "fixture": "synthetic-cli"})
+    )
+    answer.write_text(payload)
     print(json.dumps({"event": "synthetic-codex"}))
+elif mode == "nested":
+    print("[" * 2000 + "0" + "]" * 2000)
+elif mode == "nested-result":
+    print(json.dumps({"result": "[" * 2000 + "0" + "]" * 2000}))
 elif mode == "malformed":
     print("not-json")
 else:
@@ -252,6 +261,28 @@ class AgentCliSubprocessE2ETests(unittest.TestCase):
                 self.assertEqual(result["status"], expected)
                 self.assertEqual(
                     [event["backend"] for event in self.executions()], ["claude"]
+                )
+
+    def test_deep_responses_block_after_one_execution_without_fallback(self):
+        for backend, mode in (
+            ("codex", "nested"),
+            ("claude", "nested"),
+            ("claude", "nested-result"),
+        ):
+            with self.subTest(backend=backend, mode=mode):
+                self.log.unlink(missing_ok=True)
+                with self.environment(
+                    SYNTHETIC_CLAUDE_AUTH="1",
+                    SYNTHETIC_CODEX_AUTH="1",
+                    SYNTHETIC_EXEC_MODE=mode,
+                ):
+                    result = self.invoke_prompt(backend="auto", prefer=backend)
+                self.assertEqual(result["status"], "BLOCKED")
+                self.assertEqual(result["failure_phase"], "post-start")
+                self.assertIsNone(result["output"])
+                self.assertEqual(result["text"], "")
+                self.assertEqual(
+                    [event["backend"] for event in self.executions()], [backend]
                 )
 
     @unittest.skipUnless(os.name == "posix", "process groups require POSIX")

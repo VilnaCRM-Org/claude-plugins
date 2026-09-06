@@ -188,6 +188,34 @@ class RedactionBoundaryTests(unittest.TestCase):
         ):
             self.assertEqual(redaction.redact_text(candidate), candidate)
 
+    def test_invalid_public_json_tail_cannot_hide_escaped_secret_keys(self):
+        for tail in (
+            r' "\u0074oken":"ORCHID COBALT"}',
+            r'; "api\u005fkey":["ORCHID","COBALT"]}',
+            r'junk "db.pass\u0077ord":{"value":"ORCHID COBALT"}}',
+            r' "\u0074oken":"ORCHID\"COBALT',
+        ):
+            candidate = '{"note":"safe"' + tail
+            with self.subTest(candidate=candidate):
+                for result in self.surfaces(candidate):
+                    for fragment in ("ORCHID", "COBALT"):
+                        self.assertNotIn(fragment, result)
+                result = redaction.redact_text(candidate)
+                self.assertEqual(result, '{"note":"[REDACTED]"')
+                self.assertEqual(redaction.redact_text(result), result)
+                self.assertEqual(
+                    redaction.redacted_source_spans(candidate),
+                    ((candidate.index('"safe"'), len(candidate)),),
+                )
+        for control in (
+            r'{"note":"safe", "pub\u006cic":"ordinary"}',
+            '{"note":"safe"  }',
+            '{"notes":[{"note":"safe"}]}',
+            '{"note":"safe"',
+        ):
+            self.assertEqual(redaction.redact_text(control), control)
+            self.assertEqual(redaction.redacted_source_spans(control), ())
+
     def test_long_json_and_shell_inputs_finish_in_bounded_process(self):
         code = """
 from redaction import redact_text
@@ -207,6 +235,9 @@ for n in (1000, 4000, 16000):
     result = redact_text(text)
     assert 'ORCHID' not in result and 'COBALT' not in result
     text = '{"message":"token="' + (' ' * n) + 'ORCHID COBALT}'
+    result = redact_text(text)
+    assert 'ORCHID' not in result and 'COBALT' not in result
+    text = '{"note":"safe"' + (' ' * n) + '"' + chr(92) + 'u0074oken":"ORCHID COBALT"}'
     result = redact_text(text)
     assert 'ORCHID' not in result and 'COBALT' not in result
     text = 'key="' + ('ordinary ' * n) + 'api_token=ORCHID"\\nusername=alice'

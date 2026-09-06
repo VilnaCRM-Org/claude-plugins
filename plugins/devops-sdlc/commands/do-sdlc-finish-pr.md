@@ -38,8 +38,18 @@ ID and, for preview, one environment belonging to that target; local checks may
 omit it. If scope selects no target and multiple profile targets could match,
 BLOCKED is immediate before dependent execution; never choose by shell defaults.
 Normalize the authorized repository as `github.com/owner/name` without a scheme,
-query or extra path; record it as `GITHUB_REPOSITORY` and never use ambient
-`GH_REPO`. Derive `GITHUB_OWNER`/`GITHUB_NAME` only from that value for API routes.
+query or extra path; record it as `DEVOPS_APPROVED_GITHUB_REPO` and never use ambient
+`GH_REPO`. Before first use, assign all three task-local variables from the
+verified authorization, overwriting any pre-existing values. Derive
+`DEVOPS_APPROVED_GITHUB_OWNER`/`DEVOPS_APPROVED_GITHUB_NAME` only from that value
+for API routes. Resolve the command argument before GitHub reads or writes:
+for a PR URL, verify its host/repository and positive PR number, then assign that
+number to `DEVOPS_APPROVED_PR_SELECTOR`; for a branch, verify the exact intended
+head branch and assign it to both `DEVOPS_APPROVED_HEAD_BRANCH` and
+`DEVOPS_APPROVED_PR_SELECTOR`. Never default to the current checkout branch.
+If the argument is absent, use only an unambiguous selector in the accepted task
+summary; missing or conflicting identity means BLOCKED. Overwrite these
+task-local variables from the verified input before use, too.
 
 Verify `$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json` and readable Python
 helper files; Python invocation needs no executable bit. Check the prerequisites
@@ -79,13 +89,19 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    specified branch within the user's existing publication scope. If publication
    is explicitly excluded, prepare the complete local result and mark this gate
    BLOCKED. Push only the intended branch. Search for an existing PR matching
-   repository/base/head before creation; otherwise use
-   `gh pr create --repo "$GITHUB_REPOSITORY" --draft --body-file <path>`. For a matching
-   non-draft PR, restore draft with `gh pr ready --repo "$GITHUB_REPOSITORY" --undo <PR>`.
-2. Resolve repository, PR number and head SHA with `gh pr view --repo "$GITHUB_REPOSITORY"`.
-   Query `gh pr checks --repo "$GITHUB_REPOSITORY"` plus `gh api --hostname github.com`
-   `"repos/$GITHUB_OWNER/$GITHUB_NAME/..."` check-run/status APIs for the head, using pagination and required-check
-   configuration. Every `gh pr` call uses `--repo "$GITHUB_REPOSITORY"`; every `gh api`
+   repository/base/head before creation. For a verified branch with no matching
+   PR, use `gh pr create --repo "$DEVOPS_APPROVED_GITHUB_REPO" --head "$DEVOPS_APPROVED_HEAD_BRANCH" --base <verified-base> --draft --body-file <path>`;
+   capture and verify the returned PR URL, then replace the selector with its
+   PR number. A missing explicitly requested PR is BLOCKED, not a creation request.
+   For a matching non-draft PR, restore draft with
+   `gh pr ready "$DEVOPS_APPROVED_PR_SELECTOR" --repo "$DEVOPS_APPROVED_GITHUB_REPO" --undo`.
+2. Resolve repository, PR number, head branch and head SHA with
+   `gh pr view "$DEVOPS_APPROVED_PR_SELECTOR" --repo "$DEVOPS_APPROVED_GITHUB_REPO"`.
+   Verify them against the authorized input before proceeding, then use the
+   resolved PR number as the selector for all subsequent reads and mutations.
+   Query `gh pr checks "$DEVOPS_APPROVED_PR_SELECTOR" --repo "$DEVOPS_APPROVED_GITHUB_REPO"` plus `gh api --hostname github.com`
+   `"repos/$DEVOPS_APPROVED_GITHUB_OWNER/$DEVOPS_APPROVED_GITHUB_NAME/..."` check-run/status APIs for the head, using pagination and required-check
+   configuration. Every `gh pr` call uses `--repo "$DEVOPS_APPROVED_GITHUB_REPO"`; every `gh api`
    call uses `--hostname github.com`. REST routes include the verified owner/name;
    GraphQL queries use `repository(owner: $owner, name: $name)` with those values.
    Verify response identity; mutations use only IDs verified to belong to this PR.
