@@ -104,9 +104,9 @@ resets another stage.
 Apply this precedence before any new attempt: a known caller stop directive,
 a known open/tripped Ralph breaker, or a count at five or more means ESCALATED,
 even if supporting history is incomplete. Otherwise, if resuming without its prior
-count, report BLOCKED instead of assuming zero. Other missing, invalid or unknown
-saved count, breaker or Ralph-run state on resumption is also BLOCKED, never
-assumed clear. Neither outcome starts an attempt.
+count, report BLOCKED instead of assuming zero. On resumption, an invalid or
+unknown saved count or missing, invalid or unknown breaker or Ralph-run state is
+also BLOCKED; do not assume a clear state. Neither outcome starts an attempt.
 
 Ralph is the autonomous implementation loop launched by BMALPH. For an actual
 reported run, retain its observed state and log source/path; absent run evidence
