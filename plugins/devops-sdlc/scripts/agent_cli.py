@@ -24,7 +24,7 @@ from typing import Any
 BACKENDS = ("claude", "codex")
 MAX_BYTES = 2_000_000
 MAX_CONTEXT = 300_000
-MAX_COMPONENTS = 512
+MAX_TRAVERSAL_ENTRIES = 512
 CODEX_CONFIG = (
     "features.shell_tool=false",
     "features.unified_exec=false",
@@ -258,27 +258,38 @@ def bounded_component_paths(root: Path) -> list[Path]:
             raise AdapterError("Plugin component directories must not be symlinks.")
         if not directory.exists():
             continue
-        pending = [directory]
-        while pending:
-            current = pending.pop()
-            try:
-                with os.scandir(current) as entries:
-                    for entry in entries:
-                        if len(paths) >= MAX_COMPONENTS:
-                            raise AdapterError(
-                                "Plugin has too many Markdown component entries."
-                            )
-                        path = Path(entry.path)
-                        if entry.is_symlink():
-                            raise AdapterError(
-                                "Plugin component entries must not be symlinks."
-                            )
-                        paths.append(path)
-                        if entry.is_dir(follow_symlinks=False):
-                            pending.append(path)
-            except OSError as exc:
-                raise AdapterError("Plugin component directory is unreadable.") from exc
+        collect_component_entries(directory, paths)
     return sorted(path for path in paths if path.suffix == ".md")
+
+
+def collect_component_entries(directory: Path, paths: list[Path]) -> None:
+    pending = [directory]
+    while pending:
+        scan_component_directory(pending.pop(), paths, pending)
+
+
+def scan_component_directory(
+    directory: Path, paths: list[Path], pending: list[Path]
+) -> None:
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                add_component_entry(entry, paths, pending)
+    except OSError as exc:
+        raise AdapterError("Plugin component directory is unreadable.") from exc
+
+
+def add_component_entry(
+    entry: os.DirEntry, paths: list[Path], pending: list[Path]
+) -> None:
+    if len(paths) >= MAX_TRAVERSAL_ENTRIES:
+        raise AdapterError("Plugin has too many traversal entries.")
+    path = Path(entry.path)
+    if entry.is_symlink():
+        raise AdapterError("Plugin component entries must not be symlinks.")
+    paths.append(path)
+    if entry.is_dir(follow_symlinks=False):
+        pending.append(path)
 
 
 def validate_request(

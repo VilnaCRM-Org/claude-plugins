@@ -135,8 +135,12 @@ The first invocation timed out resolving offline Ruff tooling. After inspection,
 the parent supplied the verified pinned Ruff binary; the same task completed on
 invocation 2/5, with 25 child runtime tests and Ruff gates passed. The parent
 reviewed/imported only the two-file patch and passed all 28 current runtime tests
-with unchanged source hashes. Evidence: `ralph-review-followup.json` in the
-delivery bundle, including both attempts, cap wrapper, loaded settings and logs.
+with unchanged source hashes. The parent suite includes three additional
+regressions for other review findings, explaining its 28 tests versus the
+isolated child's 25. See [the committed bounded-run evidence](verification/bmalph-review-repair.json)
+for both attempts, cap wrapper, loaded settings, logs and source/count
+reconciliation. The complete `ralph-review-followup.json` is also retained in
+the delivery bundle.
 
 A preliminary launch used the generated .ralph/.ralphrc rather than the root
 configuration; the parent gate stopped it before any model invocation. Its

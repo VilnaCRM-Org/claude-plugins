@@ -19,8 +19,9 @@ from typing import Any
 ROOT = pathlib.Path(__file__).resolve().parent
 MAX_AUDIT_CHARS = 4_000
 SECRET_RE = re.compile(
-    r"(?i)\b([a-z0-9_-]*(?:api[_-]?key|secret|token|password)[a-z0-9_-]*)\b"
-    r"\s*[:=]\s*[^\s,;]+"
+    r"(?i)(?P<name>\"[a-z0-9_-]*(?:api[_-]?key|secret|token|password)"
+    r"[a-z0-9_-]*\"|[a-z0-9_-]*(?:api[_-]?key|secret|token|password)"
+    r"[a-z0-9_-]*)\s*[:=]\s*(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\S+)"
 )
 VERDICT_SCHEMA = {
     "type": "object",
@@ -40,7 +41,7 @@ def digest(value: str) -> str:
 
 
 def audit_text(value: str) -> str:
-    return SECRET_RE.sub(r"\1=[REDACTED]", value)[:MAX_AUDIT_CHARS]
+    return SECRET_RE.sub(r"\g<name>=[REDACTED]", value)[:MAX_AUDIT_CHARS]
 
 
 def tree_hash(root: pathlib.Path, excluded_path: pathlib.Path | None = None) -> str:

@@ -41,9 +41,11 @@ If that capability or the role definition is absent, immediately BLOCK that
 review/QA gate; there is no role fallback or implementer self-approval.
 
 Stage prerequisites: Python 3 and scripts/devops.py for profile validation.
-For requested issue lookup/adoption/creation also require `gh`, successful
-`gh auth status --hostname github.com`, and readable issue API responses for
-the bound repository below.
+For requested issue lookup/adoption/creation, require the `gh` binary before
+entering the procedure. During step 1, first bind the authorized repository,
+then verify `gh auth status --hostname github.com` and readable issue API
+responses for that bound repository. Authentication/read access are checked
+at that point, not before the destination is known.
 A local-brief-only request does not require GitHub authentication, a model judge,
 a delegated reviewer or the bmalph planning tool.
 For a new CLI invocation only, before it starts, binary/authentication preflight

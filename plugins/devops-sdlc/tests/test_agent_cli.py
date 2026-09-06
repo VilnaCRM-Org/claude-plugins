@@ -285,8 +285,8 @@ class AgentCliTests(unittest.TestCase):
     def test_component_collection_bounds_count_and_cumulative_context(self):
         plugin = self.plugin()
         self.put("plugin/commands/second.md", "second")
-        with mock.patch.object(adapter, "MAX_COMPONENTS", 2):
-            with self.assertRaisesRegex(adapter.AdapterError, "too many Markdown"):
+        with mock.patch.object(adapter, "MAX_TRAVERSAL_ENTRIES", 2):
+            with self.assertRaisesRegex(adapter.AdapterError, "too many traversal"):
                 adapter.read_plugin_components(plugin)
         with mock.patch.object(adapter, "MAX_CONTEXT", 80):
             with self.assertRaisesRegex(adapter.AdapterError, "context exceeds"):
@@ -321,8 +321,8 @@ class AgentCliTests(unittest.TestCase):
                 raise AssertionError("component walk exceeded its cap")
 
         with mock.patch.object(adapter.os, "scandir", return_value=Entries()):
-            with mock.patch.object(adapter, "MAX_COMPONENTS", 2):
-                with self.assertRaisesRegex(adapter.AdapterError, "too many Markdown"):
+            with mock.patch.object(adapter, "MAX_TRAVERSAL_ENTRIES", 2):
+                with self.assertRaisesRegex(adapter.AdapterError, "too many traversal"):
                     adapter.read_plugin_components(plugin)
         self.assertEqual(traversed, candidates)
 

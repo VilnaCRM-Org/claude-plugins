@@ -330,6 +330,15 @@ class ScenarioTests(unittest.TestCase):
             self.assertNotIn(value, audited)
         self.assertEqual(audited.count("[REDACTED]"), 3)
 
+    def test_audit_and_judge_input_redact_complete_secret_values(self):
+        candidate = (
+            'db_password=sentinel,more;tail "api_token": "quoted sentinel value"'
+        )
+        for value in ("sentinel", "more", "tail", "quoted"):
+            self.assertNotIn(value, judge.audit_text(candidate))
+            self.assertNotIn(value, judge.judge_prompt(self.scenario, candidate))
+        self.assertIn('"api_token"=[REDACTED]', judge.audit_text(candidate))
+
     def test_calibration_schema_rejected_before_backend_or_model_calls(self):
         invalid = [None, [], [None], [{"expect": "PASS"}, {"expect": "FAIL"}]]
         seeds = self.catalog["calibration"]

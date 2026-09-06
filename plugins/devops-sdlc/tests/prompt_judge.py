@@ -46,8 +46,9 @@ CONTEXT = (
     "authoritative inventory; do not infer unseen implementation or test success."
 )
 SECRET_RE = re.compile(
-    r"(?i)\b([a-z0-9_-]*(?:api[_-]?key|secret|token|password)[a-z0-9_-]*)\b"
-    r"\s*[:=]\s*[^\s,;]+"
+    r"(?i)(?P<name>\"[a-z0-9_-]*(?:api[_-]?key|secret|token|password)"
+    r"[a-z0-9_-]*\"|[a-z0-9_-]*(?:api[_-]?key|secret|token|password)"
+    r"[a-z0-9_-]*)\s*[:=]\s*(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\S+)"
 )
 
 
@@ -233,7 +234,7 @@ def backend_identity(result: dict) -> tuple[str, str, str, str]:
 
 
 def redact_evidence(value: str) -> str:
-    return SECRET_RE.sub(r"\1=[REDACTED]", value)
+    return SECRET_RE.sub(r"\g<name>=[REDACTED]", value)
 
 
 def stored_dimensions(verdict: dict) -> dict:
@@ -545,8 +546,10 @@ def assess_artifact(
         "kind": artifact.kind,
         "name": artifact.name,
         "sha256": digest(artifact.raw.encode()),
-        "prompt_text_sha256": digest(
-            vote_prompt(artifact, dimensions, context).encode()
+        "prompt_text_sha256": (
+            digest(vote_prompt(artifact, dimensions, context).encode())
+            if dimensions
+            else None
         ),
         "requested_dimensions": [dimension.id for dimension in dimensions],
         "votes": [],

@@ -49,16 +49,36 @@ Before starting a new CLI process,
 selects authenticated Claude, or authenticated Codex if Claude binary/auth fails.
 Use `--prefer codex` to reverse that order. If both are unavailable, stop live
 work as BLOCKED. Never replay a started or uncertain action through fallback.
-The stage is the invoking command name (or directly invoked skill name). Its
-budget is five procedure attempts, recorded in `specs/<task>/run-summary.md`;
-reuse the existing task path or create the date/task-title slug once for new work.
+Use the exact invoked command identifier as the stage key, for example
+`do-sdlc-implement`. For a skill invoked directly, use its frontmatter `name`,
+for example `terraform-terraspace`. A stage has five procedure attempts.
+The task ledger is the existing task's `run-summary.md`; reuse its exact saved
+repository-relative path. For new work without a ledger, create it once at
+`specs/YYYY-MM-DD-<slug>/run-summary.md`: use the task creation date, lowercase
+the task title, replace each run of characters outside `a-z` and `0-9` with one
+hyphen, and trim leading/trailing hyphens. Use `task` if the slug is empty.
+For example, a task titled "Add Cache" created on 2026-09-06 uses
+`specs/2026-09-06-add-cache/run-summary.md`. If that path already belongs to a
+different task, report BLOCKED; never overwrite it or reset its counter.
+Persist the exact ledger path and stage key before the first procedure attempt.
+References to `specs/<task-id>/run-summary.md` in selected skills mean this same
+saved ledger; they do not create a second task directory.
 An attempt starts when the first applicable procedure step begins and ends on its
 PASSED, FAILED or BLOCKED outcome. Before starting, read the saved count: if it is
 already five, stop with FAILED; otherwise increment once, save and report `n/5`.
 Observing an already-started attempt does not increment again. Preserve counts,
-applicability and evidence across sessions and backend changes. Ralph is the loop
-run by BMALPH; an open/tripped circuit breaker in `.ralph/logs/` ends that run.
-Preserve the failed log and partial work; never reset it to retry.
+applicability and evidence across sessions and backend changes.
+
+BMAD is the installed planning workflow that produces requirements, architecture,
+stories and a readiness decision. BMALPH is the command-line integration that
+imports those planning artifacts and starts the implementation loop named Ralph.
+Only the `do-sdlc-implement` stage starts that loop after its readiness gate passes;
+skill selection or planning does not start implementation. In that stage,
+`bmalph implement` imports the ready stories, then `bmalph run --driver codex`
+or `bmalph run --driver claude-code` starts Ralph using the selected authenticated
+CLI. Ralph's circuit breaker is its automatic stop after repeated failures or
+lack of progress. An open/tripped breaker recorded in `.ralph/logs/` ends that
+run. Preserve the failed log and partial work; never reset it to retry.
 
 Required checks are the exact acceptance checks recorded in that same task
 summary. A native Claude-plugin check means observing Claude actually load and

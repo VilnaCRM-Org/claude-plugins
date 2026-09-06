@@ -174,6 +174,12 @@ class PromptJudgeTests(unittest.TestCase):
             subject.redact_evidence("AWS_SECRET_ACCESS_KEY: not-retained"),
             "AWS_SECRET_ACCESS_KEY=[REDACTED]",
         )
+        redacted = subject.redact_evidence(
+            'db_password=sentinel,more;tail "api_token": "quoted sentinel value"'
+        )
+        for value in ("sentinel", "more", "tail", "quoted"):
+            self.assertNotIn(value, redacted)
+        self.assertIn('"api_token"=[REDACTED]', redacted)
         value = {
             "dimensions": {
                 "J1": {
@@ -262,6 +268,18 @@ class PromptJudgeTests(unittest.TestCase):
         report = self.run_fixture(settings=subject.Settings(dimensions=("J1",)))
         self.assertEqual(report["artifacts"][0]["status"], "NOT_REQUESTED")
         self.assertEqual(report["status"], "FAILED")
+
+    def test_not_requested_artifact_has_no_prompt_hash_or_vote_call(self):
+        artifact = subject.artifact_inventory(
+            self.root, subject.plugin_snapshot(self.root)
+        )[0]
+        with mock.patch.object(subject, "collect_votes") as votes:
+            row = subject.assess_artifact(
+                artifact, [], subject.CONTEXT, self.settings, "fixture", ()
+            )
+        self.assertEqual(row["status"], "NOT_REQUESTED")
+        self.assertIsNone(row["prompt_text_sha256"])
+        votes.assert_not_called()
 
     def test_plugin_changes_during_run_invalidate_report(self):
         counter = 0
