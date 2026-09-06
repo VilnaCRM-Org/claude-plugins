@@ -65,7 +65,7 @@ skill receives a verdict; no silent skips.
    which paths are required, deny every other path by action and resource, and
    include those denials in the review evidence. When rejecting unnecessary
    privilege or public-access expansion, record a security finding in
-   `specs/<task>/run-summary.md`: affected principal/resource, rejected scope,
+   `specs/<task-id>/run-summary.md`: affected principal/resource, rejected scope,
    security impact, least-privilege remediation, source SHA, responsible reviewer
    and unresolved/resolved status. The responsible reviewer is the assigned
    independent security-reviewer; an unavailable reviewer leaves it unresolved.

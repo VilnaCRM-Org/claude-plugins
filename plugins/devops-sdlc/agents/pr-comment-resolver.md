@@ -40,6 +40,16 @@ Mark fixture, live, skipped and blocked evidence separately.
 
 ## Allowed actions
 
+Before any shell execution or file edit, verify the caller's current host-policy
+attestation described in [execution policy](../docs/execution-policy.md). It must
+bind this session, source SHA, assigned paths, tool/argv surface, credential
+isolation and network policy to controls outside the editable repository. A
+profile flag or agent assertion is insufficient. Continue automatically within
+already authorized, enforced scope. If enforcement is absent or uncertain,
+BLOCK only the affected execution/edit action and return a reviewable patch or
+exact command proposal to the authorized parent; continue permitted analysis.
+Do not install policy, expand permissions or call a proposal an executed fix.
+
 Edit only assigned source/test files and run reviewed local commands.
 Never run cloud mutations, state exports, secret disclosure, force-unlock or
 permission broadening from this delegation. Existing authorization applies only

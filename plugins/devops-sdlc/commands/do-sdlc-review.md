@@ -63,7 +63,8 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
 
 1. Freeze the source SHA and diff base. Review every changed file and the
    [complete skill inventory](../skills/SKILL-DECISION-GUIDE.md), recording each
-   skill's PASS, FAIL or justified NOT_APPLICABLE; no silent skips.
+   skill's PASSED, FAILED, SKIPPED (justified inapplicable) or BLOCKED status;
+   no silent skips.
 2. Always assign independent `fr-nfr-reviewer` for requirement/code changes.
    Assign `security-reviewer` for IAM, credentials, network exposure, subprocess,
    authorization or privileged CI changes. Assign `state-migration-reviewer` for

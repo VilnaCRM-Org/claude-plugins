@@ -1,6 +1,6 @@
 ---
 name: bmad-autonomous-planning
-description: "Use when turning infrastructure work into BMAD requirements, architecture, stories and a readiness handoff. Use infrastructure-quality for checking existing code; execution belongs to do-sdlc-implement."
+description: "Use when turning infrastructure work into BMAD requirements, architecture, stories and a readiness handoff. Use infrastructure-quality for checking existing code; implementation execution is a separate command stage, outside this skill."
 ---
 
 # Bmad Autonomous Planning

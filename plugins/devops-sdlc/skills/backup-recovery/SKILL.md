@@ -58,9 +58,10 @@ skill receives a verdict; no silent skips.
 
 1. Read repository backup/retention/encryption/replication requirements and
    declared RPO/RTO. Treat targets separately from observed restore performance.
-2. Inspect metadata limited to backup identifiers, timestamps, retention, encryption,
-   resource counts and checksums permitted by the task; never raw state or secrets for backup success, age, replication, KMS access
-   and recovery owner. Never export state, database contents or decrypted keys.
+2. Inspect metadata for backup success, age, replication, KMS access and recovery
+   owner, limited to task-permitted backup identifiers, timestamps, retention,
+   encryption, resource counts and checksums. Never read or export raw state,
+   database contents, secrets or decrypted keys.
 3. Prepare an isolated restore drill with exact source, destination, cleanup,
    data-access boundary and authorization. Do not restore over shared production
    or destroy resources to simulate a disaster.

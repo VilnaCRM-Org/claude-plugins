@@ -143,6 +143,15 @@ As a maintainer, I want BMAD planning and bounded implementation with independen
 **Then** it invokes `bmalph implement` and the configured Ralph driver, respects five-iteration stage guards and terminal breakers,
 **And** independent reviewers record FR/NFR, IAM/state/destructive-change and recovery findings with an applicability ledger.
 
+**Bounded-workflow evidence: verified in a separate review-repair task.**
+The original Story 3.1 launch loaded 100 calls and made six calls before its
+breaker opened; that failed run remains non-compliant. The later Story 9.1
+Pulumi discovery repair used actual BMALPH import/run, verified loaded limits of five calls and five minutes
+limits and a persisted task cap across the hour boundary, then completed in 2/5
+invocations. Its two-file patch and parent validation are recorded in
+[the bounded-run evidence](verification/bmalph-review-repair.json). This establishes
+current bounded-workflow behavior, not success of the historical failed run.
+
 **Given** a drift, incident, recovery, cost, observability or environment task,
 **When** its skill applies,
 **Then** it uses detected repository contracts and accurate evidence,
@@ -242,11 +251,23 @@ Deliver a small independent reporter through an actual Ralph iteration.
 
 As a maintainer, I want a validated inventory report, so that I can assess progress toward 90% eligible-work automation without counting mock results as production work.
 
-**Requirements:** FR12, NFR3, NFR5, NFR6. **Owner:** Ralph integration worker.
+**Requirements:** FR12, NFR3, NFR4, NFR5, NFR6. **Owner:** Ralph integration worker.
+
+**Acceptance evidence is separated by concern.** Reporter implementation and
+strict parent validation establish the functional criteria below. The original
+Story 3.1 Ralph run remains BLOCKED and non-compliant; no breaker was reset and
+its outcome is never relabelled. The independent bounded-workflow criterion is
+now verified by the distinct Story 9.1 review repair linked above. Full current
+runtime, LLM and final-head delivery evidence remains required for release.
 
 **Exclusive changed paths:** `plugins/devops-sdlc/scripts/automation_coverage.py`, `plugins/devops-sdlc/tests/test_automation_coverage.py`, `plugins/devops-sdlc/docs/automation-inventory.md`. Do not modify runtime helper, prompts, CI or other agents' files.
 
 **Acceptance Criteria:**
+
+**Given** imported ready artifacts and a new scoped implementation run,
+**When** BMALPH starts the configured driver,
+**Then** its effective five-iteration limit is verified before the first implementation action,
+**And** observed attempt and exit records show the run stayed within that bound without resetting a terminal breaker. The linked Story 9.1 evidence verifies this workflow criterion; the original Story 3.1 execution still remains failed.
 
 **Given** a versioned JSON inventory containing uniquely identified repository/target/environment/operation rows, applicability, outcome, evidence kind/reference and exclusion reason,
 **When** `python3 automation_coverage.py INVENTORY.json` runs,

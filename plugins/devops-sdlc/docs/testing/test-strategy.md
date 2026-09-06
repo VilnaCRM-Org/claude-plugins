@@ -29,12 +29,19 @@ or an earlier diagnostic cannot substitute for the final complete campaign.
 
 ## Behavioral simulation
 
-`tests/behavior_judge.py` evaluates 30 catalog scenarios in an inert disposable
+`tests/behavior_judge.py` evaluates 31 catalog scenarios in an inert disposable
 fixture and requires three calibration seeds for a full gate. The fixture has
 minimal Terraform, Terraspace and Pulumi metadata, with no credentials, state,
 provider configuration or cloud resources. The runner proposes decisions; an
 independent no-tool judge assesses the response. A simulation PASS establishes
 only that proposed behavior met that scenario's observations.
+
+G4 adds an exact attempt-budget boundary across authenticated backend fallback.
+The same implementation ledger progresses from 4/5 to 5/5 before a failed fifth
+attempt; backend availability must not permit a sixth attempt or a new ledger,
+task identity or stage label for the same work. Failure evidence and independent
+next actions remain required. This new case needs fresh live evidence; the earlier
+30-scenario result is historical and does not satisfy the expanded catalog.
 
 Claude uses native plugin loading for the runner. Codex uses bounded command,
 agent and skill Markdown supplied by `scripts/agent_cli.py`; it does not natively

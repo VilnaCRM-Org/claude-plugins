@@ -121,6 +121,46 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("test", result["candidates"][0]["make_targets"])
         self.assertFalse(result["executed"])
 
+    def test_cli_discovery_includes_pulumi_yaml_and_yml_stack_configs(self):
+        self.put("pulumi/Pulumi.yml", "name: fixture\n")
+        self.put("pulumi/Pulumi.test.yml", "secure: SECRET_SENTINEL_YML\n")
+        self.put("pulumi/Pulumi.test.yaml", "secure: SECRET_SENTINEL_YAML\n")
+        external = tempfile.TemporaryDirectory()
+        self.addCleanup(external.cleanup)
+        symlink_target = Path(external.name) / "Pulumi.link.yaml"
+        symlink_target.write_text("secure: SECRET_SENTINEL_SYMLINK\n")
+        (self.root / "pulumi" / "Pulumi.link.yaml").symlink_to(symlink_target)
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(ENTRYPOINT),
+                "discover",
+                "--repo",
+                str(self.root),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        result = json.loads(completed.stdout)
+        [candidate] = result["candidates"]
+
+        self.assertEqual(candidate["root"], "pulumi")
+        self.assertEqual(
+            candidate["configuration_filenames"],
+            ["pulumi/Pulumi.test.yaml", "pulumi/Pulumi.test.yml"],
+        )
+        self.assertEqual(
+            candidate["configuration_filenames"],
+            sorted(candidate["configuration_filenames"]),
+        )
+        self.assertNotIn(
+            "pulumi/Pulumi.link.yaml", candidate["configuration_filenames"]
+        )
+        self.assertNotIn("SECRET_SENTINEL", completed.stdout)
+        self.assertNotIn("SECRET_SENTINEL", completed.stderr)
+
     def test_discovery_skips_symlinked_external_tree(self):
         (self.root / "elsewhere").symlink_to("/tmp", target_is_directory=True)
         self.assertEqual(runtime.discover(self.root)["candidates"], [])
@@ -174,6 +214,74 @@ class RuntimeTests(unittest.TestCase):
             self.put(runtime.PROFILE, contents)
             with self.assertRaises(runtime.Invalid):
                 runtime.validate_profile(self.root)
+
+    def test_deep_profile_and_plan_json_return_bounded_cli_error(self):
+        nested = "[" * 2000 + "0" + "]" * 2000
+        for command, name in (
+            ("validate-profile", runtime.PROFILE),
+            ("verify-plan", ".artifacts/devops-sdlc/deep.json"),
+        ):
+            self.put(name, nested)
+            argv = [sys.executable, str(ENTRYPOINT), command, "--repo", str(self.root)]
+            if command == "verify-plan":
+                argv += ["--plan", name]
+            result = subprocess.run(argv, capture_output=True, text=True, check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.stdout, "")
+            row = json.loads(result.stderr)
+            self.assertEqual(row["status"], "BLOCKED")
+            self.assertFalse(row["executed"])
+            self.assertNotIn("Traceback", result.stderr)
+
+    def test_unreadable_discovery_directory_fails_instead_of_partial_inventory(self):
+        real_scandir = os.scandir
+        self.put("hidden/main.tf", "fixture")
+
+        def unreadable(path):
+            if Path(path).name == "hidden":
+                raise PermissionError("private directory content")
+            return real_scandir(path)
+
+        with mock.patch.object(runtime.os, "scandir", side_effect=unreadable):
+            with self.assertRaisesRegex(
+                runtime.Invalid, "could not read a directory"
+            ) as failure:
+                runtime.discover(self.root)
+        self.assertNotIn("private directory content", str(failure.exception))
+
+    def test_terraspace_stack_grammar_and_multi_stack_fail_profile_validation(self):
+        self.profile["targets"][0]["stack_type"] = "terraspace"
+        self.profile["targets"][0]["commands"]["preview"]["argv"] = [
+            "terraspace",
+            "plan",
+            "{stack}",
+        ]
+        for selector in ("group/stack", "s" * 81):
+            self.profile["targets"][0]["environments"]["test"]["stack"] = selector
+            self.save_profile()
+            with self.assertRaises(runtime.Invalid):
+                runtime.validate_profile(self.root)
+        self.profile["targets"][0]["environments"]["test"]["stack"] = "valid-stack"
+        self.profile["targets"][0]["commands"]["validate"]["argv"] = [
+            "make",
+            "terraspace-validate",
+            "stacks=one",
+        ]
+        self.save_profile()
+        with self.assertRaisesRegex(runtime.Invalid, "Unsupported Make argument"):
+            runtime.validate_profile(self.root)
+        self.profile["targets"][0]["commands"]["validate"]["argv"] = [
+            "terraspace",
+            "validate",
+            "{stack}",
+        ]
+        self.save_profile()
+        self.assertEqual(
+            runtime.validate_profile(self.root)["targets"][0]["environments"]["test"][
+                "stack"
+            ],
+            "valid-stack",
+        )
 
     def test_rejects_bad_argv(self):
         vectors = [

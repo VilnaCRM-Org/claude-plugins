@@ -13,13 +13,14 @@ user has authorized its update.
 | `schema_version` | Integer `1`; booleans do not count as integers. |
 | `project` | Exactly `name` and `repo`; repo is non-empty `owner/name` for GitHub routing. |
 | `project.name` | Non-empty display name, at most 160 characters. |
-| `project.repo` | GitHub repository identity in `owner/name` form. |
+| `project.repo` | GitHub repository identity in `owner/name` form. Schema validation is not authorization; the issue command binds this destination to the authorized task repository and origin before GitHub access. |
 | `targets` | 1–100 objects with unique `id` values. |
 | `id` | 1–80 letters, digits, dots, underscores or hyphens; starts alphanumeric. |
 | `stack_type` | `terraform`, `terraspace` or `pulumi`. |
 | `root` | Existing repository-relative command working directory; `.` is allowed. No absolute paths, parent traversal or symlink components. |
 | `environments` | Object keyed by environment ID; may be empty for local-only targets; at most 50 entries. |
 | Environment entry | Exactly `stack`, 12-digit AWS `account_id`, `region`, and non-secret `backend`. |
+| Terraspace `stack` | Same 1–80 character identifier grammar as `id`; slash-containing or longer selectors fail profile validation before planning. |
 | `backend` | An `s3://`, absolute `file:///` or `https://` identifier; no credentials, query strings, fragments or parent traversal. |
 | `commands` | All five keys required: `validate`, `test`, `check`, `security`, `preview`. |
 | Command entry | `null`, or exactly `argv` and boolean `requires_credentials`. |

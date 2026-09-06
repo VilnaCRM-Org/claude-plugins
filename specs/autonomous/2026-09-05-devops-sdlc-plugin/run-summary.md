@@ -33,8 +33,11 @@ loaded limits in the initial log before proceeding.
 - Native Claude manifest validation passed; this is packaging evidence, not an
   authenticated Claude execution campaign. Live evaluation uses authenticated Codex through preflight fallback.
 - Prompt lint and Python format/lint/types/security/complexity checks passed.
-- Current deterministic campaign: 131 tests passed, with 100% coverage of 1,057
-  runtime statements and 444 branches, without exclusions. Judge harness tests
+- Pre-review version-twelve deterministic campaign: 131 tests passed, with 100% coverage of 1,057
+  runtime statements and 444 branches under the existing repository coverage
+  configuration. Correction: that report excluded six terminal CLI entry-point
+  lines; its earlier "without exclusions" description was inaccurate. The new
+  review-follow-up gate includes those lines with zero exclusions. Judge harness tests
   are included in the test count; runtime coverage applies to the three scripts.
 - Operator E2E: all 24 primary local assertions passed. The extra report has
   eleven rows: nine local passes and two unrun cloud rows. These include actual
@@ -50,11 +53,11 @@ loaded limits in the initial log before proceeding.
 - Independent runtime security review: seven findings fixed and rechecked.
 - First full live diagnostics exposed prompt and behavioral failures. Preserve
   those failed reports; fixes do not retroactively change their verdicts.
-- Final version-twelve fresh prompt assessment PASSED all 31 artifacts and all 203
+- Pre-review version-twelve fresh prompt assessment PASSED all 31 artifacts and all 203
   applicable dimension pairs, using three live votes per artifact. All ten
   critical positive/negative calibration controls passed with three votes each.
   Exact source citations, median thresholds and critical-vote floors were enforced.
-- Final version-twelve behavioral simulation PASSED all 30 catalog scenarios plus
+- Pre-review version-twelve behavioral simulation PASSED all 30 catalog scenarios plus
   all three calibration controls in one complete campaign. Three separately
   predeclared migration diagnostics at version ten and three fallback diagnostics
   at version eleven also passed; these do not replace catalog
@@ -77,8 +80,9 @@ loaded limits in the initial log before proceeding.
   Claude authentication preflight was unavailable. Both explicitly requested
   `gpt-5.5`; the CLI did not expose independently observed model identity. These
   final campaigns required no Claude login. Input snapshots stayed unchanged and the
-  committed plugin matches the reported input hashes.
-- Draft PR 13 contains the change. Review findings have explicit independent
+  plugin at `b59ccd4537fe408392814d5d7c67b5ef8818053a` matched those input hashes.
+  Subsequent review repairs require new complete source-bound campaigns.
+- PR 13 contains the change; the user subsequently marked it ready for review. Review findings have explicit independent
   dispositions; fixes and valid maintainability advisories are distinguished.
   A secret-detector false positive was removed by shortening a test method name
   without changing assertions. Completion additionally requires exact final-head
@@ -110,3 +114,32 @@ The reporter requires a matching frozen identity/applicability baseline before
 reporting a supplied automation target; it always records external verification
 as false. Real eligible-task claims need independent verification before any
 operational achievement is asserted.
+
+## Review follow-up campaign (2026-09-06)
+
+CodeRabbit and Cubic completed the initial review of b59ccd4. Their findings are
+being reconciled with independent source checks, fixes and focused regressions.
+Qodo reported its trial ended and did not run; no completed Qodo review is claimed.
+Current source requires the final zero-exclusion runtime gate, 31-scenario live
+catalog with three calibration controls, and a fresh 31-artifact prompt gate.
+The prior version-twelve verification record remains historical until replaced
+by validated evidence for the reviewed source. Final delivery also requires
+current-head CI, reviewer completion and a quiet observation window.
+
+A separate BMALPH 2.11.0 review-repair task imported Story 9.1 through
+`bmalph implement`, then ran `bmalph run --driver codex --no-dashboard`. It repaired
+Pulumi .yml inventory discovery and added a real CLI regression. The trusted
+launcher verified loaded five-call/five-minute limits before releasing each
+invocation and enforced a persistent five-invocation cap across an hour boundary.
+The first invocation timed out resolving offline Ruff tooling. After inspection,
+the parent supplied the verified pinned Ruff binary; the same task completed on
+invocation 2/5, with 25 child runtime tests and Ruff gates passed. The parent
+reviewed/imported only the two-file patch and passed all 28 current runtime tests
+with unchanged source hashes. Evidence: `ralph-review-followup.json` in the
+delivery bundle, including both attempts, cap wrapper, loaded settings and logs.
+
+A preliminary launch used the generated .ralph/.ralphrc rather than the root
+configuration; the parent gate stopped it before any model invocation. Its
+rejection is preserved. The original Story 3.1 six-call campaign and terminal
+breaker remain unchanged and non-compliant; this distinct repair provides new
+bounded-workflow evidence without claiming the failed original run succeeded.

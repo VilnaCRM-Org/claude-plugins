@@ -264,16 +264,13 @@ def vote_metadata(result: dict, number: int, mode: str) -> dict:
     }
 
 
-def one_vote(
+def vote_prompt(
     artifact: _model.Artifact,
     dimensions: list[rubrics.Dimension],
     context: str,
-    settings: Settings,
-    number: int,
-    mode: str,
-) -> dict:
+) -> str:
     citation_lines = citation_choices(artifact.raw)
-    prompt = (
+    return (
         judge.build_prompt(artifact, dimensions, context)
         + "\n\n"
         + (
@@ -286,6 +283,17 @@ def one_vote(
         + "\nAllowed exact citation fragments (copy one verbatim):\n"
         + "\n".join(citation_lines)
     )
+
+
+def one_vote(
+    artifact: _model.Artifact,
+    dimensions: list[rubrics.Dimension],
+    context: str,
+    settings: Settings,
+    number: int,
+    mode: str,
+) -> dict:
+    prompt = vote_prompt(artifact, dimensions, context)
     attempts = []
     backend = settings.backend
     for repair in range(judge.MAX_REPROMPTS + 1):
@@ -300,7 +308,10 @@ def one_vote(
                 plugin_root=None,
                 timeout=settings.timeout,
             )
-        metadata = vote_metadata(result, number, mode)
+        metadata = {
+            **vote_metadata(result, number, mode),
+            "prompt_text_sha256": digest(prompt.encode()),
+        }
         if result.get("status") != "COMPLETED" or result.get("plugin_mode") != "none":
             return {
                 **metadata,
@@ -336,6 +347,7 @@ def one_vote(
             attempts.append(
                 {
                     "status": "INVALID",
+                    "prompt_text_sha256": digest(prompt.encode()),
                     "reason": str(exc),
                     "output_sha256": json_digest(result.get("output")),
                 }
@@ -533,7 +545,9 @@ def assess_artifact(
         "kind": artifact.kind,
         "name": artifact.name,
         "sha256": digest(artifact.raw.encode()),
-        "prompt_text_sha256": digest(artifact.raw.encode()),
+        "prompt_text_sha256": digest(
+            vote_prompt(artifact, dimensions, context).encode()
+        ),
         "requested_dimensions": [dimension.id for dimension in dimensions],
         "votes": [],
         "dimensions": [],
@@ -686,6 +700,8 @@ def evaluate_one(
     if identity is None:
         row = {
             "path": artifact.path.relative_to(artifact.plugin_root).as_posix(),
+            "kind": artifact.kind,
+            "name": artifact.name,
             "sha256": digest(artifact.raw.encode()),
             "status": "BLOCKED",
             "requested_dimensions": [d.id for d in requested],

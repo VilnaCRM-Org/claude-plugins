@@ -102,7 +102,7 @@ skill receives a verdict; no silent skips.
 
 Return PASSED, FAILED, SKIPPED or BLOCKED with source SHA, selected target and,
 when used, environment, command results, artifact hashes and unresolved findings.
-Every applicable acceptance gate requires PASSED; SKIPPED is only for an action
+Every applicable acceptance gate requires a PASSED status; SKIPPED is only for an action
 outside the requested scope, with its reason recorded before evaluating results.
 Missing input, tool, helper, independent reviewer, authentication or authorization
 ends dependent work immediately as BLOCKED with the exact missing prerequisite.

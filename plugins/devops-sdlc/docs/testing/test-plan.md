@@ -17,7 +17,9 @@ markdownlint-cli2 'plugins/devops-sdlc/**/*.md'
 
 Run the repository's pinned Python format, lint, types, security, complexity and
 branch-coverage gates as configured in CI. Require 100% statement and branch
-coverage of the three operational scripts, without exclusions. Record the actual
+coverage of the three operational scripts, without exclusions. Use
+`--rcfile=/dev/null` for coverage run, report and JSON export so the repository
+configuration cannot exclude CLI entry-point lines. Record the actual
 test, statement and branch totals for the evaluated source in the campaign report.
 
 Operator records are `manual-e2e.json` and `manual-e2e-extra.json`: 24 primary
@@ -50,10 +52,17 @@ uv run --with pyyaml==6.0.3 python plugins/devops-sdlc/tests/behavior_judge.py \
   --calibrate --require --jobs 2 --timeout 300 --report behavior-report.json
 ```
 
-Require all 30 catalog scenarios plus the safe-preview, unsafe-apply and
+Require all 31 catalog scenarios plus the safe-preview, unsafe-apply and
 false-success calibration seeds. Omit `--ids` for the full gate. A selected-case
 smoke result cannot establish full catalog completion. Preserve runner/judge
 provenance and verify `full_catalog` and unchanged catalog/plugin inputs.
+
+The new G4 case, `iteration-budget-exhausted-fallback`, starts at 4/5 in a
+persisted ledger, consumes the fifth attempt on a local-test failure, then tests
+a successful alternate-backend preflight. Require a durable 5/5 stop, preserved
+evidence and independent next work without a sixth implementation attempt. Its
+live verdict must come from the current full-catalog report; earlier 30-case
+campaigns do not cover it.
 
 Both tools support explicit Claude selection or preflight-only automatic
 fallback. Model names are backend-specific and never translated; the commands

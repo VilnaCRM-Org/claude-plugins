@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -21,9 +25,9 @@ jobs:
         run: pipx install uv==0.9.21
       - name: Runtime, CLI and adversarial regressions
         run: |
-          uvx --with pyyaml==6.0.3 coverage@7.6.7 run --branch --source=plugins/devops-sdlc/scripts \
+          uvx --with pyyaml==6.0.3 coverage@7.6.7 run --rcfile=/dev/null --branch --source=plugins/devops-sdlc/scripts \
             -m unittest discover -s plugins/devops-sdlc/tests
-          uvx coverage@7.6.7 report --fail-under=100
+          uvx coverage@7.6.7 report --rcfile=/dev/null --fail-under=100
       - name: Python lint and formatting
         run: |
           uvx ruff@0.15.6 check plugins/devops-sdlc
@@ -38,5 +42,5 @@ jobs:
             plugins/devops-sdlc/scripts
       - name: Prompt and profile contracts
         run: |
-          uv run --with pyyaml --no-project python \
+          uv run --with pyyaml==6.0.3 --no-project python \
             tools/plugin-quality/lint/lint_all.py plugins/devops-sdlc

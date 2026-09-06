@@ -28,6 +28,7 @@ context; it does not natively load this Claude plugin. Select the adapter with
 backend-specific runner and judge model choices. Auto fallback occurs only when
 binary/authentication preflight fails; a selected CLI failure after start stops
 the run.
+Race-safe adapter input loading requires POSIX.
 
 Use an authenticated Claude Code or Codex CLI, Python 3.10+, Git and GitHub CLI.
 BMALPH is installed separately; this implementation was developed with BMALPH

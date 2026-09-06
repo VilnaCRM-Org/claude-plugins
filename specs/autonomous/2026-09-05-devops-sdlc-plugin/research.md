@@ -6,7 +6,7 @@ Date: 2026-09-05. BMAD analyst research uses local repository evidence and deleg
 
 - `CLAUDE.md` requires BMAD analysis, planning, solutioning, then BMALPH implementation.
 - `_bmad/COMMANDS.md` resolves the installed workflow files; `_bmad/config.yaml` is the available configuration. The workflows reference an absent `_bmad/bmm/config.yaml`; the generated root config supplies equivalent variables.
-- `../research/plugin-patterns.md` records PHP/React architecture, artifact spines, stage loops, CI rules, and LLM judge constraints.
+- The PHP/React plugin-pattern evidence embedded below records architecture, artifact spines, stage loops, CI rules, and LLM judge constraints; no unresolved workspace-relative research input is required.
 - BMALPH 2.11.0 was initialized by the parent agent. No BMAD or Ralph assets will be vendored into the plugin.
 
 ## Workflow execution policy

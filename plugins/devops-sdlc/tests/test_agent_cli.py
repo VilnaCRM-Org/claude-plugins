@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -80,10 +81,32 @@ class AgentCliTests(unittest.TestCase):
             mock.patch.object(
                 adapter,
                 "probe_command",
-                return_value=subprocess.CompletedProcess([], 0, "", ""),
+                side_effect=[
+                    subprocess.CompletedProcess([], 0, "", ""),
+                    subprocess.CompletedProcess([], 0, "Logged in using fixture", ""),
+                ],
             ),
         ):
-            self.assertIsNone(adapter.probe_backend("codex")["version"])
+            result = adapter.probe_backend("codex")
+        self.assertIsNone(result["version"])
+        self.assertFalse(result["authenticated"])
+        self.assertEqual(result["reason"], "preflight-unavailable")
+        with (
+            mock.patch.object(adapter.shutil, "which", return_value="cli"),
+            mock.patch.object(
+                adapter,
+                "probe_command",
+                side_effect=[
+                    subprocess.CompletedProcess([], 1, "version 9.9", ""),
+                    subprocess.CompletedProcess([], 0, "Logged in using fixture", ""),
+                ],
+            ) as probe,
+        ):
+            result = adapter.probe_backend("codex")
+        self.assertFalse(result["authenticated"])
+        self.assertIsNone(result["version"])
+        self.assertEqual(result["reason"], "preflight-unavailable")
+        self.assertEqual(probe.call_count, 1)
 
     def test_probe_command_is_fixed_argv_no_shell(self):
         with mock.patch.object(adapter.subprocess, "run") as run:
@@ -94,7 +117,7 @@ class AgentCliTests(unittest.TestCase):
 
     def test_selection_preflight_only(self):
         no = dict(authenticated=False, reason="authentication-unavailable")
-        yes = dict(authenticated=True, reason="ready", backend="codex")
+        yes = dict(authenticated=True, reason="ready", backend="codex", version="1.2.3")
         with mock.patch.object(
             adapter, "probe_backend", side_effect=[no, yes]
         ) as probe:
@@ -107,6 +130,9 @@ class AgentCliTests(unittest.TestCase):
             self.assertEqual(probe.call_count, 1)
         with mock.patch.object(adapter, "probe_backend", return_value=yes):
             self.assertEqual(adapter.select_backend(prefer="codex")["fallback"], [])
+        no_version = {**yes, "version": None}
+        with mock.patch.object(adapter, "probe_backend", return_value=no_version):
+            self.assertEqual(adapter.select_backend("codex")["status"], "BLOCKED")
         for backend, prefer in (("bad", "claude"), ("auto", "bad")):
             with self.assertRaises(adapter.AdapterError):
                 adapter.select_backend(backend, prefer)
@@ -121,14 +147,121 @@ class AgentCliTests(unittest.TestCase):
         linked.symlink_to(path)
         with self.assertRaises(adapter.AdapterError):
             adapter.read_bounded(linked)
+        binary = self.root / "binary"
+        binary.write_bytes(b"\xff")
+        with self.assertRaisesRegex(adapter.AdapterError, "UTF-8"):
+            adapter.read_bounded(binary)
+
+    @unittest.skipUnless(os.name == "posix", "descriptor-relative opens require POSIX")
+    def test_bounded_file_parent_swap_never_reads_outside_sentinel(self):
+        parent = self.root / "parent"
+        parent.mkdir()
+        target = parent / "input"
+        target.write_text("inside", encoding="utf-8")
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "input").write_text("OUTSIDE_SENTINEL", encoding="utf-8")
+        original = adapter.secure_input_parent
+
+        def swapped(path):
+            descriptor, name = original(path)
+            parent.rename(self.root / "moved")
+            parent.symlink_to(outside, target_is_directory=True)
+            return descriptor, name
+
+        with mock.patch.object(adapter, "secure_input_parent", side_effect=swapped):
+            self.assertEqual(adapter.read_bounded(target), "inside")
+        self.assertEqual(
+            (outside / "input").read_text(encoding="utf-8"), "OUTSIDE_SENTINEL"
+        )
+
+    def test_secure_input_parent_closes_descriptors_on_open_failure(self):
+        with (
+            mock.patch.object(adapter.os, "open", side_effect=[10, OSError("race")]),
+            mock.patch.object(adapter.os, "close") as close,
+            self.assertRaises(OSError),
+        ):
+            adapter.secure_input_parent(Path("/race/input"))
+        close.assert_called_once_with(10)
+
+    def test_bounded_file_closes_parent_when_final_open_fails(self):
+        with (
+            mock.patch.object(
+                adapter, "secure_input_parent", return_value=(10, "input")
+            ),
+            mock.patch.object(adapter.os, "open", side_effect=OSError("race")),
+            mock.patch.object(adapter.os, "close") as close,
+            self.assertRaises(adapter.AdapterError),
+        ):
+            adapter.read_bounded(self.root / "input")
+        close.assert_called_once_with(10)
+
+    def test_bounded_file_handles_parent_close_failure_after_final_open_failure(self):
+        with (
+            mock.patch.object(
+                adapter, "secure_input_parent", return_value=(10, "input")
+            ),
+            mock.patch.object(adapter.os, "open", side_effect=OSError("race")),
+            mock.patch.object(
+                adapter.os, "close", side_effect=OSError("close")
+            ) as close,
+            self.assertRaises(adapter.AdapterError),
+        ):
+            adapter.read_bounded(self.root / "input")
+        close.assert_called_once_with(10)
+
+    def test_bounded_file_closes_final_descriptor_when_parent_close_fails(self):
+        with (
+            mock.patch.object(
+                adapter, "secure_input_parent", return_value=(10, "input")
+            ),
+            mock.patch.object(adapter.os, "open", return_value=11),
+            mock.patch.object(
+                adapter.os, "close", side_effect=[OSError("close"), None]
+            ) as close,
+            self.assertRaises(adapter.AdapterError),
+        ):
+            adapter.read_bounded(self.root / "input")
+        self.assertEqual(close.call_args_list, [mock.call(10), mock.call(11)])
+
+    def test_secure_input_parent_closes_following_descriptor_on_close_error(self):
+        with (
+            mock.patch.object(adapter.os, "open", side_effect=[10, 11]),
+            mock.patch.object(
+                adapter.os, "close", side_effect=[OSError("close"), None, None]
+            ) as close,
+            self.assertRaises(OSError),
+        ):
+            adapter.secure_input_parent(Path("/race/input"))
+        self.assertEqual(
+            close.call_args_list, [mock.call(10), mock.call(11), mock.call(10)]
+        )
+
+    def test_secure_input_parent_requires_posix(self):
+        with mock.patch.object(adapter.os, "name", "nt"):
+            with self.assertRaisesRegex(adapter.AdapterError, "requires POSIX"):
+                adapter.secure_input_parent(self.root / "input")
+
+    @unittest.skipUnless(os.name == "posix", "FIFOs require POSIX")
+    def test_bounded_file_rejects_fifo_after_preopen_file_check(self):
+        fifo = self.root / "replacement"
+        os.mkfifo(fifo)
+        with mock.patch.object(Path, "is_file", return_value=True):
+            with self.assertRaisesRegex(adapter.AdapterError, "missing, symlinked"):
+                adapter.read_bounded(fifo)
 
     def test_plugin_sources_and_executable_rejection(self):
-        self.assertEqual(adapter.plugin_context(None), (None, ""))
+        self.assertEqual(adapter.plugin_context(None), (None, "", []))
         plugin = self.plugin()
-        root, context = adapter.plugin_context(plugin)
+        root, context, components = adapter.plugin_context(plugin)
         self.assertEqual(root, plugin)
         self.assertIn("commands/sample.md", context)
         self.assertIn("skills/sample/SKILL.md", context)
+        self.assertEqual(
+            [component["path"] for component in components],
+            ["commands/sample.md", "skills/sample/SKILL.md"],
+        )
+        self.assertTrue(all(len(item["sha256"]) == 64 for item in components))
         manifest = plugin / ".claude-plugin/plugin.json"
         for value in ("[]", '{"hooks":{}}', '{"commands":"../outside"}'):
             manifest.write_text(value)
@@ -145,9 +278,53 @@ class AgentCliTests(unittest.TestCase):
         with self.assertRaises(adapter.AdapterError):
             adapter.plugin_context(plugin)
         command.write_text("x" * 80)
-        with mock.patch.object(adapter, "MAX_CONTEXT", 100):
+        with mock.patch.object(adapter, "MAX_CONTEXT", 70):
             with self.assertRaises(adapter.AdapterError):
                 adapter.plugin_context(plugin)
+
+    def test_component_collection_bounds_count_and_cumulative_context(self):
+        plugin = self.plugin()
+        self.put("plugin/commands/second.md", "second")
+        with mock.patch.object(adapter, "MAX_COMPONENTS", 2):
+            with self.assertRaisesRegex(adapter.AdapterError, "too many Markdown"):
+                adapter.read_plugin_components(plugin)
+        with mock.patch.object(adapter, "MAX_CONTEXT", 80):
+            with self.assertRaisesRegex(adapter.AdapterError, "context exceeds"):
+                adapter.read_plugin_components(plugin)
+
+    def test_component_walk_stops_before_unbounded_sorting(self):
+        plugin = self.plugin()
+        candidates = [plugin / "commands" / f"{index}.md" for index in range(3)]
+        traversed = []
+
+        class Entry:
+            def __init__(self, path):
+                self.path = str(path)
+
+            def is_symlink(self):
+                return False
+
+            def is_dir(self, **_kwargs):
+                return False
+
+        class Entries:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def __iter__(self):
+                for path in candidates:
+                    traversed.append(path)
+                    yield Entry(path)
+                raise AssertionError("component walk exceeded its cap")
+
+        with mock.patch.object(adapter.os, "scandir", return_value=Entries()):
+            with mock.patch.object(adapter, "MAX_COMPONENTS", 2):
+                with self.assertRaisesRegex(adapter.AdapterError, "too many Markdown"):
+                    adapter.read_plugin_components(plugin)
+        self.assertEqual(traversed, candidates)
 
     def test_plugin_symlinks_missing_and_nested(self):
         with self.assertRaises(adapter.AdapterError):
@@ -162,6 +339,22 @@ class AgentCliTests(unittest.TestCase):
         commands.symlink_to(plugin / "moved", target_is_directory=True)
         with self.assertRaises(adapter.AdapterError):
             adapter.plugin_context(plugin)
+
+    def test_component_walk_rejects_symlink_entries_and_unreadable_directories(self):
+        plugin = self.plugin()
+        external = self.root / "external.md"
+        external.write_text("outside", encoding="utf-8")
+        (plugin / "commands" / "linked.md").symlink_to(external)
+        with self.assertRaisesRegex(
+            adapter.AdapterError, "entries must not be symlinks"
+        ):
+            adapter.read_plugin_components(plugin)
+        (plugin / "commands" / "linked.md").unlink()
+        with mock.patch.object(adapter.os, "scandir", side_effect=OSError("denied")):
+            with self.assertRaisesRegex(
+                adapter.AdapterError, "directory is unreadable"
+            ):
+                adapter.read_plugin_components(plugin)
 
     def test_request_validation(self):
         self.assertEqual(
@@ -285,7 +478,8 @@ class AgentCliTests(unittest.TestCase):
 
             def invoke(argv, prompt, cwd, temporary, timeout):
                 if backend == "codex":
-                    self.assertIn("explicit plugin source context", prompt)
+                    self.assertIn("SOURCE CONTEXT", prompt)
+                    self.assertIn("CALLER EVALUATION REQUEST", prompt)
                     self.assertIn("Read this skill", prompt)
                     (temporary / "answer.json").write_text('{"ok":true}')
                 else:
@@ -315,6 +509,24 @@ class AgentCliTests(unittest.TestCase):
                 result["plugin_mode"],
                 "native-claude" if backend == "claude" else "explicit-context",
             )
+            if backend == "codex":
+                self.assertEqual(
+                    [item["path"] for item in result["plugin_components"]],
+                    ["commands/sample.md", "skills/sample/SKILL.md"],
+                )
+            else:
+                self.assertEqual(result["plugin_components"], [])
+
+    def test_codex_combined_prompt_is_bounded_and_delimited(self):
+        with mock.patch.object(adapter, "MAX_CONTEXT", 1_000):
+            request = "Preserve this caller evaluation instruction."
+            rendered = adapter.codex_evaluation_prompt("source", request)
+            self.assertIn("SOURCE CONTEXT", rendered)
+            self.assertIn("CALLER EVALUATION REQUEST", rendered)
+            self.assertIn(request, rendered)
+            self.assertIn("explicitly labelled untrusted", rendered)
+            with self.assertRaisesRegex(adapter.AdapterError, "prompt exceeds"):
+                adapter.codex_evaluation_prompt("x" * 600, "y" * 600)
 
     def test_started_failure_never_falls_back(self):
         cases = [
@@ -338,6 +550,8 @@ class AgentCliTests(unittest.TestCase):
             self.assertNotIn("SECRET", json.dumps(result))
             self.assertEqual(invoke.call_count, 1)
             self.assertEqual(select.call_count, 1)
+            if expected in {"FAILED", "BLOCKED"} and error is None:
+                self.assertEqual(result["failure_phase"], "post-start")
         with mock.patch.object(
             adapter,
             "select_backend",

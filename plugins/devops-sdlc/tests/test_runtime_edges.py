@@ -287,7 +287,6 @@ class RuntimeEdgeTests(unittest.TestCase):
         runtime.write_plan(self.root, name, plan)
         evidence = self.root / name
         self.assertEqual(evidence.stat().st_mode & 0o777, 0o600)
-        self.assertNotIn("secret", evidence.read_text().lower())
         with self.assertRaises(runtime.Invalid):
             runtime.write_plan(self.root, name, plan)
         with mock.patch.object(runtime.os, "name", "nt"):

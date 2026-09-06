@@ -1,11 +1,16 @@
 ---
 description: "Verify DevOps behavior independently using positive, negative and edge scenarios."
-argument-hint: "[specs-directory | PR-URL]"
+argument-hint: "[specs-directory]"
 ---
 
 # /do-sdlc-qa — FR8
 
 ## Inputs
+
+The argument is an existing specs directory contained in the task repository,
+with its PRD, architecture and `run-summary.md`. If omitted, reuse the recorded
+specs directory for this same task. A missing, escaping, symlinked or ambiguous
+directory is BLOCKED; a PR URL alone does not identify QA inputs.
 
 Inputs are the command argument, repository guidance and
 `specs/<task>/run-summary.md` when resuming. That summary records task/repository

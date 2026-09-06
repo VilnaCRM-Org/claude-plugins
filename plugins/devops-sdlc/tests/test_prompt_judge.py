@@ -94,6 +94,30 @@ class PromptJudgeTests(unittest.TestCase):
             self.assertIn("DATA", args[0])
             self.assertIn("RESPONSE CONTRACT", args[0])
 
+    def test_prompt_provenance_hashes_full_request_and_context(self):
+        sent = []
+
+        def capture(prompt, *args, **kwargs):
+            sent.append(prompt)
+            return fake_agent(prompt, *args, **kwargs)
+
+        report = self.run_fixture(capture)
+        row = report["artifacts"][0]
+        self.assertEqual(row["prompt_text_sha256"], subject.digest(sent[-1].encode()))
+        self.assertNotEqual(row["prompt_text_sha256"], row["sha256"])
+        for vote, prompt in zip(row["votes"], sent[-3:], strict=True):
+            self.assertEqual(
+                vote["prompt_text_sha256"], subject.digest(prompt.encode())
+            )
+        with mock.patch.object(
+            subject, "CONTEXT", subject.CONTEXT + " Additional contract."
+        ):
+            changed = self.run_fixture()
+        self.assertNotEqual(
+            row["prompt_text_sha256"], changed["artifacts"][0]["prompt_text_sha256"]
+        )
+        self.assertEqual(row["sha256"], changed["artifacts"][0]["sha256"])
+
     def test_default_inventory_is_exactly_31_in_repository(self):
         with mock.patch.object(subject, "EXPECTED_ARTIFACTS", 31):
             artifacts = subject.artifact_inventory(
@@ -109,6 +133,8 @@ class PromptJudgeTests(unittest.TestCase):
         report = self.run_fixture(unavailable)
         self.assertEqual(report["status"], "BLOCKED")
         self.assertEqual(report["artifacts"][0]["votes"], [])
+        self.assertEqual(report["artifacts"][0]["kind"], "command")
+        self.assertEqual(report["artifacts"][0]["name"], "example")
         self.assertEqual(report["coverage"]["assessed_dimension_pairs"], 0)
 
     def test_malformed_unknown_and_bool_verdicts_are_rejected(self):

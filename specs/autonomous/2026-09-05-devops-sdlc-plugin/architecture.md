@@ -114,7 +114,7 @@ All contributors retain ownership boundaries and preserve parallel edits. Any pr
 plugins/devops-sdlc/
   .claude-plugin/plugin.json
   README.md
-  SKILL-DECISION-GUIDE.md
+  skills/SKILL-DECISION-GUIDE.md
   commands/do-sdlc.md
   commands/do-sdlc-setup.md
   commands/do-sdlc-issue.md
@@ -154,7 +154,7 @@ Exact test/support filenames can follow the owning worker's conventions. Runtime
 
 ### Requirements Mapping
 
-FR1 maps to manifest/marketplace/commands; FR2-FR3 and FR5-FR6 to devops.py/profile docs; FR4 to planning/implementation commands and BMAD skill; FR7 to reviewers and quality/security/state skills; FR8 to QA/test/evidence files; FR9-FR10 to CI/comment stages; FR11 to operational skills; FR12 to automation_coverage.py, inventory docs and tests. NFR1-NFR3/NFR7 affect every execution boundary. NFR4 affects commands/agents, NFR5 packaging/runtime, NFR6 tests/evidence and NFR8 all repair/review prompts.
+FR1 maps to manifest/marketplace/commands; FR2-FR3 and FR5-FR6 to devops.py/profile docs; FR4 to planning/implementation commands and BMAD skill; FR7 to reviewers and quality/security/state skills; FR8 to QA/test/evidence files; FR9-FR10 to CI/comment stages; FR11 to operational skills; FR12 to automation_coverage.py, inventory docs and tests; FR13 to `plugins/devops-sdlc/scripts/agent_cli.py`, Story 2.3 and the dual-CLI evaluation architecture below. NFR1-NFR3/NFR7 affect every execution boundary. NFR4 affects commands/agents, NFR5 packaging/runtime, NFR6 tests/evidence, NFR8 all repair/review prompts, and NFR9 the dual-CLI evaluation isolation and preflight boundary.
 
 ### Integration and Data Flow
 

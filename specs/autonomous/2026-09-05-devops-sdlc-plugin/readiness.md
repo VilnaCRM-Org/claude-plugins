@@ -90,8 +90,8 @@ READY for implementation. Thirteen FRs and nine NFRs map to architecture and eig
 
 1. Complete core packaging, runtime/profile, prompts and protected CI integration.
 2. Run deterministic and adversarial tests, manual installed-plugin E2E, and live-model evaluation; retain exact blocked/failed outcomes until prerequisites are resolved.
-3. Run `bmalph implement` on the mirrored artifacts and execute isolated Story 3.1 through Ralph. The parent chooses the available authenticated driver without claiming Claude execution if another driver runs.
-4. Verify strict existing quality gates, then reconcile current-head required CI and review comments on the draft PR. Preserve draft status and scope boundaries.
+3. Run `bmalph implement` on the mirrored artifacts and execute isolated Story 3.1 through Ralph. The parent chooses the available authenticated driver without claiming Claude execution if another driver runs. The original Story 3.1 launch remains BLOCKED and non-compliant (100-call limit, six calls). Current bounded-workflow evidence comes from the separate Story 9.1 review repair: loaded limits of five calls and five minutes limits, persisted task budget and completion at 2/5; see verification/bmalph-review-repair.json. Reporter functional validation is recorded separately.
+4. Verify strict existing quality gates, then reconcile current-head required CI and review comments on the draft PR. Preserve the user-selected PR status and scope boundaries.
 
 ### Evidence and Risk Limits
 
@@ -105,4 +105,4 @@ NFR9: Structured evaluation disables executable tools, inherited user/project in
 
 This user-directed addition is covered by Story 2.3 and the shared evaluation adapter. Existing cloud authorization, protected workflow, live-evidence and 90% reporting requirements remain in force.
 
-Dual CLI addendum readiness: READY. Story 2.3 has no dependency on the already imported Ralph Story 3.1; the existing Ralph run need not be restarted or replayed. Backend-specific live acceptance remains observed separately.
+Dual CLI addendum planning readiness: READY. Story 2.3 does not itself authorize restarting or replaying Story 3.1. The original Ralph run remains blocked, and the distinct Story 9.1 repair supplies current bounded-workflow evidence as described above. Backend-specific live acceptance remains observed separately.

@@ -205,7 +205,9 @@ def bounded_files(root: Path):
     if root.is_symlink():
         raise Invalid("Discovery root must not be a symlink.")
     count = 0
-    for directory, directories, filenames in os.walk(root, followlinks=False):
+    for directory, directories, filenames in os.walk(
+        root, followlinks=False, onerror=discovery_error
+    ):
         directories[:] = sorted(
             name for name in directories if walk_directory(Path(directory) / name)
         )
@@ -217,6 +219,10 @@ def bounded_files(root: Path):
             if count > MAX_FILES:
                 raise Invalid("Repository discovery exceeds the file limit.")
             yield path
+
+
+def discovery_error(_error: OSError) -> None:
+    raise Invalid("Repository discovery could not read a directory safely.")
 
 
 def walk_directory(path: Path) -> bool:
@@ -283,8 +289,12 @@ def discover_candidate(root: Path, relative: str, candidate: dict, number: int) 
     if candidate["stack_type"] == "pulumi":
         metadata = [
             path.relative_to(root).as_posix()
-            for path in sorted(target_root.glob("Pulumi.*.yaml"))
-            if not path.is_symlink()
+            for path in sorted(
+                path
+                for suffix in ("yaml", "yml")
+                for path in target_root.glob(f"Pulumi.*.{suffix}")
+            )
+            if regular_discovery_file(path)
         ]
     elif candidate["stack_type"] == "terraspace":
         stack_root = contained(
@@ -464,7 +474,7 @@ def validate_make(args: list[str], stage: str) -> None:
         raise Invalid("Make target is outside this stage's bounded allowlist.")
     for item in args[1:]:
         if not re.fullmatch(
-            r"(?:env|stack|stacks|PULUMI_STACK|PULUMI_DIR|out)=[A-Za-z0-9_./-]+", item
+            r"(?:env|stack|PULUMI_STACK|PULUMI_DIR|out)=[A-Za-z0-9_./-]+", item
         ):
             raise Invalid("Unsupported Make argument or variable assignment.")
 
@@ -566,6 +576,8 @@ def validate_target(root: Path, target: Any) -> str:
     for name, environment in environments.items():
         identifier(name)
         environment_config(environment)
+        if target["stack_type"] == "terraspace":
+            identifier(environment["stack"])
     commands = exact_keys(target["commands"], STAGES)
     for stage, command in commands.items():
         validate_command(command, stage, target["stack_type"])
@@ -1171,7 +1183,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
         outcome = result.get("execution", result.get("intention", result))
         return 1 if outcome.get("status") in {"FAILED", "TIMEOUT", "SKIPPED"} else 0
-    except (Invalid, OSError, UnicodeError) as exc:
+    except (Invalid, OSError, UnicodeError, RecursionError) as exc:
         message = (
             str(exc)
             if isinstance(exc, Invalid)

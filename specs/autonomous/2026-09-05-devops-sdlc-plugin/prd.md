@@ -1,7 +1,7 @@
 ---
 stepsCompleted: [step-01-init, step-02-discovery, step-02b-vision, step-02c-executive-summary, step-03-success, step-04-journeys, step-05-domain, step-06-innovation, step-07-project-type, step-08-scoping, step-09-functional, step-10-nonfunctional, step-11-polish, step-12-complete]
 inputDocuments: [brief.md, research.md]
-documentCounts: {briefs: 1, research: 2, projectDocs: 1, brainstorming: 0}
+documentCounts: {briefs: 1, research: 1, projectDocs: 1, brainstorming: 0}
 classification: {projectType: developer_tool, domain: infrastructure, complexity: high, projectContext: brownfield}
 innovation: "Skipped: established workflow adaptation; no novelty claim"
 workflow: create-prd
@@ -34,7 +34,7 @@ Target at least 90% automation of accepted eligible work. Measure workflow suppo
 
 ### Technical Success
 
-Install validation and required CI pass. Positive, negative, edge, manual E2E, and live LLM judge evidence covers documented requirements. Missing credentials remain blocked and do not count as passes. No cloud mutation or secret disclosure occurs through the helper.
+Install validation and required CI pass. Positive, negative, edge, manual E2E, and live LLM judge evidence covers documented requirements. Missing credentials remain blocked and do not count as passes. Direct cloud mutation commands are rejected. Reviewed local commands and supported previews run repository/provider/program code with process authority; previews require read-only credentials. The helper provides no sandboxing or guarantee against cloud side effects or secret disclosure.
 
 ### Measurable Outcomes
 
