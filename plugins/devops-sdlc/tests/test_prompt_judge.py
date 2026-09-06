@@ -174,12 +174,51 @@ class PromptJudgeTests(unittest.TestCase):
             subject.redact_evidence("AWS_SECRET_ACCESS_KEY: not-retained"),
             "AWS_SECRET_ACCESS_KEY=[REDACTED]",
         )
+        identifier = "a" * 10_000
+        self.assertEqual(subject.redact_evidence(identifier), identifier)
         redacted = subject.redact_evidence(
             'db_password=sentinel,more;tail "api_token": "quoted sentinel value"'
         )
         for value in ("sentinel", "more", "tail", "quoted"):
             self.assertNotIn(value, redacted)
+        self.assertNotIn("value", redacted)
         self.assertIn('"api_token"=[REDACTED]', redacted)
+        concatenated = (
+            "api_token='orchid'\"cobalt quartz\"tailend "
+            'db_password="maple \\"cinder dawn\\""suffixend'
+        )
+        redacted = subject.redact_evidence(concatenated)
+        for value in (
+            "orchid",
+            "cobalt",
+            "quartz",
+            "tailend",
+            "maple",
+            "cinder",
+            "dawn",
+            "suffixend",
+        ):
+            self.assertNotIn(value, redacted)
+        self.assertEqual(redacted, "api_token=[REDACTED] db_password=[REDACTED]")
+        malformed_cases = (
+            (
+                'api_token="orchid\nterminal-backslash\\',
+                ("orchid", "terminal", "backslash"),
+            ),
+            ("api_token='lilac'\"cobalt quartz", ("lilac", "cobalt", "quartz")),
+            ('api_token="marigold\\', ("marigold",)),
+        )
+        for malformed, values in malformed_cases:
+            with self.subTest(malformed=malformed):
+                redacted = subject.redact_evidence(malformed)
+                self.assertEqual(redacted, "api_token=[REDACTED]")
+                for value in values:
+                    self.assertNotIn(value, redacted)
+        json_newline = '"api_token": "orchid\\" cobalt\nquartz"'
+        redacted = subject.redact_evidence(json_newline)
+        self.assertEqual(redacted, '"api_token"=[REDACTED]')
+        for value in ("orchid", "cobalt", "quartz"):
+            self.assertNotIn(value, redacted)
         value = {
             "dimensions": {
                 "J1": {
@@ -197,6 +236,43 @@ class PromptJudgeTests(unittest.TestCase):
             subject.strict_verdict(
                 value, [subject.rubrics.DIMENSIONS_BY_ID["J1"]], "artifact text"
             )
+
+    def test_stored_evidence_redacts_nested_and_escaped_assignments(self):
+        cases = (
+            "note: api_token=WRAPPED_SENTINEL",
+            '{"message": "api_token=WRAPPED_SENTINEL"}',
+            "'api_token'='WRAPPED_SENTINEL'",
+            "api_token=WRAPPED_SENTINEL\\ ESCAPED_SENTINEL",
+            "api_token=WRAPPED_SENTINEL\\\nESCAPED_SENTINEL",
+            "api_token='WRAPPED_SENTINEL password=INNER_SENTINEL'",
+        )
+        for candidate in cases:
+            verdict = {
+                "dimensions": {
+                    "J1": {"score": 5, "evidence": candidate, "citation": candidate}
+                }
+            }
+            with self.subTest(candidate=candidate):
+                stored = subject.stored_dimensions(verdict)
+                self.assertNotIn("SENTINEL", json.dumps(stored))
+                self.assertEqual(stored["J1"]["score"], 5)
+                self.assertEqual(
+                    stored["J1"]["evidence_sha256"],
+                    subject.digest(candidate.encode()),
+                )
+
+    def test_evidence_redaction_retains_nonsecret_text_and_empty_assignment(self):
+        for candidate in (
+            'note="ordinary words" status=READY',
+            '{"message": "ordinary words"}',
+            "token is a word here",
+            "api_token=   ",
+        ):
+            with self.subTest(candidate=candidate):
+                self.assertEqual(subject.redact_evidence(candidate), candidate)
+        self.assertEqual(
+            subject.redact_evidence('"api_token"=""'), '"api_token"=[REDACTED]'
+        )
 
     def test_invalid_output_has_safe_error_without_raw_response(self):
         def invalid(*args, **kwargs):

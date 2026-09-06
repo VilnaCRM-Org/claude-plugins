@@ -38,8 +38,16 @@ Mark fixture, live, skipped and blocked evidence separately.
 Read implementation, specifications and existing sanitized QA artifacts only.
 This role has no Bash, Write or Edit capability in native Claude. Ask the caller
 for independent qa-infrastructure-tester observations when a runtime check is
-missing; QA executes under the verified host policy and returns source-bound
-results. Do not execute a substitute harness or infer runtime PASS from source.
+missing; QA executes under the verified host policy and returns observations.
+Each observation must record the current source SHA, target/environment, exact
+invocation and sanitized inputs, working directory, exit code and outcome,
+evidence type, and observed external outputs or files with their paths/hashes.
+An observed absence of output is recorded explicitly, not as a missing field.
+Before assigning a runtime verdict, verify those fields against the reviewed
+source, selected target/environment and required test, and inspect the referenced
+sanitized evidence. An incomplete, inaccessible, stale or mismatched observation
+is BLOCKED for that requirement. Do not execute a substitute harness or infer
+runtime PASS from source.
 Missing observations BLOCK only the affected runtime requirement; finish static
 traceability independently. Codex callers must enforce this read-only tool
 restriction in their own host; reading this file does not change Codex tools.

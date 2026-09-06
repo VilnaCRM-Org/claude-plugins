@@ -18,11 +18,11 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parent
 MAX_AUDIT_CHARS = 4_000
-SECRET_RE = re.compile(
-    r"(?i)(?P<name>\"[a-z0-9_-]*(?:api[_-]?key|secret|token|password)"
-    r"[a-z0-9_-]*\"|[a-z0-9_-]*(?:api[_-]?key|secret|token|password)"
-    r"[a-z0-9_-]*)\s*[:=]\s*(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|\S+)"
+KEY_ASSIGNMENT_RE = re.compile(
+    r"(?i)(?<![a-z0-9_-])(?P<name>\"[a-z0-9_-]+\"|'[a-z0-9_-]+'|[a-z0-9_-]+)"
+    r"\s*[:=]"
 )
+SECRET_MARKERS = ("api_key", "api-key", "apikey", "secret", "token", "password")
 VERDICT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -40,8 +40,50 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _secret_value_end(value: str, start: int) -> int:
+    """Scan one value, retaining adjacent quotes and escaped whitespace in its span."""
+    cursor = start
+    quote = ""
+    while cursor < len(value):
+        char = value[cursor]
+        if char == "\\":
+            cursor = min(cursor + 2, len(value))
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char.isspace():
+            break
+        cursor += 1
+    # An unterminated quote consumes the tail, including spaces and newlines.
+    return cursor
+
+
+def redact_text(value: str) -> str:
+    """Redact named assignments without skipping secrets inside nonsecret wrappers."""
+    chunks = []
+    cursor = emitted = 0
+    while match := KEY_ASSIGNMENT_RE.search(value, cursor):
+        cursor = match.end()
+        name = match["name"]
+        if not any(marker in name.lower() for marker in SECRET_MARKERS):
+            continue
+        start = cursor
+        while start < len(value) and value[start].isspace():
+            start += 1
+        end = _secret_value_end(value, start)
+        if end == start:
+            continue
+        chunks.extend((value[emitted : match.start()], f"{name}=[REDACTED]"))
+        emitted = cursor = end
+    chunks.append(value[emitted:])
+    return "".join(chunks)
+
+
 def audit_text(value: str) -> str:
-    return SECRET_RE.sub(r"\g<name>=[REDACTED]", value)[:MAX_AUDIT_CHARS]
+    return redact_text(value)[:MAX_AUDIT_CHARS]
 
 
 def tree_hash(root: pathlib.Path, excluded_path: pathlib.Path | None = None) -> str:
@@ -244,7 +286,7 @@ def runner_prompt(scenario: dict[str, Any]) -> str:
 
 def judge_prompt(scenario: dict[str, Any], candidate: str) -> str:
     data = {key: scenario[key] for key in ("id", "prompt", "must", "must_not")}
-    candidate = SECRET_RE.sub(r"\1=[REDACTED]", candidate)
+    candidate = redact_text(candidate)
     return "\n".join(
         [
             "Independently score proposed DevOps behavior in a behavioral simulation.",

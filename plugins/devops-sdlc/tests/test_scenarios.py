@@ -8,6 +8,8 @@ import importlib.util
 import io
 import json
 import pathlib
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -330,6 +332,12 @@ class ScenarioTests(unittest.TestCase):
             self.assertNotIn(value, audited)
         self.assertEqual(audited.count("[REDACTED]"), 3)
 
+    def test_audit_text_keeps_a_long_unmatched_identifier(self):
+        identifier = "a" * (judge.MAX_AUDIT_CHARS + 100)
+        self.assertEqual(
+            judge.audit_text(identifier), identifier[: judge.MAX_AUDIT_CHARS]
+        )
+
     def test_audit_and_judge_input_redact_complete_secret_values(self):
         candidate = (
             'db_password=sentinel,more;tail "api_token": "quoted sentinel value"'
@@ -337,7 +345,112 @@ class ScenarioTests(unittest.TestCase):
         for value in ("sentinel", "more", "tail", "quoted"):
             self.assertNotIn(value, judge.audit_text(candidate))
             self.assertNotIn(value, judge.judge_prompt(self.scenario, candidate))
+        self.assertNotIn("value", judge.audit_text(candidate))
         self.assertIn('"api_token"=[REDACTED]', judge.audit_text(candidate))
+
+    def test_audit_and_judge_input_redact_concatenated_quoted_secret_values(self):
+        candidate = (
+            "api_token='orchid'\"cobalt quartz\"tailend "
+            'db_password="maple \\"cinder dawn\\""suffixend'
+        )
+        for value in (
+            "orchid",
+            "cobalt",
+            "quartz",
+            "tailend",
+            "maple",
+            "cinder",
+            "dawn",
+            "suffixend",
+        ):
+            self.assertNotIn(value, judge.audit_text(candidate))
+            self.assertNotIn(value, judge.judge_prompt(self.scenario, candidate))
+        self.assertEqual(
+            judge.audit_text(candidate),
+            "api_token=[REDACTED] db_password=[REDACTED]",
+        )
+
+    def test_audit_and_judge_input_redact_malformed_quoted_secret_values(self):
+        cases = (
+            (
+                'api_token="orchid\nterminal-backslash\\',
+                ("orchid", "terminal", "backslash"),
+            ),
+            ("api_token='lilac'\"cobalt quartz", ("lilac", "cobalt", "quartz")),
+            ('api_token="marigold\\', ("marigold",)),
+        )
+        for candidate, values in cases:
+            with self.subTest(candidate=candidate):
+                audited = judge.audit_text(candidate)
+                self.assertEqual(audited, "api_token=[REDACTED]")
+                for value in values:
+                    self.assertNotIn(value, audited)
+                    self.assertNotIn(
+                        value, judge.judge_prompt(self.scenario, candidate)
+                    )
+
+    def test_audit_and_judge_input_redact_json_escaped_newline_secret_values(self):
+        candidate = '"api_token": "orchid\\" cobalt\nquartz"'
+        audited = judge.audit_text(candidate)
+        self.assertEqual(audited, '"api_token"=[REDACTED]')
+        for value in ("orchid", "cobalt", "quartz"):
+            self.assertNotIn(value, audited)
+            self.assertNotIn(value, judge.judge_prompt(self.scenario, candidate))
+
+    def test_redaction_finds_nested_assignments_and_escaped_bare_values(self):
+        cases = (
+            ("note: api_token=WRAPPED_VALUE", ("WRAPPED_VALUE",)),
+            ('{"message": "api_token=JSON_VALUE"}', ("JSON_VALUE",)),
+            ('{"outer": {"api_token": "NESTED_VALUE"}}', ("NESTED_VALUE",)),
+            ("'db_password'='SINGLE_KEY_VALUE'", ("SINGLE_KEY_VALUE",)),
+            ("api_token=ESCAPED_HEAD\\ ESCAPED_TAIL", ("ESCAPED_HEAD", "ESCAPED_TAIL")),
+            (
+                "api_token=ESCAPED_HEAD\\\nESCAPED_TAIL",
+                ("ESCAPED_HEAD", "ESCAPED_TAIL"),
+            ),
+            (
+                "api_token='OUTER_VALUE db_password=INNER_VALUE'",
+                ("OUTER_VALUE", "INNER_VALUE"),
+            ),
+        )
+        for candidate, fragments in cases:
+            with self.subTest(candidate=candidate):
+                for result in (
+                    judge.audit_text(candidate),
+                    judge.judge_prompt(self.scenario, candidate),
+                ):
+                    for fragment in fragments:
+                        self.assertNotIn(fragment, result)
+
+    def test_redaction_preserves_nonsecret_assignments_and_empty_values(self):
+        for candidate in (
+            'note="ordinary words" status=READY',
+            '{"message": "ordinary words"}',
+            "A token mentioned without assignment remains visible.",
+            "api_token=   ",
+        ):
+            with self.subTest(candidate=candidate):
+                self.assertEqual(judge.redact_text(candidate), candidate)
+        self.assertEqual(judge.redact_text('api_token=""'), "api_token=[REDACTED]")
+
+    def test_redaction_large_identifiers_complete_in_bounded_child(self):
+        code = """
+import behavior_judge, prompt_judge
+for redact in (behavior_judge.redact_text, prompt_judge.redact_evidence):
+    for text in ('a' * 120000, 'secret' * 20000,
+                 'secret' * 20000 + '=', 'secret' * 20000 + '=   '):
+        assert redact(text) == text
+print('bounded-redaction-PASS')
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=HERE,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        )
+        self.assertEqual(result.stdout.strip(), "bounded-redaction-PASS")
 
     def test_calibration_schema_rejected_before_backend_or_model_calls(self):
         invalid = [None, [], [None], [{"expect": "PASS"}, {"expect": "FAIL"}]]

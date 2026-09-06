@@ -11,6 +11,14 @@ The argument is an existing specs directory contained in the task repository,
 with its PRD, architecture and `run-summary.md`. If omitted, reuse the recorded
 specs directory for this same task. A missing, escaping, symlinked or ambiguous
 directory is BLOCKED; a PR URL alone does not identify QA inputs.
+Before reading each required PRD, architecture file or `run-summary.md`, validate
+that file individually against the resolved task repository root. Reject a
+symlink in any path component, a non-regular file or a resolved path outside that
+root, even inside an accepted specs directory. Use the host's permitted file
+access mechanism to enforce the boundary when opening the file; a prior
+directory check alone is insufficient. If the file cannot be read with that
+boundary preserved, mark the dependent QA input BLOCKED and request a sanitized
+regular-file copy within the task repository. Do not follow the rejected link.
 
 Inputs are the command argument, repository guidance and
 `specs/<task>/run-summary.md` when resuming. That summary records task/repository

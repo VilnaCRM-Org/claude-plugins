@@ -138,9 +138,20 @@ reviewed/imported only the two-file patch and passed all 28 current runtime test
 with unchanged source hashes. The parent suite includes three additional
 regressions for other review findings, explaining its 28 tests versus the
 isolated child's 25. See [the committed bounded-run evidence](verification/bmalph-review-repair.json)
-for both attempts, cap wrapper, loaded settings, logs and source/count
-reconciliation. The complete `ralph-review-followup.json` is also retained in
+for both attempts, the explicitly sanitized cap-wrapper display, loaded settings,
+logs and source/count reconciliation. The executed wrapper is preserved separately
+with its original SHA-256; its public display replaces only the developer-specific
+checkout prefix with `<ISOLATED_REPAIR_CHECKOUT>` and is not claimed as executed
+source. The complete `ralph-review-followup.json` is also retained in
 the delivery bundle.
+
+The capsule preserves raw timestamps and labels their clock sources. Invocation
+1 started at `2026-09-05T23:55:53.661781+00:00`; invocation 2 started at
+`2026-09-06T00:02:06.969391+00:00`; completion was
+`2026-09-06T00:03:40+00:00`. The offset-free execution-log completion
+`03:03:40` is Europe/Sofia local time (UTC+03:00), consistent with Ralph’s
+separate UTC status and breaker records. The added timeline is derived evidence;
+no original epoch, status, breaker or log timestamp was rewritten.
 
 A preliminary launch used the generated .ralph/.ralphrc rather than the root
 configuration; the parent gate stopped it before any model invocation. Its
