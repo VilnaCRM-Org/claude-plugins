@@ -56,7 +56,15 @@ skill receives a verdict; no silent skips.
 
 ## Procedure
 
-1. Read `Pulumi.yaml`/`Pulumi.yml`, Python version, pyproject/uv lock,
+1. Before any helper proposal or invocation, explicitly include a plugin-path
+   verification row in the returned checklist: inspect
+   `$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json` and verify
+   `$DEVOPS_PLUGIN_ROOT/scripts/devops.py` and
+   `$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py` are regular readable Python files.
+   Invoke them with `python3`; executable bits are not required. Record the exact
+   paths and observed readability, or the proposed checks when simulating. A
+   `.codex-plugin` or root-level manifest is not this distribution's manifest.
+   Read `Pulumi.yaml`/`Pulumi.yml`, Python version, pyproject/uv lock,
    component layout, policy pack, tests and stack configuration filenames.
    Resolve the actual project root; do not assume a root-level program.
 2. For new projects, use the infrastructure template repository and exact commit recorded in the task

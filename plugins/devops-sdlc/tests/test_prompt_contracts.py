@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import ast
 import copy
+import fcntl
+import importlib
 import json
 import os
 import pathlib
 import re
 import tempfile
 import unittest
+
+from ledger_reference import transaction
+from ledger_reference.storage import _save
 
 PLUGIN = pathlib.Path(__file__).resolve().parents[1]
 CONTRACTS = {
@@ -125,22 +131,87 @@ class PromptContractTests(unittest.TestCase):
         )
 
 
+REFERENCE_MODULES = (
+    "__init__",
+    "storage",
+    "history",
+    "state",
+    "observation",
+    "actions",
+    "transaction",
+)
+
+
+def reference_sources(text):
+    start = "<!-- atomic-ledger-reference:start -->"
+    end = "<!-- atomic-ledger-reference:end -->"
+    if text.count(start) != 1 or text.count(end) != 1:
+        raise ValueError("Missing or duplicate reference boundary")
+    body = text.split(start, 1)[1].split(end, 1)[0]
+    pattern = re.compile(
+        r"<!-- atomic-ledger-module:ledger_reference/([a-z_]+)\.py -->\n"
+        r"```python\n(.*?)```",
+        re.S,
+    )
+    if pattern.sub("", body).strip():
+        raise ValueError("Unrecognized reference content")
+    return pattern.findall(body)
+
+
+class ReferenceSourceTests(unittest.TestCase):
+    def verify_reference(self, text):
+        sources = reference_sources(text)
+        self.assertEqual([name for name, _ in sources], list(REFERENCE_MODULES))
+        for name, documented in sources:
+            module_name = "ledger_reference" + (
+                "." + name if name != "__init__" else ""
+            )
+            imported = importlib.import_module(module_name)
+            expected = PLUGIN / "tests/ledger_reference" / (name + ".py")
+            self.assertEqual(
+                pathlib.Path(imported.__file__).resolve(), expected.resolve()
+            )
+            checked_in = expected.read_text(encoding="utf-8")
+            self.assertEqual(documented, checked_in)
+            self.assertEqual(
+                ast.dump(ast.parse(documented)), ast.dump(ast.parse(checked_in))
+            )
+
+    def test_fences_exactly_match_imported_reviewed_modules(self):
+        self.verify_reference((PLUGIN / "skills/AI-AGENT-GUIDE.md").read_text())
+
+    def test_changed_markdown_is_rejected_without_execution(self):
+        text = (PLUGIN / "skills/AI-AGENT-GUIDE.md").read_text()
+        cases = (
+            text.replace(
+                'return {"decision": "START_ONCE", **active}',
+                'raise RuntimeError("never execute Markdown")',
+            ),
+            text.replace(
+                "atomic-ledger-module:ledger_reference/storage.py",
+                "atomic-ledger-module:ledger_reference/unreviewed.py",
+            ),
+            text.replace("atomic-ledger-reference:end", "missing-reference-end"),
+            text.replace(
+                "<!-- atomic-ledger-reference:end -->",
+                '```python\nraise RuntimeError("unreviewed")\n```\n'
+                "<!-- atomic-ledger-reference:end -->",
+            ),
+        )
+        for changed in cases:
+            with self.subTest(changed=changed[-80:]):
+                with self.assertRaises((AssertionError, ValueError)):
+                    self.verify_reference(changed)
+
+
 class AtomicLedgerReferenceTests(unittest.TestCase):
-    """Execute the documented transaction against isolated ledger fixtures."""
+    """Execute imported reviewed code against isolated ledger fixtures."""
 
     def setUp(self):
-        text = (PLUGIN / "skills/AI-AGENT-GUIDE.md").read_text()
-        code = re.search(
-            r"<!-- atomic-ledger-reference:start -->\n```python\n(.*?)```",
-            text,
-            re.S,
-        )
-        self.assertIsNotNone(code)
-        self.api = {}
-        exec(compile(code.group(1), "documented-ledger-reference", "exec"), self.api)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = pathlib.Path(self.temp.name)
+        self.api = {"transaction": transaction, "_save": _save, "fcntl": fcntl}
         self.directory = os.open(self.path, os.O_RDONLY | os.O_DIRECTORY)
         self.addCleanup(os.close, self.directory)
         self.identity = [
@@ -188,6 +259,15 @@ class AtomicLedgerReferenceTests(unittest.TestCase):
             self.assertEqual(reserved["decision"], "RESERVED")
             self.assertEqual(reserved["attempt"], count)
             token = reserved["token"]
+            before = (self.path / "attempts.json").read_bytes()
+            observed = self.call("observe", token=token)
+            self.assertEqual(observed["decision"], "OBSERVE_ONLY")
+            self.assertEqual(observed["phase"], "reserved")
+            self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+            self.assertEqual(
+                self.call("observe", token=token, owner="other-session")["decision"],
+                "BLOCKED",
+            )
             self.assertEqual(self.call("start", token=token)["decision"], "START_ONCE")
             self.assertEqual(self.call("start", token=token)["decision"], "BLOCKED")
             self.assertEqual(

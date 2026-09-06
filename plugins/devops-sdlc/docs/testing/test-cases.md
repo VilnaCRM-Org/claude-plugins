@@ -63,7 +63,10 @@ The [catalog case](../../tests/scenarios.json)
 result is not yet verified; catalog and schema checks alone do not establish PASS.
 
 1. Start from `specs/attempt-budget-boundary/run-summary.md`, stage
-   `do-sdlc-implement`, at 4/5. The caller atomically reserves 5/5 with its active
+   `do-sdlc-implement`, at 4/5, with the exact task/stage/agent/target/environment
+   entry key in adjacent `attempts.json` as the sole counter authority. The
+   summary copies observations and references that record. The caller atomically
+   reserves 5/5 with its active
    ownership record before the one authorized attempt; the delegate never
    increments the count again.
 2. Record its local-test exit code 1, source SHA and

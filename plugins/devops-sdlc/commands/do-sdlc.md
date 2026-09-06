@@ -10,7 +10,10 @@ argument-hint: "[task-description | issue-URL]"
 Inputs are the command argument, repository guidance and
 `specs/<task>/run-summary.md` when resuming. That summary records task/repository
 identity, target/environment selections, source/profile hashes, artifact paths,
-check outcomes and persisted counters. For a verified fresh task, the caller
+check outcomes and copied counter observations. Each counter observation names
+the authoritative adjacent `attempts.json` path and exact
+`[task_id, stage_key, agent, target, environment]` entry key; the summary is never
+an independent counter writer. For a verified fresh task, the caller
 initializes its new sidecar under lock before creating the first human summary,
 following the agent guide's atomic transaction. An existing summary with no
 sidecar requires verified locked migration; never reset it to zero.
@@ -145,7 +148,8 @@ and token before execution. A delegate receives the same reservation and never
 increments again. For a NEW reservation, count >=5 means FAILED before missing
 history; caller stop means BLOCKED; an evidenced open/tripped Ralph breaker means
 FAILED; missing required state/log means BLOCKED. The matching owner may start or
-observe its already-reserved fifth attempt without taking another reservation.
+observe its already-reserved fifth attempt, subject to current stop/state checks,
+without taking another reservation. Inspection grants no execution authority.
 Print `stage: <name> n/5` from the saved record and restate it at every handoff.
 Only verified terminal completion closes ownership; crashes or uncertain effects
 retain the marker and block replay. Existing history with no sidecar requires

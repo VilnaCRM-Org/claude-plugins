@@ -206,9 +206,9 @@ def validate_entry(entry: dict, artifact_raw: str) -> None:
         or not citation
         or len(citation) > 120
         or any(ord(char) < 32 for char in citation)
-        or citation not in artifact_raw
-        or _redact_text(citation) != citation
     ):
+        raise AssessmentError("Verdict citation must be bounded single-line text.")
+    if citation not in artifact_raw or _redact_text(citation) != citation:
         raise AssessmentError(
             "Verdict citation must be a bounded, redaction-stable "
             "exact artifact substring."

@@ -73,6 +73,19 @@ class RedactionBoundaryTests(unittest.TestCase):
                     for fragment in ("ORCHID", "COBALT"):
                         self.assertNotIn(fragment, result)
 
+    def test_changed_json_strings_preserve_readable_unicode_and_surrogate_safety(self):
+        for suffix in ("Перевірка 東京 🌿", r"Перевірка \ud800", r"東京 \udfff"):
+            candidate = '{"message":"token=ORCHID ' + suffix + '","must":"validate"}'
+            with self.subTest(suffix=suffix):
+                redacted = redaction.redact_text(candidate)
+                redacted.encode("utf-8")
+                self.assertIn(suffix.split()[0], redacted)
+                self.assertEqual(json.loads(redacted)["must"], "validate")
+                self.assertEqual(redaction.redact_text(redacted), redacted)
+                for result in self.surfaces(candidate):
+                    result.encode("utf-8")
+                    self.assertNotIn("ORCHID", result)
+
     def test_decoded_and_punctuated_json_secret_keys_preserve_public_fields(self):
         for key in (r"to\u006ben", "db.password", r"api\u005fkey", r"db\"token"):
             candidate = '{"' + key + '":"ORCHID","must":"validate"}'
@@ -119,6 +132,33 @@ class RedactionBoundaryTests(unittest.TestCase):
             for fragment in ("ORCHID", "COBALT", "QUARTZ"):
                 self.assertNotIn(fragment, result)
 
+    def test_premature_json_quotes_never_strand_named_secret_tails(self):
+        cases = (
+            '{"message": "api_token="ORCHID COBALT""}',
+            '{"message":"api_token="ORCHID"COBALT","must":"QUARTZ"}',
+            '{"message":"password=prefix"ORCHID COBALT"}',
+            '{"message":"token="  ORCHID COBALT}',
+            '{"message":"token=",ORCHID COBALT}',
+            '{"message":"token=";ORCHID COBALT}',
+        )
+        for candidate in cases:
+            with self.subTest(candidate=candidate):
+                for result in self.surfaces(candidate):
+                    for fragment in ("ORCHID", "COBALT", "QUARTZ"):
+                        self.assertNotIn(fragment, result)
+                result = redaction.redact_text(candidate)
+                self.assertEqual(redaction.redact_text(result), result)
+        for candidate in (
+            '{"message":"token=","must":"validate"}',
+            '{"message":"token=ORCHID","must":"validate"}',
+            '{"message":"token=\\"ORCHID COBALT\\"","must":"validate"}',
+        ):
+            with self.subTest(valid=candidate):
+                result = redaction.redact_text(candidate)
+                self.assertEqual(json.loads(result)["must"], "validate")
+                self.assertNotIn("ORCHID", result)
+                self.assertNotIn("COBALT", result)
+
     def test_nonsecret_json_and_shell_controls_are_unchanged(self):
         for candidate in (
             '{"must":"validate","safe":[1,2]}',
@@ -143,6 +183,12 @@ for n in (1000, 4000, 16000):
     assert result.count('validate') == n and 'ORCHID' not in result
     text = 'token="' + ('ORCHID' + escaped_quote) * n
     assert 'ORCHID' not in redact_text(text)
+    text = '{"message":"' + ('secret' * n) + '="ORCHID COBALT""}'
+    result = redact_text(text)
+    assert 'ORCHID' not in result and 'COBALT' not in result
+    text = '{"message":"token="' + (' ' * n) + 'ORCHID COBALT}'
+    result = redact_text(text)
+    assert 'ORCHID' not in result and 'COBALT' not in result
 print('bounded-redaction-PASS')
 """
         result = subprocess.run(

@@ -58,7 +58,10 @@ smoke result cannot establish full catalog completion. Preserve runner/judge
 provenance and verify `full_catalog` and unchanged catalog/plugin inputs.
 
 The new G4 case, `iteration-budget-exhausted-fallback`, starts at 4/5 in a
-persisted ledger, consumes the fifth attempt on a local-test failure, then tests
+canonical `attempts.json` entry referenced by the human summary. The caller
+atomically reserves count plus active owner/token under the verified host lock;
+the delegate uses that same reservation without a second increment. It consumes
+the fifth attempt on a local-test failure, then tests
 a successful alternate-backend preflight. Require a durable 5/5 stop, preserved
 evidence and independent next work without a sixth implementation attempt. Its
 live verdict must come from the current full-catalog report; earlier 30-case
