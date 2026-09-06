@@ -1,10 +1,9 @@
 # Skill decision guide
 
-At planning and independent review, record **every skill verdict, no silent skips**:
-PASSED, FAILED, SKIPPED (inapplicable with reason), or BLOCKED (missing prerequisites).
-Every applicable skill is required; PASS needs inspected evidence.
-Only an out-of-scope trigger may be SKIPPED with a reason. Reassess after every
-scope or source change.
+Planning/independent review: **every skill verdict, no silent skips**:
+PASSED: inspected evidence; FAILED; SKIPPED only for out-of-scope triggers
+with reason; BLOCKED: missing prerequisites. Applicable skills are required.
+Reassess on scope/source changes.
 
 ## Complete inventory
 
@@ -60,6 +59,10 @@ for authenticated Claude, falling back to Codex at binary/auth preflight.
 selected backend, nonempty version and `available`/`authenticated` both true;
 else report BLOCKED. Readiness grants no task permission. Never replay
 a started or uncertain action through fallback.
+Record backend/version/fallback reason and proposed implementation handoff in
+response/saved summary: Claude → `bmalph run --driver claude-code`;
+Codex → `bmalph run --driver codex`. Include it while implementation is BLOCKED. Apply the agent
+guide's model rules; no cross-backend translation.
 The stage key is the invoked command file's basename without `.md`, e.g.
 `do-sdlc-plan`; for a directly invoked skill, use its frontmatter `name`.
 Each stage allows five procedure attempts.
@@ -108,14 +111,12 @@ subject to current stop/state checks, without reserving again. An active or
 uncertain reservation blocks every competing session. Preserve counts,
 applicability, evidence and active ownership across sessions and backend changes.
 
-BMAD produces requirements, architecture, stories and a readiness decision.
-BMALPH imports them and starts the implementation loop Ralph. Only
-`do-sdlc-implement` may start it after readiness passes; planning or skill
-selection cannot. In that stage, `bmalph implement` imports ready stories, then
-`bmalph run --driver codex` or `bmalph run --driver claude-code` starts Ralph with
-the selected authenticated CLI. Its circuit breaker stops repeated failures or
-lack of progress. An open/tripped breaker in `.ralph/logs/` ends the run; preserve
-the failed log and partial work, never reset it to retry.
+BMAD yields requirements, architecture, stories and readiness. Only
+`do-sdlc-implement`, after readiness passes, may import stories with
+`bmalph implement` and start Ralph with the mapped driver; planning
+and skill selection cannot. Its breaker stops repeated failures/lack of progress;
+open/tripped in `.ralph/logs/` ends the run: keep failed log and partial work,
+never reset to retry.
 
 Required checks are the acceptance checks recorded in that task summary.
 A native Claude-plugin check requires observing Claude load and invoke the
