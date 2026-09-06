@@ -39,13 +39,13 @@ that review and source hash; unavailable review blocks command execution.
 A command is needed when a procedure step or the task's acceptance checklist
 requires executing validation, tests, security checks or preview. If the task
 requests analysis or a plan only, describe those commands and mark them unexecuted.
-The recorded acceptance checklist is the task ledger's list of required outcomes;
-missing outcomes needed for this skill are BLOCKED, never inferred as passed.
-When a description names multiple siblings, choose the sibling whose stated
-trigger matches the requested action; use both if both triggers match, and record
-SKIPPED only if neither matches. An independent reviewer is a different agent or
-session that did not author the changed implementation; no such reviewer blocks
-any step explicitly requiring independence.
+The task ledger is the saved human `run-summary.md`; its acceptance checklist
+records the task's required outcomes before execution. Missing required outcomes
+are BLOCKED, never inferred as passed. Adjacent `attempts.json` is the canonical
+attempt-state sidecar, not the acceptance checklist.
+Select each sibling whose trigger matches the requested action; SKIPPED only
+for nonmatching scope. Use an agent/session other than the implementation's author
+for required independent review; otherwise BLOCKED.
 
 ## Applicability gate
 
@@ -111,21 +111,26 @@ Return PASSED, FAILED, SKIPPED or BLOCKED with source SHA, selected target and,
 when used, environment, command results, artifact hashes and unresolved findings.
 Every applicable acceptance gate requires PASSED; SKIPPED is only for an action
 outside the requested scope, with its reason recorded before evaluating results.
-Missing input, tool, helper, independent reviewer, authentication or authorization
-ends dependent work immediately as BLOCKED with the exact missing prerequisite.
-Continue only independent work. A failed check requires a root-cause fix; never
-suppress findings, add baseline exceptions, lower thresholds, disable tests or
-edit quality configuration merely to make a gate pass.
+Missing input, tool, helper, reviewer, authentication or authorization:
+BLOCKED; name the exact prerequisite and stop dependent work immediately.
+Continue independent work only. Fix root causes; never suppress findings, add
+baseline exceptions, lower thresholds, disable tests or edit quality config to pass.
 
 The stage is the invoking command's name; for direct use it is this skill's name.
 Reuse the task's recorded `specs/<task-id>/run-summary.md`. If no task record exists,
-select its date/task-title slug path, initialize the verified new sidecar under
-lock before creating the first human summary, and preserve that path.
+read [Task state and external handoff](../AI-AGENT-GUIDE.md#task-state-and-external-handoff)
+before selecting the path: use its UTC-date and user-message slug algorithm.
+Initialize the verified new sidecar under lock before the first summary; preserve
+that path on resume.
 One attempt means one execution of this procedure. For a NEW reservation, if its
 persisted count is five or more, stop with FAILED and the unmet exit condition.
-Use the [atomic caller transaction](../AI-AGENT-GUIDE.md#atomic-attempt-reservation):
-the verified host primitive persists count+1 with active owner/token under one
-lock before execution. Missing capability or active/uncertain ownership conflicts
+Before initialization or reservation, read the
+[atomic caller transaction](../AI-AGENT-GUIDE.md#atomic-attempt-reservation) and its
+linked exact-file reference; use the inspected, hash-verified `ledger_reference`
+API. Verify the host primitive with inventory and a two-process probe on the
+actual shared filesystem proving `fcntl.flock`, `os.replace`, directory `fsync`
+and the same protected lock inode. Its transaction persists count+1 with active
+owner/token under one lock before execution. Missing capability or active/uncertain ownership conflicts
 mean BLOCKED. Delegates reuse the exact task/stage/agent/target/environment key
 and token without another increment. The matching owner may start/observe its
 already-reserved fifth attempt; never reserve it twice. Report `stage: n/5` with

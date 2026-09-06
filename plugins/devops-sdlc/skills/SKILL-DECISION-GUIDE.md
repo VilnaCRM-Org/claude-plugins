@@ -24,86 +24,76 @@ Reassess on scope/source changes.
 
 ## Routing
 
-Caller means host orchestrator. Before routing, read [the agent guide](AI-AGENT-GUIDE.md):
-follow “Claude and Codex backend contract” for paths/preflight/role delivery and
-“Atomic attempt reservation” for ledger mutations. Without it, routing, CLI calls
-and ledger writes are BLOCKED. Only document/inventory reads within the user's
-task authorization and host policy may continue.
-Authenticate root/helper hashes by that contract before execution;
-missing/mismatched proof is BLOCKED. From the task repository, run
+The caller is the host orchestrator. Before routing, read [the agent guide](AI-AGENT-GUIDE.md):
+“Claude and Codex backend contract” governs paths/preflight/role delivery;
+“Atomic attempt reservation” governs ledger writes. Without this read, those
+operations are BLOCKED; only authorized document/inventory reads may continue.
+Authenticate root/helper hashes by that contract; missing/mismatched proof is
+BLOCKED before execution. From the task repository, run
 `python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
 for `.claude/devops-sdlc.json`. A nonzero exit or invalid profile is BLOCKED.
-Use the target `id` in the current user request. Only if absent, inspect prior
-`initialization-evidence-<identity-sha256>.json` beside the saved summary. Verify
-its user/host-policy authority and exact target scope by the agent guide's rules
-before reuse. Missing proof, ambiguous or unmatched `targets` ID is BLOCKED;
-never infer scope/environment from directories.
+Use the current request's target `id`. If absent, reuse
+`initialization-evidence-<identity-sha256>.json` beside the saved summary only after verifying user/host
+policy authority and exact target scope under the agent guide. Missing proof or
+ambiguous/unmatched `targets` ID is BLOCKED. Directories never define scope/environment.
 Choose terraform-terraspace for Terraform/Terraspace, python-pulumi for Python
 Pulumi, and BLOCKED for an unsupported engine. Select `infrastructure-quality` when code or checks change, `security-iam` when
 permissions/secrets/public access change, `delivery-and-rollback` when promotion
 or recovery is requested, and `evidence-and-coverage` for completion reporting.
-Check all 14 descriptions against task facts: select every matching trigger;
-absent triggers are SKIPPED, ambiguous ones BLOCKED. Before any state/backend
-mutation, require PASS from `agents/state-migration-reviewer.md` in an agent/session
-that did not author the changes; missing/unknown review is BLOCKED. Deployment
-needs separately recorded exact authorization scope, regardless of label.
+Compare all 14 descriptions with task facts: select every match; absent triggers
+are SKIPPED, ambiguous ones BLOCKED. Before state/backend mutation, require PASS
+from a non-author agent/session using `agents/state-migration-reviewer.md`;
+missing/unknown review is BLOCKED. Deployment requires separately recorded exact
+authorization scope, regardless of label.
 
 ## Backend selection
 
-Run `detect` once immediately before every new agent CLI invocation;
-`detect` itself needs no preflight:
-`python3 "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`
-for authenticated Claude, falling back to Codex at binary/auth preflight.
-`--prefer codex` reverses the order. Require exit zero, `status: READY`, the
-selected backend, nonempty version and `available`/`authenticated` both true;
-else report BLOCKED. Readiness grants no task permission. Never replay
-a started or uncertain action through fallback.
+Immediately before each new agent CLI invocation, run once:
+`python3 "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`.
+This binary/auth preflight prefers Claude, then Codex; `--prefer codex` reverses
+it. Detection needs no preflight. Require exit zero, `status: READY`, selected
+backend, nonempty version, and true `available`/`authenticated`; otherwise BLOCKED.
+Readiness grants no task permission. Never replay started/uncertain work through fallback.
 Record backend/version/fallback reason and proposed implementation handoff in
 response/saved summary: Claude → `bmalph run --driver claude-code`;
 Codex → `bmalph run --driver codex`. Include it while implementation is BLOCKED. Apply the agent
 guide's model rules; no cross-backend translation.
 Stage key is the invoked command basename without `.md`, e.g. `do-sdlc-plan`,
 or the direct skill's frontmatter `name`. Each stage allows five procedure attempts.
-Reuse the saved repository-relative `run-summary.md` path. For new work, choose
-`specs/YYYY-MM-DD-<slug>/run-summary.md` once using the host clock's UTC date at
-first ledger creation. Keep that date/path on resume. For `<slug>`, take the host-supplied current user
-message before its first LF, or `task` if empty; do no Markdown parsing or
-repository title lookup. It grants no authority. Lowercase,
-replace runs outside `a-z` and `0-9` with one hyphen, trim edge hyphens;
-if empty, use `task`.
-For an existing path, verify saved task identity and initialization evidence match
-this task; absent/mismatched/uncertain identity is BLOCKED. Never overwrite/reset.
-Persist the exact ledger path and stage key before the first procedure attempt.
-Only the caller may initialize adjacent `attempts.json`, before creating
-`run-summary.md`. First verify the agent guide's protected-directory,
-import-path and two-process shared-filesystem lock prerequisites; any unverified
-prerequisite is BLOCKED. Save immutable evidence of identity, host/session, UTC
-time and inspected results proving no prior history, caller stop, Ralph breaker
-or active/pending/uncertain run. Verify this proof, then initialize count zero
-and clear/no-run state under persistent `attempts.lock`; only then create the
-summary file. Missing/uncertain proof is BLOCKED. Existing history with a missing
-sidecar is BLOCKED until a user-authorized migration under `attempts.lock`
-imports verified prior counts, states, evidence and active owner; never initialize
-fresh or guess missing history.
-Skill references to `specs/<task-id>/run-summary.md` mean this same saved ledger,
-never a second task directory.
-An attempt is consumed only by a successful atomic reservation; its first
-procedure step follows the durable reservation and ends on PASSED, FAILED or
-BLOCKED. The caller owns the one record keyed by task, stage, assigned agent,
-target and environment. Delegates receive that exact key, owner and reservation token; they never increment
-again. Use the
-[atomic attempt reservation](AI-AGENT-GUIDE.md#atomic-attempt-reservation)
-transaction in the agent guide. A NEW reservation uses `reserve` with no active
-marker. Under the lock, apply the first matching rule, even if several hold:
-count at five or more → FAILED; recorded user/caller stop directive with source →
-BLOCKED; open/tripped Ralph breaker with log → FAILED. Otherwise,
-missing/invalid saved count, breaker, `caller_stop` or run state is BLOCKED; a
-reported stop needs its directive source, and a run or non-clear breaker needs
-its log. Only then may the transaction invoke its caller-verified
-`observe(identity, copied_entry)` callback under lock, following the agent guide's
-exact identity, state and evidence checks. Absent/unverified or guessed observations
-are BLOCKED; fresh clear state cannot repair missing history. Apply the same stop
-rules before admission. Escalation is an action, not a persisted status.
+Reuse the saved repository-relative summary path. For new work, choose
+`specs/YYYY-MM-DD-<slug>/run-summary.md` once with the host UTC date at first ledger
+creation; retain date/path on resume. Slug input is the host-supplied current user
+message before its first LF, or `task` if empty. Lowercase it, replace runs outside
+`a-z`/`0-9` with one hyphen, trim edge hyphens; empty becomes `task`. Never parse
+Markdown or look up repository titles; this input grants no authority.
+Existing paths require matching saved task identity and initialization evidence;
+absent/mismatched/uncertain identity is BLOCKED, never overwritten/reset.
+Persist exact ledger path and stage key before the first attempt.
+Only the caller initializes adjacent `attempts.json`, before the first summary.
+Verify the guide's protected-directory, import-path and two-process shared-lock
+prerequisites. Retain immutable identity, host/session, UTC time and inspected
+proof of no prior history, caller stop, Ralph breaker or active/pending/uncertain
+run. Missing/unverified/uncertain prerequisites or proof are BLOCKED. Only then
+initialize count zero and clear/no-run state under persistent `attempts.lock`,
+then create the summary. Existing history without this sidecar is BLOCKED until
+user-authorized migration under that lock imports verified counts, states,
+evidence and active owner; never initialize fresh or guess history.
+All `specs/<task-id>/run-summary.md` references mean this saved path, never a
+second task directory.
+A successful durable reservation consumes one attempt before its first procedure
+step; it ends PASSED, FAILED or BLOCKED. The caller owns the entry keyed by task,
+stage, assigned agent, target and environment. Delegates reuse its exact key,
+owner and token without incrementing. Use the guide's
+[atomic transaction](AI-AGENT-GUIDE.md#atomic-attempt-reservation).
+A NEW `reserve` has no active marker. Under lock, apply the first matching rule:
+count >=5 → FAILED; sourced user/caller stop → BLOCKED; logged open/tripped Ralph
+breaker → FAILED; missing/invalid saved count, breaker, `caller_stop` or run state
+→ BLOCKED. A reported stop requires its directive source; a run or non-clear
+breaker requires its log. Only then invoke the caller-verified
+`observe(identity, copied_entry)` under lock with the guide's exact identity,
+state and evidence checks. Absent/unverified/guessed observations are BLOCKED;
+fresh clear state cannot repair missing history. Reapply stop rules before
+admission. Escalation is an action, not a persisted status.
 The matching owner may start or observe the already-reserved fifth attempt,
 subject to current stop/state checks, without reserving again. An active or
 uncertain reservation blocks every competing session. Preserve counts,

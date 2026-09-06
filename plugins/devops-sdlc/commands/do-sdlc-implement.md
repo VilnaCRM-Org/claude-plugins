@@ -94,15 +94,21 @@ launch only on START_ONCE, never on observation alone.
    Proposals give payload/unknown hashes, never claim injection.
 3. Send `infrastructure-implementer` the proposal/handoff: `attempts.json` beside the saved summary,
    exact `[task,stage,agent,target,environment]` key, owner/token and independent file scope.
-   Include an admission checklist: lock proof; reloaded count; complete coherent history/count
-   validation; current caller stop, breaker and running/pending/uncertain-run checks;
-   active ownership; decision. Each check gives its value, evidence and performed or
-   proposed locked action. Proposals mark checks unexecuted and outputs pending;
-   missing admission inputs block execution. Checks bypassed by
-   stop/exhaustion precedence state that reason, not PASS. Start once only after
-   ownership admission; never reserve/increment again. Serialize shared IAM/backend/
-   state work; preserve others' edits. Add meaningful regression tests before or with
-   fixes under repository gates.
+   Emit `check | value | evidence | locked action/result` rows for: lock proof,
+   reloaded count, complete same-entry history/count validation, caller stop,
+   breaker, running/pending/uncertain runs, active ownership and admission decision.
+   State explicitly that the caller validates the full history/count under lock
+   before count+1, even when supplied facts say history is valid. “Reserve/start”
+   alone does not describe this check. Proposals mark checks unexecuted and outputs
+   pending; missing admission inputs block execution. Precedence-bypassed checks
+   state the stop/exhaustion reason, never PASS.
+   Before owner start, emit the saved `run-summary.md` copy with
+   `attempts.json_path,exact_key,used/5,remaining,owner,token`.
+   Copy values from canonical `attempts.json`; the summary never writes counters.
+   Proposals label this copy proposed; unknown values remain explicit placeholders.
+   Start once after ownership admission; never reserve/increment again. Serialize
+   shared IAM/backend/state work, preserve others' edits and add meaningful
+   regression tests before or with fixes under repository gates.
 4. `plan` creates a command intention; require
    `--stage validate|test|check|security|preview` and explicit `--target`.
    Use the agent guide's exact recipes and reviewed profile argv. Execute local
@@ -153,8 +159,8 @@ For a NEW reservation, count >=5 means FAILED before missing history; caller sto
 evidenced open/tripped Ralph breaker FAILED; missing required state/log means BLOCKED.
 The caller atomically validates state
 and persists count+1 with an active owner and token before execution. Before owner
-start, copy resulting count/5, remaining, canonical `attempts.json` path/exact key
-and owner/token to saved `run-summary.md` (observation only); hand off start once.
+start, copy the step 3 reservation observation to saved `run-summary.md`;
+hand off start once. The summary never writes counters.
 A delegate receives the same reservation and never increments again.
 The matching owner may start once or observe its already-reserved fifth attempt,
 subject to current stop/state, without another reservation. Inspection grants no

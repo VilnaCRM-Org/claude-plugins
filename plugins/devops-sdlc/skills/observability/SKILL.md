@@ -25,7 +25,9 @@ Failure: BLOCKED; no repository commands. Read
   explicit stack/backend binding. Other engines are BLOCKED. Engine-specific
   skills skip other engines with reasons; route to their sibling.
 - If an environment is named, set NAME to that name. Require a matching key in the
-  selected target's `environments` and its identity fields; otherwise BLOCKED.
+  selected target's `environments`, with `stack`, `account_id`, `region` and
+  `backend` as defined by [the profile schema](../../docs/profile-schema.md);
+  missing or invalid fields are BLOCKED.
   Preview/operations require NAME. Only local static work with no environment may
   omit it.
 - Review configured argv and all local wrappers for side effects with an agent
@@ -62,12 +64,14 @@ Independent review requires a different agent/session from the author; else BLOC
    checklist-scoped deployment, backup, IAM/OIDC, KMS and state-storage resources;
    explain exclusions. Check missing data, thresholds, deduplication and
    runbook context. Preserve redaction; avoid sensitive high-cardinality labels.
-3. Before a configured check, select its `targets[].commands` key: `validate`,
-   `test`, `check`, `security` or `preview` (helper, not counter stage).
-   Record this key as HELPER_STAGE and the selected target ID as TARGET.
+3. For each checklist check requiring a configured command, use its recorded
+   helper stage: `validate`, `test`,
+   `check`, `security` or `preview`. It must map the required check to a reviewed
+   `targets[].commands` argv; missing or ambiguous mappings are BLOCKED.
+   Record that key as HELPER_STAGE and the selected target ID as TARGET.
    Record a new, unused path under `.artifacts/devops-sdlc/` as INTENTION.
-   Substitute recorded values. Add `--environment NAME` to `plan` if NAME is defined;
-   otherwise omit that flag:
+   Substitute recorded values. Add `--environment NAME` to `plan`; omit only for
+   local static work without NAME. Preview without NAME is BLOCKED:
 
    ```sh
    helper="$DEVOPS_PLUGIN_ROOT/scripts/devops.py"

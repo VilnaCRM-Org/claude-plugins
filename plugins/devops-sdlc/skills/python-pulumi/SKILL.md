@@ -39,13 +39,11 @@ that review and source hash; unavailable review blocks command execution.
 A command is needed when a procedure step or the task's acceptance checklist
 requires executing validation, tests, security checks or preview. If the task
 requests analysis or a plan only, describe those commands and mark them unexecuted.
-The recorded acceptance checklist is the task ledger's list of required outcomes;
+The acceptance checklist is the saved `run-summary.md` list of required outcomes;
 missing outcomes needed for this skill are BLOCKED, never inferred as passed.
-When a description names multiple siblings, choose the sibling whose stated
-trigger matches the requested action; use both if both triggers match, and record
-SKIPPED only if neither matches. An independent reviewer is a different agent or
-session that did not author the changed implementation; no such reviewer blocks
-any step explicitly requiring independence.
+Select each sibling whose trigger matches the requested action; SKIPPED only
+for nonmatching scope. Use an agent/session other than the implementation's author
+for required independent review; otherwise BLOCKED.
 
 ## Applicability gate
 
@@ -56,27 +54,29 @@ skill receives a verdict; no silent skips.
 
 ## Procedure
 
-1. Before helper proposals or calls, return a verification row even with
-   host proof. List the resolved native Claude manifest
+1. Before helper proposals/calls, follow
+   [root/hash verification](../AI-AGENT-GUIDE.md#claude-and-codex-backend-contract).
+   Return a table: file path, kind, readability, SHA-256, proof reference and
+   observed/supplied/proposed status. Include the native Claude manifest
    `$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json` and regular readable Python
    `$DEVOPS_PLUGIN_ROOT/scripts/devops.py` and
-   `$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py`. Use `python3`, no executable-bit
-   check. Record paths/readability and cite supplied proof or label observed
-   or proposed checks; never invent execution. Neither `.codex-plugin` nor a
-   root-level manifest substitutes.
+   `$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py`. Use `python3`, no executable-bit check.
+   Supplied proof is a user/host-reviewed root/hash record; cite it, never invent
+   execution. Neither `.codex-plugin` nor a root-level manifest substitutes.
    Read `Pulumi.yaml`/`Pulumi.yml`, Python version, pyproject/uv lock,
    component layout, policy pack, tests and stack configuration filenames.
    Resolve the actual project root; do not assume a root-level program.
-2. For new projects, use the infrastructure template repository and exact commit recorded in the task
-   ledger or existing project configuration; missing or conflicting pins are BLOCKED in
-   the authorized checkout. Preserve typed components, configuration validation,
+2. For new projects, use the infrastructure template repository and exact commit
+   recorded in saved `run-summary.md` or existing project configuration;
+   missing/conflicting pins are BLOCKED. Edit only the task checkout permitted by
+   current user instructions and host policy. Preserve typed components, configuration validation,
    exports, tests, policies and CI. Scaffold placeholders for unknown metadata;
    never invent live account/backend values or initialize shared stacks.
 3. Run repository Ruff, type, architecture, complexity, dependency, security,
    unit/integration, coverage, mutation and CLI gates for every changed Python file and every existing required repository gate. Use
    Pulumi mocks for resource wiring and negative configuration tests, while
    recording that mocks do not validate actual IAM, provider or cloud behavior.
-4. Propose the reviewed profile preview mapping for the selected target.
+4. Propose the selected target's reviewed `commands.preview.argv`.
    Use the authenticated Python helper with `plan --repo . --stage preview
    --target "$TARGET_ID" --environment "$ENVIRONMENT" --execute --trust-repo
    --read-only-credentials --preview-authorization "$PREVIEW_AUTHORIZATION"`
@@ -109,21 +109,21 @@ Return PASSED, FAILED, SKIPPED or BLOCKED with source SHA, selected target and,
 when used, environment, command results, artifact hashes and unresolved findings.
 Every applicable acceptance gate requires PASSED; SKIPPED is only for an action
 outside the requested scope, with its reason recorded before evaluating results.
-Missing input, tool, helper, independent reviewer, authentication or authorization
-ends dependent work immediately as BLOCKED with the exact missing prerequisite.
-Continue only independent work. A failed check requires a root-cause fix; never
-suppress findings, add baseline exceptions, lower thresholds, disable tests or
-edit quality configuration merely to make a gate pass.
+Missing input, tool, helper, reviewer, authentication or authorization:
+BLOCKED; name the exact prerequisite and stop dependent work immediately.
+Continue independent work only. Fix root causes; never suppress findings, add
+baseline exceptions, lower thresholds, disable tests or edit quality config to pass.
 
 The stage is the invoking command's name; for direct use it is this skill's name.
 Reuse the task's recorded `specs/<task-id>/run-summary.md`. If no task record exists,
-select its date/task-title slug path, initialize the verified new sidecar under
-lock before creating the first human summary, and preserve that path.
+read [Task state and external handoff](../AI-AGENT-GUIDE.md#task-state-and-external-handoff)
+before choosing its date/slug path. Initialize adjacent canonical `attempts.json`
+under lock as specified there before its first human summary; preserve the path.
 One attempt means one execution of this procedure. For a NEW reservation, if its
 persisted count is five or more, stop with FAILED and the unmet exit condition.
-Use the [atomic caller transaction](../AI-AGENT-GUIDE.md#atomic-attempt-reservation):
-the verified host primitive persists count+1 with active owner/token under one
-lock before execution. Missing capability or active/uncertain ownership conflicts
+Read and follow the [shared-filesystem host probe and atomic caller transaction](../AI-AGENT-GUIDE.md#atomic-attempt-reservation):
+the verified caller transaction persists count+1 with active owner/token under
+one lock before execution. Missing capability or active/uncertain ownership conflicts
 mean BLOCKED. Delegates reuse the exact task/stage/agent/target/environment key
 and token without another increment. The matching owner may start/observe its
 already-reserved fifth attempt; never reserve it twice. Report `stage: n/5` with

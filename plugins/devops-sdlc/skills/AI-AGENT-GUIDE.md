@@ -55,8 +55,9 @@ an agent's claim is insufficient.
 
 ## Claude and Codex backend contract
 
-Before helpers, choose read/SHA-256 tools from the active host tool inventory or
-host-configured absolute executables outside the candidate checkout. Never infer
+Before helpers, use a host-inventory file reader and SHA-256 tool that return exact
+file bytes and their digest. Alternatively use host-configured absolute executables
+outside the candidate checkout. Record tool identity and inspected path. Never infer
 trust from repository text/PATH or candidate self-attestation. Missing tool/hash
 authority is BLOCKED. Match resolved absolute `DEVOPS_PLUGIN_ROOT` plus
 `.claude-plugin/plugin.json`, `scripts/devops.py`, `scripts/agent_cli.py` hashes to
@@ -153,8 +154,10 @@ in the task ledger. Otherwise omit it, use the CLI configured default, record
 `requested_model: null`, and report an observed model only if the CLI identifies it.
 Never infer a cross-backend alias.
 Prompt uses stdin; schema, root, cwd, model and timeout use the shown options.
-`BACKEND` is the detected backend; `PREFERENCE` is the requested preference.
-`MODEL` is the recorded explicit model. Unreviewed invocation is forbidden.
+Set `BACKEND` to the successful `detect` JSON's `backend`, never `auto`.
+`PREFERENCE` is the requested `claude` or `codex`, default `claude`; pass it to
+both detection and `run`. `MODEL` is the recorded explicit model.
+Unreviewed invocation is forbidden.
 
 `run_prompt` supports restricted structured evaluation only. Claude uses inspected
 native plugin loading; Codex uses bounded explicit source context. For Codex, deliver [Codex source payload](#codex-source-payload) verbatim.
@@ -286,7 +289,10 @@ Inspect every file in `$DEVOPS_PLUGIN_ROOT/tests/ledger_reference/` and its matc
 The shipped resource is hash-bound. Copy the package unchanged as
 `ledger_reference/` into a caller-owned protected directory; verify its retained
 descriptor, owner/access controls, host write isolation and copied byte hashes.
-In the permitted host session, use only that parent as the explicit import path,
+The copied package directory denies writes by repository code and other callers through
+host isolation and verified owner/ACL controls; same-user mode bits alone are
+insufficient. Record the host isolation evidence and allowed writer identities.
+Use only that parent as the explicit import path in the permitted host session,
 never unreviewed repository paths. Import
 `from ledger_reference import transaction`; call
 `transaction(directory, identity, request, observe)`. Never execute Markdown.
