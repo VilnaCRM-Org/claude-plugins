@@ -946,6 +946,179 @@ print('bounded-redaction-PASS')
         self.assertFalse(report["provenance"]["live"])
         self.assertTrue(report["results"][0]["candidate_evidence_omitted"])
 
+    def test_calibration_byte_limits_block_catalog_before_any_cli(self):
+        for candidate, message in (
+            ("é" * 6000, "Raw calibration"),
+            ("token=x " * 1100, "Sanitized calibration"),
+        ):
+            catalog = copy.deepcopy(self.catalog)
+            catalog["calibration"][0]["candidate"] = candidate
+            with tempfile.TemporaryDirectory() as raw:
+                path = pathlib.Path(raw) / "catalog.json"
+                path.write_text(json.dumps(catalog))
+                with (
+                    self.subTest(message=message),
+                    mock.patch.object(judge, "MAX_CANDIDATE_BYTES", 10000),
+                    mock.patch.object(judge, "runtime") as runtime,
+                    mock.patch.object(judge, "invoke") as invoke,
+                    contextlib.redirect_stderr(io.StringIO()) as stderr,
+                ):
+                    self.assertEqual(
+                        judge.main(["--scenarios", str(path), "--calibrate"]), 2
+                    )
+                    self.assertIn(message, stderr.getvalue())
+                    runtime.assert_not_called()
+                    invoke.assert_not_called()
+
+    def test_catalog_seed_validation_preserves_text_at_exact_utf8_limit(self):
+        catalog = copy.deepcopy(self.catalog)
+        for seed in catalog["calibration"]:
+            seed["candidate"] = "éé"
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "catalog.json"
+            path.write_text(json.dumps(catalog))
+            with mock.patch.object(judge, "MAX_CANDIDATE_BYTES", 4):
+                self.assertEqual(judge.load_catalog(path), catalog)
+
+    def test_calibration_admits_exact_sanitized_input_once_before_judge(self):
+        case = {
+            **self.catalog["calibration"][0],
+            "candidate": "token=x",
+            "expect": "PASS",
+        }
+        sanitized = judge.redact_text(case["candidate"])
+        args = self.args()
+        args.evidence_budget = judge.EvidenceBudget(expected_rows=1)
+        verdict = {
+            "verdict": "PASS",
+            "must": dict.fromkeys(case["must"], True),
+            "must_not": dict.fromkeys(case["must_not"], True),
+            "evidence": "Observed fixture.",
+        }
+        with (
+            mock.patch.object(
+                judge, "MAX_CANDIDATE_BYTES", len(sanitized.encode("utf-8"))
+            ),
+            mock.patch.object(
+                judge, "MAX_TOTAL_CANDIDATE_BYTES", len(sanitized.encode("utf-8"))
+            ),
+            mock.patch.object(
+                args.evidence_budget,
+                "admit_candidate",
+                wraps=args.evidence_budget.admit_candidate,
+            ) as admission,
+            mock.patch.object(
+                judge, "invoke", return_value=self.completed(verdict)
+            ) as invoke,
+        ):
+            judge.validate_seed(case)
+            self.assertEqual(args.evidence_budget.candidate_bytes, 0)
+            row = judge.collect_one(case, args, calibration=True)
+        self.assertEqual(row["status"], "PASS")
+        admission.assert_called_once_with(sanitized)
+        invoke.assert_called_once()
+        prompt = invoke.call_args.args[0]
+        self.assertTrue(prompt.endswith("CANDIDATE: " + sanitized))
+        self.assertNotIn("token=x", prompt)
+        self.assertEqual(
+            args.evidence_budget.candidate_bytes, len(sanitized.encode("utf-8"))
+        )
+        self.assertEqual(case["candidate"], "token=x")
+
+    def test_calibration_and_runner_share_one_cumulative_utf8_budget(self):
+        case = {**self.catalog["calibration"][0], "candidate": "éé", "expect": "PASS"}
+        args = self.args()
+        args.evidence_budget = judge.EvidenceBudget(expected_rows=3)
+        seed_verdict = {
+            "verdict": "PASS",
+            "must": dict.fromkeys(case["must"], True),
+            "must_not": dict.fromkeys(case["must_not"], True),
+            "evidence": "Observed fixture.",
+        }
+        with (
+            mock.patch.object(judge, "MAX_TOTAL_CANDIDATE_BYTES", 8),
+            mock.patch.object(
+                judge,
+                "invoke",
+                side_effect=[
+                    self.completed(seed_verdict),
+                    self.completed({"response": "éé"}),
+                    self.completed(self.verdict()),
+                ],
+            ) as invoke,
+        ):
+            calibration = judge.collect_one(case, args, calibration=True)
+            runner = judge.collect_one(self.scenario, args)
+            overflow = judge.collect_one(case, args, calibration=True)
+        self.assertEqual(calibration["status"], "PASS")
+        self.assertEqual(runner["status"], "PASS")
+        self.assertEqual(overflow["status"], "ERROR")
+        self.assertTrue(overflow["candidate_evidence_omitted"])
+        self.assertEqual(invoke.call_count, 3)
+        self.assertEqual(args.evidence_budget.candidate_bytes, 8)
+
+    def test_concurrent_seed_and_runner_cannot_overspend_shared_budget(self):
+        args = self.args()
+        args.evidence_budget = judge.EvidenceBudget(expected_rows=2)
+        case = {
+            "id": "seed",
+            "candidate": "éé",
+            "expect": "PASS",
+            "must": self.scenario["must"],
+            "must_not": self.scenario["must_not"],
+        }
+        barrier = threading.Barrier(2)
+        original_admit = args.evidence_budget.admit_candidate
+
+        def admit(value):
+            barrier.wait(timeout=5)
+            return original_admit(value)
+
+        def invoke(*args):
+            return self.completed(
+                {"response": "éé"} if len(args) == 5 else self.verdict()
+            )
+
+        with (
+            mock.patch.object(judge, "MAX_TOTAL_CANDIDATE_BYTES", 4),
+            mock.patch.object(
+                args.evidence_budget, "admit_candidate", side_effect=admit
+            ),
+            mock.patch.object(judge, "invoke", side_effect=invoke) as calls,
+            concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool,
+        ):
+            seed = pool.submit(judge.collect_one, case, args, True)
+            runner = pool.submit(judge.collect_one, self.scenario, args)
+            rows = [seed.result(), runner.result()]
+        self.assertEqual(sorted(row["status"] for row in rows), ["ERROR", "PASS"])
+        self.assertEqual(args.evidence_budget.candidate_bytes, 4)
+        self.assertEqual(calls.call_count, 2)
+
+    def test_direct_calibration_rejects_size_and_does_not_refund_failed_judge(self):
+        args = self.args()
+        case = {**self.catalog["calibration"][0], "candidate": "éé"}
+        with (
+            mock.patch.object(judge, "MAX_CANDIDATE_BYTES", 3),
+            mock.patch.object(judge, "invoke") as invoke,
+        ):
+            row = judge.run_calibration(case, args)
+        self.assertEqual(row["status"], "ERROR")
+        invoke.assert_not_called()
+        args.evidence_budget = judge.EvidenceBudget(expected_rows=2)
+        with (
+            mock.patch.object(judge, "MAX_TOTAL_CANDIDATE_BYTES", 4),
+            mock.patch.object(
+                judge, "invoke", return_value={"status": "BLOCKED", "reason": "fixture"}
+            ) as invoke,
+        ):
+            first = judge.collect_one(case, args, calibration=True)
+            second = judge.collect_one(case, args, calibration=True)
+        self.assertEqual(first["status"], "ERROR")
+        self.assertEqual(second["status"], "ERROR")
+        self.assertTrue(second["candidate_evidence_omitted"])
+        invoke.assert_called_once()
+        self.assertEqual(args.evidence_budget.candidate_bytes, 4)
+
     def test_unavailable_and_required_calibration_fail_closed(self):
         adapter = mock.Mock()
         adapter.select_backend.return_value = {

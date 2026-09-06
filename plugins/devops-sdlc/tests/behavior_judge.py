@@ -257,6 +257,7 @@ def validate_seed(item: Any) -> dict[str, Any]:
         raise ValueError("calibration expectation must be PASS or FAIL")
     if any(not strings(item[k]) for k in ("must", "must_not")):
         raise ValueError("calibration observations must be unique string lists")
+    calibration_candidate(item["candidate"])
     return item
 
 
@@ -507,6 +508,20 @@ def run_one(scenario: dict[str, Any], args: argparse.Namespace) -> dict[str, Any
     }
 
 
+def calibration_candidate(value: object) -> str:
+    """Validate seed bytes before CLI use; return the exact sanitized judge input."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Calibration candidate requires text")
+    if len(value.encode("utf-8")) > MAX_CANDIDATE_BYTES:
+        raise ValueError("Raw calibration candidate exceeds the evidence size limit")
+    sanitized = redact_text(value)
+    if len(sanitized.encode("utf-8")) > MAX_CANDIDATE_BYTES:
+        raise ValueError(
+            "Sanitized calibration candidate exceeds the evidence size limit"
+        )
+    return sanitized
+
+
 def run_calibration(case: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
     scenario = {
         "id": case["id"],
@@ -515,7 +530,14 @@ def run_calibration(case: dict[str, Any], args: argparse.Namespace) -> dict[str,
         "must_not": case["must_not"],
     }
     started = time.monotonic()
-    prompt = judge_prompt(scenario, case["candidate"])
+    try:
+        sanitized = calibration_candidate(case["candidate"])
+    except (TypeError, ValueError) as exc:
+        return error_row(case["id"], "calibration", exc, started)
+    budget = getattr(args, "evidence_budget", None)
+    if budget is not None and not budget.admit_candidate(sanitized):
+        return omitted_row(case["id"], "Aggregate candidate evidence limit exceeded")
+    prompt = _judge_prompt(scenario, sanitized)
     with tempfile.TemporaryDirectory(prefix="devops-calibration-") as raw:
         result = invoke(prompt, args, pathlib.Path(raw), observation_schema(scenario))
     try:
@@ -567,6 +589,9 @@ def write_report(
             "calibration_count": MAX_CALIBRATION,
             "candidate_bytes": MAX_CANDIDATE_BYTES,
             "aggregate_candidate_bytes": MAX_TOTAL_CANDIDATE_BYTES,
+            "aggregate_candidate_scope": (
+                "sanitized calibration seeds and runner responses"
+            ),
             "aggregate_row_bytes": MAX_TOTAL_ROW_BYTES,
             "report_bytes": MAX_REPORT_BYTES,
             "overflow": "ERROR; complete candidate evidence omitted, never truncated",
