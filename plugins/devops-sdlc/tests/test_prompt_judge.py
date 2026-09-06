@@ -53,15 +53,27 @@ class PromptJudgeTests(unittest.TestCase):
     def test_importlib_loader_finds_shared_redaction_from_foreign_directory(self):
         code = "\n".join(
             (
-                "import importlib.util, sys",
+                "import importlib.util, pathlib, sys",
                 f"path = {str(Path(subject.__file__).resolve())!r}",
                 "spec = importlib.util.spec_from_file_location("
                 "'isolated_prompt_judge', path)",
                 "module = importlib.util.module_from_spec(spec)",
                 "sys.modules[spec.name] = module",
                 "spec.loader.exec_module(module)",
+                "import redaction",
+                "assert module._redact_text is redaction.redact_text",
+                "assert pathlib.Path(redaction.__file__).resolve() "
+                "== pathlib.Path(path).parent / 'redaction.py'",
                 "assert module.redact_evidence('api_token=fixture') "
                 "== 'api_token=[REDACTED]'",
+                "seen = []",
+                "def observe(value):",
+                "    seen.append(value)",
+                "    return 'alias-delegated'",
+                "module._redact_text = observe",
+                "assert module.redact_evidence('delegation-sentinel') "
+                "== 'alias-delegated'",
+                "assert seen == ['delegation-sentinel']",
             )
         )
         with tempfile.TemporaryDirectory() as directory:

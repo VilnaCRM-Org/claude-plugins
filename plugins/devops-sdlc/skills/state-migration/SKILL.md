@@ -56,17 +56,21 @@ skill receives a verdict; no silent skips.
 
 ## Migration report contract
 
-Lead with the requested resource move and its decision, then provide: the
-source-to-destination ownership mapping, forward verification and stop trigger,
-mandatory protected pre-change backup and successful restore-rehearsal evidence,
-the ordered recovery sequence below, and required evidence/blockers. Missing
+Lead with the requested resource move and its decision, then give the ordered
+forward procedure below before general setup details. Explicitly place the
+disposable dry-run/rehearsal and reviewed preview before the separately authorized
+real state transfer. Post-transfer preview is an additional check and cannot
+satisfy this pre-transfer gate. Include the source-to-destination mapping,
+protected backup and restore-rehearsal evidence, stop trigger, ordered recovery
+sequence below, and required evidence/blockers. Missing
 backup or rehearsal evidence makes migration acceptance BLOCKED even when the
 proposed move preserves identity; backup readiness is required regardless of
 whether recovery will use the snapshot. A list of
 backup metadata or the words "reverse mapping" is not a recovery procedure.
 A general SDLC/setup preamble must not replace this migration report. When the
 engine or addresses are unknown, mark exact commands/mappings BLOCKED and name
-the missing inputs; still propose all logical recovery actions in order. Label
+the missing inputs; still propose all logical forward and recovery actions in
+order, including the pre-transfer preview gate. Label
 unexecuted steps PROPOSED, never completed or authorized by this report.
 
 ## Procedure
@@ -74,12 +78,7 @@ unexecuted steps PROPOSED, never completed or authorized by this report.
 1. Inventory current resource IDs, addresses, owners and dependencies from approved
    metadata. Map each source address to its destination and identify data-bearing
    resources. Never expose raw state in prompts, logs or committed evidence.
-2. Propose an engine-supported ownership transfer preserving resource identities,
-   aliases, protect/retain settings and secrets provider. Require a disposable
-   rehearsal and reviewed preview showing no unintended create/delete/replace
-   before any separately authorized state change. Specify the failure that stops
-   migration and triggers recovery or reviewed fail-forward.
-3. Before migration acceptance or any state-changing transfer, require a protected
+2. Before migration acceptance or any state-changing transfer, require a protected
    pre-change backup and successful restore-rehearsal results. Record encryption
    and access-control evidence, capture time, integrity hash, backend/account/
    region/stack, provider pins and verified source revision without exposing state.
@@ -87,7 +86,20 @@ unexecuted steps PROPOSED, never completed or authorized by this report.
    Missing, stale or failed evidence is BLOCKED; a proposed backup is not proof of
    readiness. Prepare the ordered recovery actions below before recommending the
    transfer. Backup readiness is mandatory; actual restoration remains conditional.
-4. Obtain reviewed authorization for the exact migration and recovery actions,
+3. Prepare the source-to-destination mapping and compatible source-code changes
+   using the engine's supported transfer mechanism. Preserve physical identities,
+   aliases, protect/retain settings and secrets provider. Under scoped rehearsal
+   authorization, require a disposable dry-run/rehearsal and independently reviewed
+   preview of the proposed migration before changing real state. Require recorded
+   results bound to the mapping, source SHA and selected environment, showing no
+   unintended create/delete/replace and single ownership. If the engine cannot
+   preview the intended move safely, keep transfer BLOCKED and request a reviewed
+   rehearsal method; do not move real state merely to obtain a preview. Missing,
+   stale or failed pre-transfer results block transfer even if a later check is
+   planned. Specify the failure that stops migration and triggers recovery or
+   reviewed fail-forward.
+4. Only after those pre-transfer gates pass, obtain reviewed authorization for the
+   exact real migration and recovery actions,
    resources and window. No automatic import, state removal, backend migration,
    force-unlock, secrets-provider change or refresh. Generic implementation consent
    is insufficient; state removal is a mutation even when it deletes no resource.

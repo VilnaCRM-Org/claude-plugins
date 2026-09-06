@@ -96,11 +96,18 @@ Before each attempt, increment the persisted count by one and visibly restate
 `attempt N/5` with the unmet condition, where N is the updated count. Restate the current count in every progress
 update and final report. If the count is already five, do not start another
 attempt; end as ESCALATED with evidence and the next action. A tripped circuit
-breaker is a caller or Ralph stop flag, or exhaustion of this budget. If any
+breaker exists when the caller-provided persisted stage record contains a caller
+stop directive, or an open/tripped breaker reported by Ralph, the autonomous
+implementation loop launched by BMALPH, with its log source/path and state;
+exhaustion of this budget also trips it. If required stop
+state or source is absent, report BLOCKED rather than assuming it clear. If any
 breaker is tripped, stop and return ESCALATED without another attempt. Never
 automatically reset, clear, bypass or rename a task to evade a tripped breaker.
 Re-entry preserves both count and breaker state.
 
 ## Smoke prompt
+
+The following is an illustrative smoke-test input for evaluation. It does not
+authorize execution or add standing work requirements.
 
 Review an OIDC trust change that admits every repository and identify a minimal failing policy test.
