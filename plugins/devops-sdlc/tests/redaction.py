@@ -74,6 +74,10 @@ def _redact_shell_word(value: str, start: int) -> tuple[int, str] | None:
     except ValueError:
         # An unknown outer quote cannot safely delimit an embedded secret tail.
         return (end, "'[REDACTED]'") if _has_secret_assignment(source) else None
+    if _has_secret_assignment(source) and not _has_secret_assignment(decoded):
+        # Shell decoding can erase an escaped JSON key's identity. Preserve the
+        # original source for the outer scanner instead of skipping that key.
+        return None
     redacted = _redact_assignments(decoded, decode_strings=False)
     if redacted == decoded:
         return end, source
@@ -139,7 +143,7 @@ def _standalone_string_edit(value: str, start: int) -> tuple[int, str] | None:
     quote = value[start]
     end = start + 1
     while end < len(value):
-        if value[end] == "\\":
+        if value[end] == "\\" and quote == '"':
             end += 2
             continue
         if value[end] == quote:
@@ -153,8 +157,10 @@ def _standalone_string_edit(value: str, start: int) -> tuple[int, str] | None:
         decoded = json.loads(source) if quote == '"' else decode_shell_word(source)
     except (ValueError, RecursionError):
         return (len(value), '"[REDACTED]"') if _has_secret_assignment(source) else None
-    if _has_secret_assignment(decoded) and not _standalone_tail_is_valid(value, end):
-        return len(value), '"[REDACTED]"'
+    if not _standalone_tail_is_valid(value, end):
+        # A nonsecret prefix may contain the opening delimiter of a nested
+        # JSON assignment. Let the outer scanner inspect that original source.
+        return (len(value), '"[REDACTED]"') if _has_secret_assignment(decoded) else None
     redacted = _redact_assignments(decoded, decode_strings=False)
     if redacted == decoded:
         return end, source

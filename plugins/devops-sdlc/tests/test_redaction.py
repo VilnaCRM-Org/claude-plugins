@@ -276,6 +276,16 @@ for n in (1000, 4000, 16000):
     assert 'ORCHID' not in redact_text(text)
     text = '[' + ','.join('"token=ORCHID"' for _ in range(n)) + ']'
     assert 'ORCHID' not in redact_text(text)
+    for key in ('token', 'to' + chr(92) + 'u006ben'):
+        text = ('run "{"' + key + '":"ORCHID COBALT"}" now ' ) * n
+        result = redact_text(text)
+        assert 'ORCHID' not in result and 'COBALT' not in result
+        text = ('message="{"' + key + '":"ORCHID COBALT"}" now ') * n
+        result = redact_text(text)
+        assert 'ORCHID' not in result and 'COBALT' not in result
+    text = ("'api_key=ORCHID" + chr(92) + "' status=READY ") * n
+    result = redact_text(text)
+    assert 'ORCHID' not in result and result.count('READY') == n
 print('bounded-redaction-PASS')
 """
         result = subprocess.run(

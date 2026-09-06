@@ -60,6 +60,17 @@ agent and skill Markdown supplied by `scripts/agent_cli.py`; it does not nativel
 load a Claude plugin. Both run without executable tools. The independent judge
 receives no plugin directory or context. Preserve this distinction in reports.
 
+Behavior evidence retains each admitted sanitized candidate in full with its
+SHA-256 and the exact judge request hash. Enforce 2 MB per candidate before and
+after redaction, 2 MB cumulative sanitized candidates, 6 MB cumulative result
+rows including reserved omission records, and an 8 MB atomic streamed report.
+Catalog input is limited to 1 MB, 128 scenarios and 16 calibration cases; IDs
+are at most 256 UTF-8 bytes. Overflow is ERROR with explicit omission, never
+truncated evidence scored as PASS. Regression tests cover concurrent admission,
+UTF-8 accounting, JSON expansion, and preservation of the previous report when
+publication exceeds its limit. Malformed quoting tests also check secret removal,
+nonsecret context preservation, parseable shell rendering and idempotence.
+
 Select `--backend auto|claude|codex`; `--prefer` orders auto preflight. Fallback is
 limited to missing binary/authentication before a CLI starts. Timeout, invalid
 output or uncertain execution after start never triggers replay on another CLI.

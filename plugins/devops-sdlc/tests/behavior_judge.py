@@ -12,6 +12,7 @@ import json
 import pathlib
 import sys
 import tempfile
+import threading
 import time
 from typing import Any
 
@@ -23,6 +24,14 @@ from redaction import redact_text as _redact_text  # noqa: E402
 
 MAX_AUDIT_CHARS = 4_000
 MAX_CANDIDATE_BYTES = 2_000_000
+# Fixed run limits; overflow is an error, never a truncated passing observation.
+MAX_CATALOG_BYTES = 1_000_000
+MAX_SCENARIOS = 128
+MAX_CALIBRATION = 16
+MAX_ID_BYTES = 256
+MAX_TOTAL_CANDIDATE_BYTES = 2_000_000
+MAX_TOTAL_ROW_BYTES = 6_000_000
+MAX_REPORT_BYTES = 8_000_000
 VERDICT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -34,6 +43,114 @@ VERDICT_SCHEMA = {
         "evidence": {"type": "string", "minLength": 1, "maxLength": 500},
     },
 }
+
+
+class EvidenceBudget:
+    """Shared admission before judging text or retaining worker results."""
+
+    def __init__(self, expected_rows: int = MAX_SCENARIOS + MAX_CALIBRATION) -> None:
+        if (
+            type(expected_rows) is not int
+            or not 1 <= expected_rows <= MAX_SCENARIOS + MAX_CALIBRATION
+        ):
+            raise ValueError("Invalid evidence row count")
+        self.lock = threading.Lock()
+        self.candidate_bytes = 0
+        self.row_bytes = 0
+        self.rows_remaining = expected_rows
+        self.row_limit = MAX_TOTAL_ROW_BYTES
+        # A control character uses six JSON bytes, the worst encoding of an ID byte.
+        stub = omitted_row(
+            "\x00" * MAX_ID_BYTES, "Aggregate row evidence limit exceeded"
+        )
+        self.stub_bytes = sum(
+            len(chunk) for chunk in encoded_chunks(stub, MAX_REPORT_BYTES)
+        )
+        if self.stub_bytes * expected_rows > self.row_limit:
+            raise ValueError("Row limit cannot reserve all omission records")
+
+    def admit_candidate(self, value: str) -> bool:
+        size = len(value.encode("utf-8"))
+        with self.lock:
+            if self.candidate_bytes + size > MAX_TOTAL_CANDIDATE_BYTES:
+                return False
+            self.candidate_bytes += size
+            return True
+
+    def admit_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            if self.rows_remaining < 1:
+                raise ValueError("Evidence row count exceeded")
+            identifier = row["id"]
+            if (
+                not isinstance(identifier, str)
+                or len(identifier.encode("utf-8")) > MAX_ID_BYTES
+            ):
+                raise ValueError("Identifier byte limit exceeded")
+            available = (
+                self.row_limit
+                - self.row_bytes
+                - self.stub_bytes * (self.rows_remaining - 1)
+            )
+            try:
+                size = sum(len(chunk) for chunk in encoded_chunks(row, available))
+            except ValueError:
+                row = omitted_row(identifier, "Aggregate row evidence limit exceeded")
+                size = sum(len(chunk) for chunk in encoded_chunks(row, available))
+            self.rows_remaining -= 1
+            self.row_bytes += size
+            return row
+
+
+def encoded_chunks(value: object, limit: int):
+    """Bound serialization while streaming; never materialize a whole report."""
+    total = 0
+    encoder = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"))
+    for chunk in encoder.iterencode(value):
+        data = chunk.encode("utf-8")
+        total += len(data)
+        if total > limit:
+            raise ValueError("Serialized evidence size limit exceeded")
+        yield data
+
+
+def omitted_row(identifier: str, reason: str) -> dict[str, Any]:
+    return {
+        "id": identifier,
+        "status": "ERROR",
+        "stage": "evidence",
+        "error": reason,
+        "candidate_evidence_omitted": True,
+        "omission_reason": reason,
+    }
+
+
+def collect_one(item: dict[str, Any], args: argparse.Namespace, calibration=False):
+    run = run_calibration if calibration else run_one
+    return args.evidence_budget.admit_row(run(item, args))
+
+
+def publish_report(args: argparse.Namespace, *values) -> bool:
+    try:
+        write_report(args, *values)
+    except (OSError, ValueError) as exc:
+        print(f"ERROR: report not published: {audit_text(str(exc))}", file=sys.stderr)
+        return False
+    return True
+
+
+def bounded_report_write(path: pathlib.Path, report: dict[str, Any]) -> None:
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+            temporary = pathlib.Path(stream.name)
+            for chunk in encoded_chunks(report, MAX_REPORT_BYTES - 1):
+                stream.write(chunk)
+            stream.write(b"\n")
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def digest(value: str) -> str:
@@ -76,8 +193,16 @@ def tree_hash(root: pathlib.Path, excluded_path: pathlib.Path | None = None) -> 
     return hasher.hexdigest()
 
 
+def catalog_text(path: pathlib.Path) -> str:
+    with path.open("rb") as stream:
+        raw = stream.read(MAX_CATALOG_BYTES + 1)
+    if len(raw) > MAX_CATALOG_BYTES:
+        raise ValueError("Catalog byte limit exceeded")
+    return raw.decode("utf-8")
+
+
 def load_catalog(path: pathlib.Path) -> dict[str, Any]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(catalog_text(path))
     if not isinstance(data, dict):
         raise ValueError("catalog must be an object")
     scenarios, mapping = data.get("scenarios"), data.get("requirement_map")
@@ -90,16 +215,23 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
         raise ValueError("catalog needs schema_version=1 and non-empty scenarios")
     if not isinstance(mapping, dict):
         raise ValueError("catalog needs requirement_map")
+    if len(scenarios) > MAX_SCENARIOS:
+        raise ValueError("Scenario count limit exceeded")
     ids = validate_scenarios(scenarios)
     if set(mapping) != ids or any(not strings(value) for value in mapping.values()):
         raise ValueError("requirement_map must cover every scenario")
     validate_calibration(data.get("calibration"), ids)
+    identifiers = ids | {case["id"] for case in data["calibration"]}
+    if any(len(value.encode("utf-8")) > MAX_ID_BYTES for value in identifiers):
+        raise ValueError("Identifier byte limit exceeded")
     return data
 
 
 def validate_calibration(calibration: object, scenario_ids: set[str]) -> None:
     if not isinstance(calibration, list) or not calibration:
         raise ValueError("calibration needs PASS and FAIL seeds")
+    if len(calibration) > MAX_CALIBRATION:
+        raise ValueError("Calibration count limit exceeded")
     ids = set(scenario_ids)
     outcomes: set[str] = set()
     for raw in calibration:
@@ -340,6 +472,11 @@ def run_one(scenario: dict[str, Any], args: argparse.Namespace) -> dict[str, Any
                 **error_row(scenario["id"], "runner", exc, started),
                 **cli_provenance(result, "runner_"),
             }
+        budget = getattr(args, "evidence_budget", None)
+        if budget is not None and not budget.admit_candidate(sanitized):
+            return omitted_row(
+                scenario["id"], "Aggregate candidate evidence limit exceeded"
+            )
         evidence = candidate_evidence(candidate, sanitized)
         review = _judge_prompt(scenario, sanitized)
         judged = invoke(review, args, workspace, observation_schema(scenario))
@@ -424,6 +561,16 @@ def write_report(
     }
     report = {
         "schema_version": 1,
+        "evidence_limits": {
+            "catalog_bytes": MAX_CATALOG_BYTES,
+            "scenario_count": MAX_SCENARIOS,
+            "calibration_count": MAX_CALIBRATION,
+            "candidate_bytes": MAX_CANDIDATE_BYTES,
+            "aggregate_candidate_bytes": MAX_TOTAL_CANDIDATE_BYTES,
+            "aggregate_row_bytes": MAX_TOTAL_ROW_BYTES,
+            "report_bytes": MAX_REPORT_BYTES,
+            "overflow": "ERROR; complete candidate evidence omitted, never truncated",
+        },
         "kind": "live-behavioral-simulation",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "provenance": {
@@ -444,7 +591,7 @@ def write_report(
         "results": rows,
         "calibration": calibration,
     }
-    args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    bounded_report_write(args.report, report)
 
 
 def audit_row(row: dict) -> dict:
@@ -457,11 +604,13 @@ def audit_row(row: dict) -> dict:
 
 
 def inputs_unchanged(args: argparse.Namespace) -> bool:
-    return getattr(args, "initial_hash", None) == tree_hash(
-        args.plugin_dir, args.report
-    ) and (
-        getattr(args, "initial_catalog", None)
-        == digest(args.scenarios.read_text(encoding="utf-8"))
+    try:
+        catalog_digest = digest(catalog_text(args.scenarios))
+    except (OSError, ValueError):
+        return False
+    return (
+        getattr(args, "initial_hash", None) == tree_hash(args.plugin_dir, args.report)
+        and getattr(args, "initial_catalog", None) == catalog_digest
     )
 
 
@@ -504,8 +653,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         catalog = load_catalog(args.scenarios)
         selected = select_scenarios(catalog, args.ids)
+        args.evidence_budget = EvidenceBudget(
+            len(selected) + (len(catalog["calibration"]) if args.calibrate else 0)
+        )
         args.initial_hash = tree_hash(args.plugin_dir, args.report)
-        args.initial_catalog = digest(args.scenarios.read_text(encoding="utf-8"))
+        args.initial_catalog = digest(catalog_text(args.scenarios))
         args.selection = runtime().select_backend(args.backend, args.prefer)
         if args.selection.get("status") != "READY":
             raise ValueError(args.selection.get("reason", "No authenticated CLI"))
@@ -517,18 +669,19 @@ def main(argv: list[str] | None = None) -> int:
         print("ERROR: full --require run needs --calibrate", file=sys.stderr)
         return 2
     calibration = (
-        [run_calibration(item, args) for item in catalog["calibration"]]
+        [collect_one(item, args, calibration=True) for item in catalog["calibration"]]
         if args.calibrate
         else []
     )
     if any(row["status"] != "PASS" for row in calibration):
-        write_report(args, catalog, version, [], calibration, inputs_unchanged(args))
+        publish_report(args, catalog, version, [], calibration, inputs_unchanged(args))
         print("Calibration failed; no scenarios evaluated.", file=sys.stderr)
         return 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        rows = list(pool.map(lambda item: run_one(item, args), selected))
+        rows = list(pool.map(lambda item: collect_one(item, args), selected))
     unchanged = inputs_unchanged(args)
-    write_report(args, catalog, version, rows, calibration, unchanged)
+    if not publish_report(args, catalog, version, rows, calibration, unchanged):
+        return 1
     if not unchanged:
         print("Plugin inputs changed during evaluation.", file=sys.stderr)
         return 1

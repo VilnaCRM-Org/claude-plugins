@@ -86,8 +86,10 @@ skill receives a verdict; no silent skips.
    caller flags do not sandbox Python or prove permissions. The helper checks
    grant bindings, protected source/toolchain, expiry and full STS identity before
    preview. Follow the [authorization contract](../../docs/preview-authorization.md);
-   absent/mismatched proof is BLOCKED, never a reason to self-issue a grant or run
-   fork code with credentials. Keep shared secrets KMS-encrypted; never use
+   absent/mismatched proof is BLOCKED. Record mismatched backends and preserve
+   the grant; never propose changing it to admit the rejected destination,
+   self-issue a grant or run fork code with credentials.
+   Keep shared secrets KMS-encrypted; never use
    `--show-secrets`, raw exports or plaintext state.
 5. Require actual preview and saved-plan provenance; reject placeholder preview
    files and metadata-only programs as deployment proof. Preserve test-to-prod

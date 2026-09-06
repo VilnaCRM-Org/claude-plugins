@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import unittest
 
 import redaction
@@ -34,6 +35,66 @@ class QuotedContextTests(unittest.TestCase):
                 )
                 self.assertEqual(redaction.redact_text(proposal), proposal)
                 self.assertEqual(redaction.redacted_source_spans(proposal), ())
+
+    def test_malformed_quote_wrappers_cannot_hide_nested_json_assignments(self):
+        for key in ("token", r"to\u006ben", r"db.pass\u0077ord"):
+            payload = '{"' + key + '": "ORCHID COBALT", "public": "READY"}'
+            for prefix, suffix in (
+                ('run "', '" now'),
+                ("run '", "' now"),
+                ('run prefix"', '" now'),
+                ('run "prefix', '" now'),
+                ('["', '"]'),
+                ('message="', '" now'),
+            ):
+                candidate = prefix + payload + suffix
+                with self.subTest(candidate=candidate):
+                    result = redaction.redact_text(candidate)
+                    self.assertEqual(redaction.redact_text(result), result)
+                    for output in self.surfaces(candidate):
+                        self.assertNotIn("ORCHID", output)
+                        self.assertNotIn("COBALT", output)
+                        self.assertIn("[REDACTED]", output)
+                    spans = redaction.redacted_source_spans(candidate)
+                    for fragment in ("ORCHID", "COBALT"):
+                        start = candidate.index(fragment)
+                        self.assertTrue(
+                            any(
+                                a <= start and start + len(fragment) <= b
+                                for a, b in spans
+                            )
+                        )
+
+    def test_single_quoted_backslash_is_literal_before_real_closer(self):
+        for name in ("api_key", "message=api_key"):
+            candidate = "'" + name + "=ORCHID\\' status=READY"
+            expected = "'" + name + "=[REDACTED]' status=READY"
+            with self.subTest(candidate=candidate):
+                result = redaction.redact_text(candidate)
+                self.assertEqual(result, expected)
+                self.assertEqual(
+                    shlex.split(result), [name + "=[REDACTED]", "status=READY"]
+                )
+                self.assertEqual(redaction.redact_text(result), result)
+                self.assertEqual(self.surfaces(candidate), self.surfaces(expected))
+                self.assertEqual(
+                    redaction.redacted_source_spans(candidate),
+                    ((0, candidate.index(" status=READY")),),
+                )
+        control = "'ordinary\\' status=READY"
+        self.assertEqual(redaction.redact_text(control), control)
+        self.assertEqual(redaction.redacted_source_spans(control), ())
+
+    def test_single_quoted_literal_backslash_retains_adjacent_secret_tails(self):
+        for tail in ("COBALT", '"COBALT QUARTZ"', "COBALT QUARTZ"):
+            candidate = "'api_key=ORCHID\\'" + tail
+            with self.subTest(candidate=candidate):
+                result = redaction.redact_text(candidate)
+                self.assertTrue(shlex.split(result))
+                self.assertEqual(redaction.redact_text(result), result)
+                for output in self.surfaces(candidate):
+                    for fragment in ("ORCHID", "COBALT", "QUARTZ"):
+                        self.assertNotIn(fragment, output)
 
     def test_standalone_quotes_arrays_and_apostrophes_never_hide_secrets(self):
         cases = (

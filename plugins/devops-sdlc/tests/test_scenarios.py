@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import copy
 import importlib.util
@@ -11,6 +12,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -737,6 +739,212 @@ print('bounded-redaction-PASS')
                     self.assertTrue(judge.inputs_unchanged(args))
                     report = json.loads(args.report.read_text())
                     self.assertIs(report["inputs_unchanged"], True)
+
+    def test_catalog_admission_bounds_bytes_counts_and_identifiers(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "catalog.json"
+            path.write_bytes(b" " * (judge.MAX_CATALOG_BYTES + 1))
+            with self.assertRaisesRegex(ValueError, "Catalog byte limit"):
+                judge.load_catalog(path)
+            for field, limit, count in (
+                ("scenarios", "MAX_SCENARIOS", len(self.catalog["scenarios"]) - 1),
+                ("calibration", "MAX_CALIBRATION", 1),
+                (None, "MAX_ID_BYTES", 1),
+            ):
+                with self.subTest(field=field), mock.patch.object(judge, limit, count):
+                    path.write_text(json.dumps(self.catalog))
+                    with self.assertRaisesRegex(ValueError, "limit exceeded"):
+                        judge.load_catalog(path)
+            path.write_text(json.dumps(self.catalog))
+            self.assertEqual(judge.load_catalog(path), self.catalog)
+
+    def test_catalog_growth_after_admission_fails_freshness_bounded(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.args()
+            args.scenarios = pathlib.Path(raw) / "catalog.json"
+            args.scenarios.write_text(json.dumps(self.catalog))
+            judge.load_catalog(args.scenarios)
+            args.scenarios.write_bytes(b" " * (judge.MAX_CATALOG_BYTES + 1))
+            with mock.patch.object(judge, "tree_hash") as tree_hash:
+                self.assertFalse(judge.inputs_unchanged(args))
+                tree_hash.assert_not_called()
+
+    def test_shared_candidate_admission_is_atomic_and_counts_redacted_utf8(self):
+        args = self.args()
+        args.evidence_budget = judge.EvidenceBudget()
+        barrier = threading.Barrier(4)
+        reviewed = []
+
+        def invoke(prompt, unused_args, workspace, schema, plugin=None):
+            if plugin is not None:
+                barrier.wait(timeout=5)
+                return self.completed({"response": "éé"})
+            reviewed.append(prompt)
+            return self.completed(self.verdict())
+
+        with (
+            mock.patch.object(judge, "MAX_TOTAL_CANDIDATE_BYTES", 8),
+            mock.patch.object(judge, "invoke", side_effect=invoke),
+            concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool,
+        ):
+            rows = list(
+                pool.map(lambda _: judge.collect_one(self.scenario, args), range(4))
+            )
+        self.assertEqual(len(reviewed), 2)
+        self.assertEqual(args.evidence_budget.candidate_bytes, 8)
+        self.assertEqual(sum(row["status"] == "PASS" for row in rows), 2)
+        for row in rows:
+            if row["status"] == "ERROR":
+                self.assertTrue(row["candidate_evidence_omitted"])
+                self.assertNotIn("candidate_evidence", row)
+            else:
+                self.assertEqual(row["candidate_evidence"]["text"], "éé")
+                self.assertEqual(
+                    row["candidate_evidence"]["sha256"], judge.digest("éé")
+                )
+
+    def test_aggregate_admission_uses_expanded_sanitized_text(self):
+        args = self.args()
+        args.evidence_budget = judge.EvidenceBudget()
+        candidate = "token=x"
+        with (
+            mock.patch.object(judge, "MAX_TOTAL_CANDIDATE_BYTES", len(candidate)),
+            mock.patch.object(
+                judge, "invoke", return_value=self.completed({"response": candidate})
+            ) as invoke,
+        ):
+            row = judge.collect_one(self.scenario, args)
+        invoke.assert_called_once()
+        self.assertEqual(row["status"], "ERROR")
+        self.assertTrue(row["candidate_evidence_omitted"])
+        self.assertEqual(args.evidence_budget.candidate_bytes, 0)
+
+    def test_row_admission_counts_json_escaping_and_concurrent_metadata(self):
+        row = {"id": "fixture", "status": "PASS", "metadata": "\x00" * 2000}
+        size = len(b"".join(judge.encoded_chunks(row, 100000)))
+        self.assertGreater(
+            size, len(json.dumps(row, ensure_ascii=False).replace("\\u0000", "x"))
+        )
+        with mock.patch.object(judge, "MAX_TOTAL_ROW_BYTES", size * 2):
+            budget = judge.EvidenceBudget(expected_rows=8)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            rows = list(pool.map(budget.admit_row, [row] * 8))
+        self.assertEqual(len(rows), 8)
+        self.assertTrue(any(item["status"] == "PASS" for item in rows))
+        self.assertTrue(any(item["status"] == "ERROR" for item in rows))
+        retained = sum(
+            len(chunk) for item in rows for chunk in judge.encoded_chunks(item, 100000)
+        )
+        self.assertEqual(budget.row_bytes, retained)
+        self.assertLessEqual(retained, size * 2)
+        self.assertEqual(budget.rows_remaining, 0)
+        for omitted in (item for item in rows if item["status"] == "ERROR"):
+            self.assertTrue(omitted["candidate_evidence_omitted"])
+            self.assertNotIn("metadata", omitted)
+        with self.assertRaisesRegex(ValueError, "row count exceeded"):
+            budget.admit_row(row)
+
+    def test_omission_headroom_covers_worst_encoded_ids_and_rejects_tiny_limit(self):
+        with mock.patch.object(judge, "MAX_TOTAL_ROW_BYTES", 116):
+            with self.assertRaisesRegex(ValueError, "reserve all omission"):
+                judge.EvidenceBudget(expected_rows=3)
+        identifier = "\x00" * judge.MAX_ID_BYTES
+        budget = judge.EvidenceBudget(expected_rows=3)
+        # Full rows cannot displace reserved space for omission stubs.
+        with mock.patch.object(judge, "MAX_TOTAL_ROW_BYTES", budget.stub_bytes * 3):
+            budget = judge.EvidenceBudget(expected_rows=3)
+        rows = [
+            budget.admit_row({"id": identifier, "status": "PASS", "extra": "x" * 10000})
+            for _ in range(3)
+        ]
+        self.assertTrue(all(row["status"] == "ERROR" for row in rows))
+        self.assertEqual(budget.row_bytes, budget.row_limit)
+        self.assertEqual(
+            budget.row_bytes,
+            sum(
+                len(chunk)
+                for row in rows
+                for chunk in judge.encoded_chunks(row, budget.row_limit)
+            ),
+        )
+
+    def test_invalid_budget_count_or_identifier_does_not_consume_reservation(self):
+        for count in (0, True, judge.MAX_SCENARIOS + judge.MAX_CALIBRATION + 1):
+            with (
+                self.subTest(count=count),
+                self.assertRaisesRegex(ValueError, "row count"),
+            ):
+                judge.EvidenceBudget(expected_rows=count)
+        budget = judge.EvidenceBudget(expected_rows=1)
+        with self.assertRaisesRegex(ValueError, "Identifier byte limit"):
+            budget.admit_row({"id": "é" * judge.MAX_ID_BYTES, "status": "PASS"})
+        self.assertEqual(budget.rows_remaining, 1)
+        self.assertEqual(budget.row_bytes, 0)
+
+    def test_report_overflow_preserves_existing_file_and_cleans_temporary(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.args()
+            args.report = pathlib.Path(raw) / "report.json"
+            args.report.write_bytes(b"historical report")
+            with (
+                mock.patch.object(judge, "MAX_REPORT_BYTES", 100),
+                contextlib.redirect_stderr(io.StringIO()) as stderr,
+            ):
+                self.assertFalse(
+                    judge.publish_report(args, self.catalog, "fixture", [], [], True)
+                )
+            self.assertIn("report not published", stderr.getvalue())
+            self.assertEqual(args.report.read_bytes(), b"historical report")
+            self.assertEqual(list(pathlib.Path(raw).iterdir()), [args.report])
+
+    def test_full_catalog_synthetic_candidates_fit_without_truncation(self):
+        args = self.args()
+        args.evidence_budget = judge.EvidenceBudget()
+        text = "Observed local proposal. " * 500
+        with mock.patch.object(
+            judge,
+            "invoke",
+            side_effect=lambda *a, **k: self.completed(
+                {"response": text} if len(a) == 5 else self.verdict()
+            ),
+        ):
+            # Shared observation keys isolate storage from scoring in this fixture.
+            rows = [
+                judge.collect_one({**self.scenario, "id": case["id"]}, args)
+                for case in self.catalog["scenarios"]
+            ]
+        self.assertTrue(all(row["status"] == "PASS" for row in rows))
+        with tempfile.TemporaryDirectory() as raw:
+            args.report = pathlib.Path(raw) / "report.json"
+            judge.write_report(args, self.catalog, "fixture", rows, [], True)
+            report = json.loads(args.report.read_bytes())
+            self.assertLessEqual(args.report.stat().st_size, judge.MAX_REPORT_BYTES)
+        self.assertTrue(report["full_catalog"])
+        self.assertTrue(
+            all(row["candidate_evidence"]["text"] == text for row in report["results"])
+        )
+
+    def test_main_row_overflow_is_error_and_nonzero(self):
+        adapter = mock.Mock()
+        adapter.select_backend.return_value = {"status": "READY", "version": "fixture"}
+        row = {"id": self.scenario["id"], "status": "PASS", "metadata": "x" * 5000}
+        with tempfile.TemporaryDirectory() as raw:
+            report_path = pathlib.Path(raw) / "report.json"
+            with (
+                mock.patch.object(judge, "runtime", return_value=adapter),
+                mock.patch.object(judge, "run_one", return_value=row),
+                mock.patch.object(judge, "MAX_TOTAL_ROW_BYTES", 2000),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                status = judge.main(
+                    ["--ids", self.scenario["id"], "--report", str(report_path)]
+                )
+            report = json.loads(report_path.read_bytes())
+        self.assertEqual(status, 1)
+        self.assertEqual(report["counts"]["ERROR"], 1)
+        self.assertEqual(report["counts"]["PASS"], 0)
+        self.assertFalse(report["provenance"]["live"])
+        self.assertTrue(report["results"][0]["candidate_evidence_omitted"])
 
     def test_unavailable_and_required_calibration_fail_closed(self):
         adapter = mock.Mock()

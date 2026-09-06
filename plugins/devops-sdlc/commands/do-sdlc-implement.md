@@ -127,7 +127,8 @@ Never infer approval from labels, timeouts, profile flags or passing tests.
    attempts.json_path,exact_key,used/5,remaining,owner,token`.
    Copy reservation observations from sole authority `attempts.json`; exhausted
    stays 5/5, remaining 0. Unknowns explicit; proposals claim no execution/write.
-   Also report files, backend/model, risks, Ralph exit and parent/operator handoff
+   Also report files, backend, CLI version, preflight fallback reason, model,
+   risks, Ralph exit and parent/operator handoff
    evidence. Preserve counters/gates when routing failures.
 
 ## Loop & exit condition

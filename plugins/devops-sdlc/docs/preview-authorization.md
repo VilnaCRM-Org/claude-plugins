@@ -49,7 +49,7 @@ field with its required JSON type; extra fields are rejected. The issuer records
 | `issuer`, `actor`, `actor_uid` | Nonempty issuer and initiating actor identities, plus the exact worker's integer UID. |
 | `repo_path`, `repository`, `git_sha` | Exact checkout path, profile `owner/name`, and current Git revision. |
 | `operation_sha256` | Stable hash emitted by the helper's reviewed intention for this source, profile, target, environment and argv. |
-| `backend`, `account_id` | Exact approved destination URI and selected AWS account; another bucket, path or host requires new authorization. |
+| `backend`, `account_id` | Exact approved destination URI and selected AWS account. A mismatch rejects this operation; preserve the existing grant. |
 | `principal_arn`, `principal_id`, `access_key_id` | Exact temporary assumed-role ARN, STS UserId and temporary access-key identifier. Never include a secret key or session token. |
 | `issued_at`, `expires_at`, `credentials_expire_at` | Integer Unix seconds. Grant validity is at most 900 seconds; credential expiry is at most 3600 seconds after issue. The requested timeout must fit entirely before both expiries. |
 | `source_trusted`, `fork`, `read_only_role_verified` | Issuer-verified `true`, `false`, `true`; worker or repository assertions cannot supply this authority. |
@@ -75,6 +75,11 @@ credential-profile configuration do not reach the preview environment.
 Missing, changed, expired or mismatched authorization blocks preview before
 Pulumi starts. Preserve the rejection and sanitized authorization hash; never
 rewrite a grant, relax its permissions, substitute a backend, or invoke raw
-Pulumi to bypass the guard. The result remains COMPLETED/UNVERIFIED until actual
+Pulumi to bypass the guard. Record both destinations on mismatch. Do not propose
+editing, reissuing or broadening authorization to fit the rejected destination.
+A separately authorized profile correction may restore the already approved
+backend, but needs fresh source, operation and grant validation before execution.
+A genuinely new destination belongs to a separate authorization workflow, never
+a workaround for this failed gate. The result remains COMPLETED/UNVERIFIED until actual
 preview output has independent semantic validation. No local test or grant
 validation establishes cloud deployment, rollback or recovery success.
