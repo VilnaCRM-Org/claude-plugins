@@ -361,10 +361,12 @@ class RuntimeTests(unittest.TestCase):
                 with (
                     self.subTest(version=version, operation=operation_present),
                     mock.patch.object(runtime, "build_plan") as rebuild,
-                    self.assertRaisesRegex(runtime.Invalid, "schema 2.*regenerate"),
                 ):
-                    runtime.verify_plan(self.root, filename, now=1001)
-                rebuild.assert_not_called()
+                    with self.assertRaisesRegex(
+                        runtime.Invalid, "schema 2.*regenerate"
+                    ):
+                        runtime.verify_plan(self.root, filename, now=1001)
+                    rebuild.assert_not_called()
         missing_operation = copy.deepcopy(plan)
         missing_operation.pop("operation_sha256")
         self.put(filename, json.dumps(missing_operation))

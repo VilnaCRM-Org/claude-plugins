@@ -17,18 +17,15 @@ an independent counter writer. For a verified fresh task, the caller
 initializes its new sidecar under lock before creating the first human summary,
 following the agent guide's atomic transaction. An existing summary with no
 sidecar requires verified locked migration; never reset it to zero.
-Resolve the installed/source plugin directory once; set `DEVOPS_PLUGIN_ROOT`
-to its absolute path in the command environment and record it. Native Claude may initialize it from
-`CLAUDE_PLUGIN_ROOT`; Codex must receive the explicit inspected plugin path.
-Verify its manifest and helper scripts before use; do not infer it from the
-project working directory. Native Claude aliases below identify command files;
-in Codex, read and follow those files explicitly using this root. They are not
-native Codex slash commands. Follow the [backend guide](../skills/AI-AGENT-GUIDE.md)
+Once, set and record `DEVOPS_PLUGIN_ROOT` in the command environment as the
+inspected installed/source plugin's absolute path. Native Claude may use `CLAUDE_PLUGIN_ROOT`; Codex needs the explicit path.
+Verify its `.claude-plugin/plugin.json` and readable Python helpers (no executable
+bit needed); do not infer it from the project working directory. Aliases identify
+command files, not native Codex commands; Codex reads and follows them via this root. Follow the [backend guide](../skills/AI-AGENT-GUIDE.md)
 for authenticated selection and preserve the same stage state across handoffs.
-First resolve the task repository as the working directory for all `--repo .`
-commands and the profile destination. Static discovery does not need a profile.
-Only setup creates an absent `.claude/devops-sdlc.json`; every other stage routes
-an absent profile to setup and waits for its result. Then validate the profile
+Use the resolved task repository as cwd for `--repo .` and the profile.
+Static discovery needs no profile.
+Only setup creates `.claude/devops-sdlc.json`; other stages wait for setup if absent. Then validate the profile
 using `python3 "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`
 before any repository-provided code, tests or operational command executes.
 Select target IDs and environments explicitly named by the user's task or its
@@ -51,9 +48,7 @@ If the argument is absent, use only an unambiguous selector in the accepted task
 summary; missing or conflicting identity means BLOCKED. Overwrite these
 task-local variables from the verified input before use, too.
 
-Verify `$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json` and readable Python
-helper files; Python invocation needs no executable bit. Check the prerequisites
-listed below; a missing item immediately produces BLOCKED with the item name
+Check the prerequisites listed below; a missing item immediately produces BLOCKED with the item name
 and observed failure, without retries. A required independent role must be
 available as a separate invocable agent/session in the host's tool inventory.
 If that capability or the role definition is absent, immediately BLOCK that
@@ -88,18 +83,22 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    tooling. Invocation to finish a draft PR authorizes creation/update for the
    specified branch within the user's existing publication scope. If publication
    is explicitly excluded, prepare the complete local result and mark this gate
-   BLOCKED. Push only the intended branch. Search for an existing PR matching
-   repository/base/head before creation. For a verified branch with no matching
-   PR, use `gh pr create --repo "$DEVOPS_APPROVED_GITHUB_REPO" --head "$DEVOPS_APPROVED_HEAD_BRANCH" --base <verified-base> --draft --body-file <path>`;
-   capture and verify the returned PR URL, then replace the selector with its
-   PR number. A missing explicitly requested PR is BLOCKED, not a creation request.
-   For a matching non-draft PR, restore draft with
+   BLOCKED. Before mutations, for branch input find PRs by verified repository/head;
+   ambiguity is BLOCKED. For an existing PR, resolve repository, number,
+   baseRefName, head branch and SHA with
+   `gh pr view "$DEVOPS_APPROVED_PR_SELECTOR" --repo "$DEVOPS_APPROVED_GITHUB_REPO" --json number,url,baseRefName,headRefName,headRefOid`.
+   Match authorized input; set the selector to its PR number and take baseRefName.
+   With no PR for a branch, use only the base from user authorization or accepted
+   task summary;
+   verify it exists in the approved repository. Overwrite task-local
+   `DEVOPS_APPROVED_BASE_BRANCH` with this verified base. Missing/conflicting base: BLOCKED; no defaults.
+   Push only the intended branch. For a verified branch without a PR, use
+   `gh pr create --repo "$DEVOPS_APPROVED_GITHUB_REPO" --head "$DEVOPS_APPROVED_HEAD_BRANCH" --base "$DEVOPS_APPROVED_BASE_BRANCH" --draft --body-file <path>`;
+   verify the returned repository/base/head and PR URL, then replace the selector
+   with its PR number. An explicitly requested but missing PR is BLOCKED; do not create it.
+   Restore a matching non-draft PR to draft with
    `gh pr ready "$DEVOPS_APPROVED_PR_SELECTOR" --repo "$DEVOPS_APPROVED_GITHUB_REPO" --undo`.
-2. Resolve repository, PR number, head branch and head SHA with
-   `gh pr view "$DEVOPS_APPROVED_PR_SELECTOR" --repo "$DEVOPS_APPROVED_GITHUB_REPO"`.
-   Verify them against the authorized input before proceeding, then use the
-   resolved PR number as the selector for all subsequent reads and mutations.
-   Query `gh pr checks "$DEVOPS_APPROVED_PR_SELECTOR" --repo "$DEVOPS_APPROVED_GITHUB_REPO"` plus `gh api --hostname github.com`
+2. Query `gh pr checks "$DEVOPS_APPROVED_PR_SELECTOR" --repo "$DEVOPS_APPROVED_GITHUB_REPO"` plus `gh api --hostname github.com`
    `"repos/$DEVOPS_APPROVED_GITHUB_OWNER/$DEVOPS_APPROVED_GITHUB_NAME/..."` check-run/status APIs for the head, using pagination and required-check
    configuration. Every `gh pr` call uses `--repo "$DEVOPS_APPROVED_GITHUB_REPO"`; every `gh api`
    call uses `--hostname github.com`. REST routes include the verified owner/name;
