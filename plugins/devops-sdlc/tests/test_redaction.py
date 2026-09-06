@@ -188,6 +188,23 @@ class RedactionBoundaryTests(unittest.TestCase):
         ):
             self.assertEqual(redaction.redact_text(candidate), candidate)
 
+    def test_quoted_nonsecret_assignments_do_not_consume_later_secret_controls(self):
+        cases = (
+            'argv=["make", "terraspace-validate", "env=development"] token=ORCHID',
+            'message="unrecognized arguments: \'--profile\'" token=ORCHID',
+            'python="self.assertIn(\'validate\', output)" token=ORCHID',
+        )
+        for candidate in cases:
+            with self.subTest(candidate=candidate):
+                result = redaction.redact_text(candidate)
+                self.assertIn("[REDACTED]", result)
+                self.assertNotIn("ORCHID", result)
+                self.assertIn("token=", result)
+                self.assertEqual(redaction.redact_text(result), result)
+                for output in self.surfaces(candidate):
+                    self.assertNotIn("ORCHID", output)
+                    self.assertIn("[REDACTED]", output)
+
     def test_invalid_public_json_tail_cannot_hide_escaped_secret_keys(self):
         for tail in (
             r' "\u0074oken":"ORCHID COBALT"}',
@@ -246,6 +263,19 @@ for n in (1000, 4000, 16000):
     text = 'key=' + ('nested=' * n) + 'api_token=ORCHID\\nusername=alice'
     result = redact_text(text)
     assert 'ORCHID' not in result and 'username=alice' in result
+    text = 'token=' + escaped_quote + ('ORCHID ' * n) + escaped_quote
+    assert 'ORCHID' not in redact_text(text)
+    text = 'token=' + escaped_quote + ('ORCHID ' * n)
+    assert 'ORCHID' not in redact_text(text)
+    text = '[' + ','.join('"env=development"' for _ in range(n)) + ']'
+    assert redact_text(text) == text
+    text += '\\ntoken=ORCHID\\nFinal SAFE'
+    result = redact_text(text)
+    assert 'ORCHID' not in result and result.endswith('Final SAFE')
+    text = "Don't " * n + 'token=ORCHID'
+    assert 'ORCHID' not in redact_text(text)
+    text = '[' + ','.join('"token=ORCHID"' for _ in range(n)) + ']'
+    assert 'ORCHID' not in redact_text(text)
 print('bounded-redaction-PASS')
 """
         result = subprocess.run(

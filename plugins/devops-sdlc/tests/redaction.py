@@ -18,6 +18,7 @@ KEY_ASSIGNMENT_RE = re.compile(
     r"|(?<![a-z0-9_-])(?P<name>\"[a-z0-9_-]+\"|'[a-z0-9_-]+'|[a-z0-9_-]+)"
     r"\s*[:=]"
 )
+SOURCE_TOKEN_RE = re.compile(KEY_ASSIGNMENT_RE.pattern + r"|(?P<quote>[\"'])")
 SECRET_MARKERS = ("api_key", "api-key", "apikey", "secret", "token", "password")
 
 
@@ -115,6 +116,58 @@ def _value_start(value: str, cursor: int) -> int:
     return cursor
 
 
+def _standalone_tail_is_valid(value: str, end: int) -> bool:
+    """Trust literal delimiters or a separate assignment after a quoted string."""
+    following = _value_start(value, end)
+    return (
+        following == len(value)
+        or value[following] in ",]})"
+        or (following > end and KEY_ASSIGNMENT_RE.match(value, following) is not None)
+    )
+
+
+def _standalone_string_edit(value: str, start: int) -> tuple[int, str] | None:
+    """Decode quoted code/prose and argv elements before inspecting assignments.
+
+    Only complete strings have trustworthy closers. Named secrets in malformed
+    or concatenated strings retain conservative tail masking. Natural-language
+    apostrophes and escaped quotes cannot open standalone string envelopes.
+    """
+    previous = value[start - 1] if start else ""
+    if previous.isalnum() or previous in ("_", "\\"):
+        return None
+    quote = value[start]
+    end = start + 1
+    while end < len(value):
+        if value[end] == "\\":
+            end += 2
+            continue
+        if value[end] == quote:
+            end += 1
+            break
+        end += 1
+    else:
+        return None
+    source = value[start:end]
+    try:
+        decoded = json.loads(source) if quote == '"' else decode_shell_word(source)
+    except (ValueError, RecursionError):
+        return (len(value), '"[REDACTED]"') if _has_secret_assignment(source) else None
+    if _has_secret_assignment(decoded) and not _standalone_tail_is_valid(value, end):
+        return len(value), '"[REDACTED]"'
+    redacted = _redact_assignments(decoded, decode_strings=False)
+    if redacted == decoded:
+        return end, source
+    rendered = (
+        json.dumps(redacted, ensure_ascii=False)
+        .encode("utf-8", errors="backslashreplace")
+        .decode("utf-8")
+        if quote == '"'
+        else shlex.quote(redacted)
+    )
+    return end, rendered
+
+
 def _assignment_edit(
     value: str, match: re.Match[str], decode_strings: bool
 ) -> tuple[int, int, str] | None:
@@ -147,9 +200,15 @@ def _scan_assignments(
     chunks = []
     changed = []
     cursor = emitted = 0
-    while match := KEY_ASSIGNMENT_RE.search(value, cursor):
+    tokens = SOURCE_TOKEN_RE if decode_strings else KEY_ASSIGNMENT_RE
+    while match := tokens.search(value, cursor):
         cursor = match.end()
-        edit = _assignment_edit(value, match, decode_strings)
+        if decode_strings and match["quote"] is not None:
+            start = match.start()
+            string = _standalone_string_edit(value, start)
+            edit = (start, *string) if string is not None else None
+        else:
+            edit = _assignment_edit(value, match, decode_strings)
         if edit is not None:
             start, end, replacement = edit
             chunks.extend((value[emitted:start], replacement))

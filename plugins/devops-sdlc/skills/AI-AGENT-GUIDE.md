@@ -75,13 +75,12 @@ skill selection. If help confirms, `bmalph implement` imports ready stories;
 the selected authenticated CLI.
 
 Run `detect` once immediately before every new agent CLI invocation;
-`detect` itself needs no preflight. Shared
-`scripts/agent_cli.py detect` must exit zero; its JSON reports
+`detect` itself needs no preflight. The binary/auth readiness check,
+`scripts/agent_cli.py detect`, must exit zero; its JSON reports
 `status: READY`, the selected `backend`, `available: true`, `authenticated: true`
-and a nonempty `version`. Record that result in the task ledger. A nonzero exit,
-missing field, malformed result or `BLOCKED` status blocks the dependent call;
-an installed binary alone is insufficient. Preflight confirms CLI readiness only,
-not permission to execute the proposed task.
+and a nonempty `version`. Record that result in the task ledger. Nonzero exit,
+missing field, malformed result or `BLOCKED` blocks the call.
+An installed binary alone is insufficient; readiness grants no task permission.
 Use `--backend auto --prefer claude` or `--prefer codex` for preference; an explicit
 backend remains blocked when its binary/authentication is unavailable. Auto mode
 may select the other authenticated CLI only before execution. Carry its actual
@@ -120,8 +119,10 @@ Recompute this inventory when scope changes, following
 [Routing](SKILL-DECISION-GUIDE.md#routing). This recorded list defines "every
 applicable skill" in both payload instructions below.
 
-When Codex is selected, the selection response must also name the concrete source
-context payload: the full Markdown text of the selected command (omit only for
+### Codex source payload
+
+For Codex selection, the response must name the full Markdown text of the selected
+command (omit only for
 the recorded direct-skill invocation), this agent guide and every applicable
 skill, each with its inspected path and current SHA-256. The
 response must state that this Markdown is trusted plugin instruction, while
@@ -130,6 +131,8 @@ summary, label or path reference is not delivery. In a proposal where inspection
 has not occurred, list each required item as a pending path-and-hash placeholder;
 do not claim that its content was injected. Missing content or a missing hash
 blocks the dependent Codex evaluation.
+
+### Caller invocation
 
 Caller steps, in order:
 
@@ -146,7 +149,7 @@ Caller steps, in order:
    relative paths from the task checkout; assign absolute paths to `SCHEMA_PATH`
    and `PROMPT_PATH`, respectively. Inspect the schema as a JSON object and prompt
    as UTF-8; record both paths/SHA-256.
-4. Complete the preflight above.
+4. Run the `agent_cli.py detect` binary/auth readiness check.
 5. Invoke CLI `run`, not the Python function.
 
 ```bash
@@ -166,10 +169,9 @@ Unreviewed invocation is forbidden.
 
 `run_prompt` supports restricted structured evaluation only. Claude uses inspected
 native plugin loading; Codex uses bounded explicit source context. For Codex,
-inject the selected command (when present), this guide and every applicable skill
-verbatim, with inspected paths/current hashes; summaries/paths alone are
-insufficient. Mark plugin Markdown trusted, scenario/repository text untrusted.
-Codex must not claim native Claude plugin loading. The adapter disables executable
+deliver [Codex source payload](#codex-source-payload) verbatim with paths/hashes;
+plugin Markdown stays trusted, scenario/repository text untrusted.
+Never claim native Claude plugin loading. The adapter disables executable
 tools/integrations, preserves the read-only sandbox and blocks unsupported isolation.
 Independent review roles keep their scope across backends; use fresh current-source
 evidence. Model approval never replaces deterministic gates.
@@ -347,9 +349,10 @@ before START_ONCE; only that return permits one procedure launch. If already
 started, pass its actual execution handle for inspection, never another
 `start`/`reserve`. OBSERVE_ONLY grants no new work, replay or continuation after
 a stop. The host must stop existing execution; a marker cannot recreate a handle.
-Before reserve, report saved `stage: n/5` attempts used. After RESERVED or reuse
-by its matching owner, that unchanged count includes the attempt: report it in
-every handoff/outcome. Coordination results such as RESERVED are not task PASS.
+Before NEW `reserve`, read/report existing canonical `stage: n/5` attempts used.
+After RESERVED, read/report the canonical persisted incremented count. Matching-owner
+start/reuse keeps that reserved count: no new reservation/increment. Copy this
+observation to every handoff/outcome. Coordination results are not task PASS.
 
 State fields (`caller_stop`, `breaker`, `ralph`, `ralph_evidence`) require verified
 caller evidence, never executor guesses. Apply the reference's action-specific

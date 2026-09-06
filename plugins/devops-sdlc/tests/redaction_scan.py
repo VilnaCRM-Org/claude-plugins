@@ -60,13 +60,19 @@ def secret_value_end(value: str, start: int, json_value: bool = False) -> int:
         else start
     )
     quote = ""
+    encoded_quote = False
     while cursor < len(value):
         char = value[cursor]
         if char == "\\":
+            following = value[cursor + 1 : cursor + 2]
+            if encoded_quote and following == quote:
+                quote, encoded_quote = "", False
+            elif not quote and following in ('"', "'"):
+                quote, encoded_quote = following, True
             cursor = min(cursor + 2, len(value))
             continue
         if quote:
-            if char == quote:
+            if char == quote and not encoded_quote:
                 quote = ""
         elif char in "\"'":
             quote = char

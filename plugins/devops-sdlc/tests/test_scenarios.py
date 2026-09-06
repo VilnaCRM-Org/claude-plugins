@@ -278,6 +278,54 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(row["status"], "ERROR")
         self.assertEqual(row["stage"], "judge")
 
+    def test_complete_sanitized_candidate_is_retained_on_success_and_judge_error(self):
+        candidate = "Proposed validation. " * 300 + "\ntoken=ORCHID\nLAST_OBSERVATION"
+        for judged in (self.completed(self.verdict()), {"status": "TIMEOUT"}):
+            with self.subTest(judged=judged):
+                with mock.patch.object(
+                    judge,
+                    "invoke",
+                    side_effect=[self.completed({"response": candidate}), judged],
+                ) as invoke:
+                    row = judge.run_one(self.scenario, self.args())
+                evidence = row["candidate_evidence"]
+                text = evidence["text"]
+                self.assertIn("LAST_OBSERVATION", text)
+                self.assertNotIn("ORCHID", json.dumps(row))
+                self.assertEqual(evidence["sha256"], judge.digest(text))
+                self.assertEqual(evidence["original_chars"], len(candidate))
+                self.assertEqual(evidence["redacted_chars"], len(text))
+                self.assertIs(evidence["changed_by_redaction"], True)
+                submitted = invoke.call_args_list[1].args[0]
+                self.assertTrue(submitted.endswith("CANDIDATE: " + text))
+                self.assertEqual(row["judge_prompt_sha256"], judge.digest(submitted))
+                self.assertEqual(len(row["runner_output"]), judge.MAX_AUDIT_CHARS)
+
+    def test_candidate_evidence_size_limit_counts_utf8_bytes_before_judge(self):
+        candidate = "\u00e9" * (judge.MAX_CANDIDATE_BYTES // 2 + 1)
+        with mock.patch.object(
+            judge, "invoke", return_value=self.completed({"response": candidate})
+        ) as invoke:
+            row = judge.run_one(self.scenario, self.args())
+        self.assertEqual(row["status"], "ERROR")
+        self.assertEqual(row["stage"], "runner")
+        self.assertEqual(invoke.call_count, 1)
+        self.assertNotIn("candidate_evidence", row)
+
+    def test_redaction_expansion_cannot_exceed_complete_evidence_limit(self):
+        candidate = "token=x " * 20
+        with (
+            mock.patch.object(judge, "MAX_CANDIDATE_BYTES", len(candidate.encode())),
+            mock.patch.object(
+                judge, "invoke", return_value=self.completed({"response": candidate})
+            ) as invoke,
+        ):
+            row = judge.run_one(self.scenario, self.args())
+        self.assertEqual(row["status"], "ERROR")
+        self.assertIn("Sanitized response exceeds", row["error"])
+        self.assertEqual(invoke.call_count, 1)
+        self.assertNotIn("candidate_evidence", row)
+
     def test_always_pass_calibration_rejected(self):
         for case in self.catalog["calibration"]:
             verdict = {

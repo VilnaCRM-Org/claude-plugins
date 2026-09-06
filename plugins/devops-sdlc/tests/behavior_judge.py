@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 from redaction import redact_text as _redact_text  # noqa: E402
 
 MAX_AUDIT_CHARS = 4_000
+MAX_CANDIDATE_BYTES = 2_000_000
 VERDICT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -45,6 +46,18 @@ def redact_text(value: str) -> str:
 
 def audit_text(value: str) -> str:
     return redact_text(value)[:MAX_AUDIT_CHARS]
+
+
+def candidate_evidence(candidate: str, sanitized: str) -> dict[str, Any]:
+    """Retain the complete sanitized judge input, never raw candidate text."""
+    return {
+        "text": sanitized,
+        "sha256": digest(sanitized),
+        "digest_scope": "complete redacted UTF-8 candidate submitted to judge adapter",
+        "original_chars": len(candidate),
+        "redacted_chars": len(sanitized),
+        "changed_by_redaction": sanitized != candidate,
+    }
 
 
 def tree_hash(root: pathlib.Path, excluded_path: pathlib.Path | None = None) -> str:
@@ -246,8 +259,12 @@ def runner_prompt(scenario: dict[str, Any]) -> str:
 
 
 def judge_prompt(scenario: dict[str, Any], candidate: str) -> str:
+    return _judge_prompt(scenario, redact_text(candidate))
+
+
+def _judge_prompt(scenario: dict[str, Any], candidate: str) -> str:
+    """Build the judge request from an already sanitized candidate."""
     data = {key: scenario[key] for key in ("id", "prompt", "must", "must_not")}
-    candidate = redact_text(candidate)
     return "\n".join(
         [
             "Independently score proposed DevOps behavior in a behavioral simulation.",
@@ -313,18 +330,26 @@ def run_one(scenario: dict[str, Any], args: argparse.Namespace) -> dict[str, Any
             candidate = json.loads(envelope_result(result_envelope(result)))["response"]
             if not isinstance(candidate, str) or not candidate.strip():
                 raise ValueError("Runner returned no response")
+            if len(candidate.encode("utf-8")) > MAX_CANDIDATE_BYTES:
+                raise ValueError("Runner response exceeds the evidence size limit")
+            sanitized = redact_text(candidate)
+            if len(sanitized.encode("utf-8")) > MAX_CANDIDATE_BYTES:
+                raise ValueError("Sanitized response exceeds the evidence size limit")
         except (KeyError, TypeError, ValueError) as exc:
             return {
                 **error_row(scenario["id"], "runner", exc, started),
                 **cli_provenance(result, "runner_"),
             }
-        review = judge_prompt(scenario, candidate)
+        evidence = candidate_evidence(candidate, sanitized)
+        review = _judge_prompt(scenario, sanitized)
         judged = invoke(review, args, workspace, observation_schema(scenario))
         try:
             verdict = parse_verdict(result_envelope(judged), scenario)
         except (KeyError, TypeError, ValueError) as exc:
             row = error_row(scenario["id"], "judge", exc, started)
             row["runner_output"] = audit_text(candidate)
+            row["candidate_evidence"] = evidence
+            row["judge_prompt_sha256"] = digest(review)
             row.update(cli_provenance(result, "runner_"))
             row.update(cli_provenance(judged, "judge_"))
             return row
@@ -334,6 +359,8 @@ def run_one(scenario: dict[str, Any], args: argparse.Namespace) -> dict[str, Any
         "verdict": verdict,
         "runner_prompt": audit_text(prompt),
         "runner_output": audit_text(candidate),
+        "candidate_evidence": evidence,
+        "judge_prompt_sha256": digest(review),
         "judge_prompt": audit_text(review),
         "judge_output": verdict,
         **cli_provenance(result, "runner_"),
