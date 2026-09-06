@@ -116,9 +116,11 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    its remaining budget; counters survive every loop and resumed session.
 6. Run `/devops-sdlc:do-sdlc-finish-pr`. SUCCESS requires a draft PR for the
    verified head, all applicable checks green, required live QA and judges
-   passed, and zero unresolved applicable review threads. Missing credentials,
-   empty checks, stale evidence, skipped required cases or missing review data
-   produce BLOCKED or FAILED, never SUCCESS.
+   passed, and zero unresolved applicable review threads. First apply the iteration
+   guard's budget/stop/breaker precedence. Otherwise, an observed required-gate
+   failure means FAILED; without one, missing credentials, empty/pending checks,
+   stale evidence, skipped required cases or missing review data mean BLOCKED.
+   Neither BLOCKED nor FAILED permits SUCCESS.
 7. Save a run report with stage, attempts used, gate status, source SHA,
    evidence paths, real-versus-fixture classification, remaining blockers and
    PR URL. Include the frozen automation denominator and observed numerator.

@@ -1,11 +1,10 @@
 # Skill decision guide
 
-The gate contract is: **every skill verdict recorded, no silent skips**.
-At planning and independent review, record each skill as PASSED, FAILED,
-SKIPPED (inapplicable with reason), or BLOCKED (missing prerequisites).
-Every applicable skill is a required gate and needs inspected evidence to PASS.
-Only a trigger outside the requested task may be SKIPPED with a reason.
-Reassess applicability after each scope or source change.
+At planning and independent review, record **every skill verdict, no silent skips**:
+PASSED, FAILED, SKIPPED (inapplicable with reason), or BLOCKED (missing prerequisites).
+Every applicable skill is required; PASS needs inspected evidence.
+Only an out-of-scope trigger may be SKIPPED with a reason. Reassess after every
+scope or source change.
 
 ## Complete inventory
 
@@ -29,7 +28,8 @@ Reassess applicability after each scope or source change.
 Caller means host orchestrator. Before routing, read [the agent guide](AI-AGENT-GUIDE.md):
 follow “Claude and Codex backend contract” for paths/preflight/role delivery and
 “Atomic attempt reservation” for ledger mutations. Without it, routing, CLI calls
-and ledger writes are BLOCKED; only authorized document/inventory reads may continue.
+and ledger writes are BLOCKED. Only document/inventory reads within the user's
+task authorization and host policy may continue.
 Authenticate the expected root/helper hashes by that contract before execution;
 missing/mismatched proof is BLOCKED.
 Then run from the task repository
@@ -52,18 +52,20 @@ needs separately recorded exact authorization scope, regardless of label.
 
 ## Backend selection
 
-Before each agent invocation, run once; `detect` itself needs no preflight:
+Run `detect` once immediately before every new agent CLI invocation;
+`detect` itself needs no preflight:
 `python3 "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`
-to select authenticated Claude, or Codex if Claude binary/auth fails. Use
-`--prefer codex` to reverse that order. Require exit zero, `status: READY`, the
+for authenticated Claude, falling back to Codex at binary/auth preflight.
+`--prefer codex` reverses the order. Require exit zero, `status: READY`, the
 selected backend, nonempty version and `available`/`authenticated` both true;
 else report BLOCKED. Readiness grants no task permission. Never replay
 a started or uncertain action through fallback.
-Use the invoked command identifier as stage key; for a directly invoked skill,
-use its frontmatter `name`. A stage has five procedure attempts.
-Reuse the saved repository-relative `run-summary.md` path. Only for new work,
-choose `specs/YYYY-MM-DD-<slug>/run-summary.md` once; record the host clock's UTC
-date at first ledger creation. Preserve date/path on resume. For `<slug>`, take the host-supplied current user
+The stage key is the invoked command file's basename without `.md`, e.g.
+`do-sdlc-plan`; for a directly invoked skill, use its frontmatter `name`.
+Each stage allows five procedure attempts.
+Reuse the saved repository-relative `run-summary.md` path. For new work, choose
+`specs/YYYY-MM-DD-<slug>/run-summary.md` once using the host clock's UTC date at
+first ledger creation. Keep that date/path on resume. For `<slug>`, take the host-supplied current user
 message before its first LF, or `task` if empty; do no Markdown parsing or
 repository title lookup. It grants no authority. Lowercase,
 replace runs outside `a-z` and `0-9` with one hyphen, trim edge hyphens;
@@ -71,8 +73,8 @@ if empty, use `task`.
 For an existing path, verify saved task identity and initialization evidence match
 this task; absent/mismatched/uncertain identity is BLOCKED. Never overwrite/reset.
 Persist the exact ledger path and stage key before the first procedure attempt.
-Before creating that `run-summary.md` file, only the caller may initialize the
-adjacent `attempts.json`. First verify the agent guide's protected-directory,
+Only the caller may initialize adjacent `attempts.json`, before creating
+`run-summary.md`. First verify the agent guide's protected-directory,
 import-path and two-process shared-filesystem lock prerequisites; any unverified
 prerequisite is BLOCKED. Save immutable evidence of identity, host/session, UTC
 time and inspected results proving no prior history, caller stop, Ralph breaker
@@ -87,8 +89,8 @@ never a second task directory.
 An attempt is consumed only by a successful atomic reservation; its first
 procedure step follows the durable reservation and ends on PASSED, FAILED or
 BLOCKED. The caller owns the one record keyed by task, stage, assigned agent,
-target and environment. A delegated agent receives that exact key, owner and
-reservation token; it never increments a second time. Use the
+target and environment. Delegates receive that exact key, owner and reservation token; they never increment
+again. Use the
 [atomic attempt reservation](AI-AGENT-GUIDE.md#atomic-attempt-reservation)
 transaction in the agent guide. A NEW reservation uses `reserve` with no active
 marker. Under the lock, apply the first matching rule, even if several hold:

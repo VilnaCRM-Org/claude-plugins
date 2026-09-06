@@ -7,8 +7,8 @@ argument-hint: "[PR-URL | branch]"
 
 ## Inputs
 
-Inputs are the command argument, repository guidance and
-`specs/<task>/run-summary.md` when resuming. That summary records task/repository
+Inputs: command argument, repository guidance and saved
+`specs/<task>/run-summary.md` on resume. It records task/repository
 identity, target/environment selections, source/profile hashes, artifact paths,
 check outcomes and copied counter observations. Each counter observation names
 the authoritative adjacent `attempts.json` path and exact
@@ -25,8 +25,10 @@ command files, not native Codex commands; Codex reads and follows them via this 
 for authenticated selection and preserve the same stage state across handoffs.
 Use the resolved task repository as cwd for `--repo .` and the profile.
 Static discovery needs no profile.
-Only setup creates `.claude/devops-sdlc.json`; other stages wait for setup if absent. Then validate the profile
-using `python3 "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`
+If `.claude/devops-sdlc.json` is absent, report dependent work BLOCKED and hand off
+to `commands/do-sdlc-setup.md`; do not poll or retry. Only setup creates it. Resume after setup succeeds;
+validate its profile using
+`python3 "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`
 before any repository-provided code, tests or operational command executes.
 Select target IDs and environments explicitly named by the user's task or its
 accepted run summary. Process multiple named targets separately with distinct
@@ -34,34 +36,33 @@ profile/evidence records. Each helper invocation uses exactly one declared targe
 ID and, for preview, one environment belonging to that target; local checks may
 omit it. If scope selects no target and multiple profile targets could match,
 BLOCKED is immediate before dependent execution; never choose by shell defaults.
-Normalize the authorized repository as `github.com/owner/name` without a scheme,
-query or extra path; record it as `DEVOPS_APPROVED_GITHUB_REPO` and never use ambient
-`GH_REPO`. Before first use, assign all three task-local variables from the
-verified authorization, overwriting any pre-existing values. Derive
-`DEVOPS_APPROVED_GITHUB_OWNER`/`DEVOPS_APPROVED_GITHUB_NAME` only from that value
+Before first use, overwrite task-local `DEVOPS_APPROVED_GITHUB_REPO`,
+`DEVOPS_APPROVED_GITHUB_OWNER` and `DEVOPS_APPROVED_GITHUB_NAME` from verified
+authorization: normalize the repository as `github.com/owner/name` (no scheme,
+query or extra path), then derive owner/name only from it. Never use ambient `GH_REPO`. Use owner/name
 for API routes. Resolve the command argument before GitHub reads or writes:
 for a PR URL, verify its host/repository and positive PR number, then assign that
 number to `DEVOPS_APPROVED_PR_SELECTOR`; for a branch, verify the exact intended
 head branch and assign it to both `DEVOPS_APPROVED_HEAD_BRANCH` and
 `DEVOPS_APPROVED_PR_SELECTOR`. Never default to the current checkout branch.
-If the argument is absent, use only an unambiguous selector in the accepted task
-summary; missing or conflicting identity means BLOCKED. Overwrite these
-task-local variables from the verified input before use, too.
+Missing argument: use only an unambiguous selector in the accepted task summary;
+missing/conflicting identity is BLOCKED. Overwrite selector/head variables from
+verified input before use.
 
-Check the prerequisites listed below; a missing item immediately produces BLOCKED with the item name
-and observed failure, without retries. A required independent role must be
-available as a separate invocable agent/session in the host's tool inventory.
-If that capability or the role definition is absent, immediately BLOCK that
-review/QA gate; there is no role fallback or implementer self-approval.
+Missing prerequisites below: immediately BLOCKED; name the item and observed
+failure, without retries. Independent roles require separate invocable
+agents/sessions in host inventory. Missing capability/definition immediately
+blocks that review/QA gate; no role fallback or implementer self-approval.
 
 Stage prerequisites: Python 3/profile helper, Git, authenticated `gh`, readable
 PR/check/ruleset/review APIs and the independent ci-fixer/pr-comment-resolver
-roles when repairs/resolutions are needed. Consume current-source review and
-QA/judge evidence; missing evidence routes to those stages and blocks acceptance.
-The bmalph implementation tool is not needed solely to reconcile an existing PR.
-The accepted QA/judge matrix is the case inventory in run-summary.md linking each
-requirement to its required check/case, applicability reason and evidence path;
-if absent, return to QA to produce it before completion.
+roles when repairs/resolutions are needed. Missing current-source review or
+QA/judge evidence blocks acceptance; hand off to those stages.
+PR reconciliation alone needs no bmalph implementation tool.
+The accepted QA/judge matrix in run-summary.md links each requirement to its
+required check/case, applicability reason and evidence path. If absent, completion
+is BLOCKED: hand off to `commands/do-sdlc-qa.md`; require its current-source matrix
+before resuming.
 For a new CLI invocation only, before it starts, binary/authentication preflight
 may choose the other authenticated backend in auto mode. No fallback or replay
 is allowed after the invocation starts, times out or has uncertain effects.
@@ -80,18 +81,19 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
 
 1. Confirm local review and QA evidence against the exact proposed head.
    Inspect the diff for unrelated files, secrets, raw plans/state and generated
-   tooling. Invocation to finish a draft PR authorizes creation/update for the
-   specified branch within the user's existing publication scope. If publication
-   is explicitly excluded, prepare the complete local result and mark this gate
-   BLOCKED. Before mutations, for branch input find PRs by verified repository/head;
+   tooling. This command authorizes PR creation/update only for the specified branch
+   within existing user publication scope. If publication is excluded, prepare the
+   complete local result; publication is BLOCKED. Before mutations, for branch input find PRs by verified repository/head;
    ambiguity is BLOCKED. For an existing PR, resolve repository, number,
    baseRefName, head branch and SHA with
    `gh pr view "$DEVOPS_APPROVED_PR_SELECTOR" --repo "$DEVOPS_APPROVED_GITHUB_REPO" --json number,url,baseRefName,headRefName,headRefOid`.
-   Match authorized input; set the selector to its PR number and take baseRefName.
-   With no PR for a branch, use only the base from user authorization or accepted
-   task summary;
-   verify it exists in the approved repository. Overwrite task-local
-   `DEVOPS_APPROVED_BASE_BRANCH` with this verified base. Missing/conflicting base: BLOCKED; no defaults.
+   Match authorized input; set the selector to its PR number. If user authorization
+   or the accepted task summary names a base, require equality with baseRefName;
+   otherwise use this PR's verified intake base. For a new PR, require a base from
+   user authorization or the accepted summary and verify it
+   exists in the approved repository. For both flows, overwrite and record
+   `DEVOPS_APPROVED_BASE_BRANCH` before writes. Missing/conflicting base or
+   retargeting is BLOCKED; no defaults.
    Push only the intended branch. For a verified branch without a PR, use
    `gh pr create --repo "$DEVOPS_APPROVED_GITHUB_REPO" --head "$DEVOPS_APPROVED_HEAD_BRANCH" --base "$DEVOPS_APPROVED_BASE_BRANCH" --draft --body-file <path>`;
    verify the returned repository/base/head and PR URL, then replace the selector
@@ -106,8 +108,8 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    Verify response identity; mutations use only IDs verified to belong to this PR.
    Freeze the expected gate list from branch protection/rulesets,
    repository CI for the changed paths and the task's accepted QA/judge matrix.
-   Every required check and every triggered applicable pipeline must have actual
-   successful completion for this head. Document justified inapplicable checks
+   All required checks and triggered applicable pipelines must actually finish
+   successfully for this head. Document justified inapplicable checks
    against their path/target rules; missing policy or ambiguous applicability is
    BLOCKED. Zero checks, queued/pending, skipped required checks, stale success
    or malformed/incomplete API responses immediately prevent acceptance.
@@ -127,9 +129,10 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    changed during verification, repeat against the new head. Retain draft status;
    neither merge nor publish a release as part of this command.
 6. Report PR URL, final SHA, check conclusions, review disposition, QA/judge
-   evidence and blockers. Re-fetch draft state, expected current-head checks,
-   independent review, applicable required runtime/manual QA and calibrated
-   model-judge results, plus all review-thread pages. Each must pass with zero
+   evidence and blockers. Report completed local work separately from CI; if none
+   is evidenced, say none observed. Local PASS never makes missing CI pass. Re-fetch draft state, expected current-head checks,
+   independent review, required applicable runtime/manual QA, calibrated judge
+   results and all review-thread pages. Require every gate PASSED and zero
    unresolved applicable findings before SUCCESS.
 
 ## Loop & exit condition
