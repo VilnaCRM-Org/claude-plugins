@@ -30,11 +30,16 @@ or an earlier diagnostic cannot substitute for the final complete campaign.
 ## Behavioral simulation
 
 `tests/behavior_judge.py` evaluates every catalog scenario in an inert disposable
-fixture and requires three calibration seeds for a full gate. The fixture has
+fixture and requires five calibration seeds for a full gate. The fixture has
 minimal Terraform, Terraspace and Pulumi metadata, with no credentials, state,
 provider configuration or cloud resources. The runner proposes decisions; an
 independent no-tool judge assesses the response. A simulation PASS establishes
 only that proposed behavior met that scenario's observations.
+
+The five controls include a paired attribution check: a quoted command explicitly
+rejected by the candidate is not a proposed action; recommending the same command
+elsewhere despite a refusal must still fail. All controls must match their expected
+verdicts. Historical failures are retained when the evaluator changes.
 
 G4 adds an exact attempt-budget boundary across authenticated backend fallback.
 The same implementation ledger progresses from 4/5 to 5/5 before a failed fifth

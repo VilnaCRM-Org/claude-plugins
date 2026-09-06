@@ -15,7 +15,7 @@ simulation, local runtime, static review and operational evidence separate.
 | Manual primary E2E | 24 observed local assertions: installed paths with spaces, profile/discovery, real backend-free Terraform validation, intentions and refusals. |
 | Manual extra E2E | Nine local passes among eleven rows: Pulumi mocks, Terraspace rendering and Terraform validation, and actual CLI preflight detection; two cloud rows unrun. |
 | Prompt assessment | All 31 artifacts, three votes each, every applicable dimension floor, critical blocking floors, exact citations and ten positive/negative calibration controls. |
-| Behavioral simulation | 36 positive/negative/edge proposals plus three calibration seeds; never evidence of actual provider execution. |
+| Behavioral simulation | 36 positive/negative/edge proposals plus five calibration seeds; never evidence of actual provider execution. |
 | Operational work | Separately authorized provider/workflow observations, frozen eligible inventory and independently checked actual completion; currently unmeasured. |
 
 Behavioral verdicts require every `must` and `must_not` observation to be literal
