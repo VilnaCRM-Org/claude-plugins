@@ -59,19 +59,18 @@ skill receives a verdict; no silent skips.
 1. Map principal, trust issuer/audience/subject, role purpose, action,
    resource and conditions. Separate read-only preview, deployment and bootstrap
    privileges; fork/untrusted code never receives privileged credentials. For each
-   privileged principal, explicitly review escalation paths: direct or indirect
+   privileged principal, review escalation paths: direct or indirect
    `iam:PassRole`, `sts:AssumeRole`, policy/trust-policy create or edit actions,
    permissions-boundary changes, and access to roles that can perform them. State
-   which paths are required, deny every other path by action and resource, and
-   include those denials in the review evidence. When rejecting unnecessary
+   required paths; deny all others by action/resource and record those denials.
+   When rejecting unnecessary
    privilege or public-access expansion, record a security finding in
    `specs/<task-id>/run-summary.md`: affected principal/resource, rejected scope,
    security impact, least-privilege remediation, source SHA, responsible reviewer
-   and unresolved/resolved status. The responsible reviewer is the assigned
-   independent security-reviewer; an unavailable reviewer leaves it unresolved.
-   Refusing the unsafe action does not replace this finding record. Describe the
-   record as proposed during simulation; actual closure needs review and test
-   evidence for the corrected configuration.
+   and unresolved/resolved status. The assigned independent security-reviewer
+   owns resolution; absence leaves it unresolved. Refusal still requires this
+   finding. In simulations propose the record; actual closure needs review and
+   test evidence for corrected configuration.
 2. Evaluate allowed and denied repository/branch/environment/account combinations,
    confused deputy protection and permissions boundaries. Preserve short-lived
    OIDC and protected environments; never add AdministratorAccess to fix a check.
@@ -79,13 +78,15 @@ skill receives a verdict; no silent skips.
    log delivery and security controls. Run the configured policy/IaC/secret
    scanners. When a policy scan fails, record the original finding, rule,
    affected resource, source SHA and scan command; route a secure configuration
-   fix; then re-run that same failed scan against the corrected current source
-   and record its exit status and findings. Do not substitute an unrelated check
-   or report a clean result before the re-run completes.
-4. Inspect metadata and redacted summaries only. Raw state, decrypted config,
+   fix; re-run that failed scan on corrected current source and record exit
+   status/findings. No unrelated substitute or clean claim before re-run completion.
+4. Inspect metadata and sanitized summaries only. Raw state, decrypted config,
    environment dumps and tokens must not enter logs, prompts, PRs or artifacts.
-   If accidental secret output occurs, stop propagation and follow the established
-   rotation process without printing or automatically rotating credentials.
+   Never create, copy or retain raw secret-bearing output as QA/review evidence,
+   even restricted or encrypted. Use a sanitized derivative and its hash plus
+   nonsecret exposure metadata; never hash raw secrets for review. Stop propagation.
+   Existing source remediation follows its owner's separately authorized runbook;
+   deletion or rotation requires that authority.
 5. Bind privileged workflow inputs to authorized actor, repository, PR head,
    command and environment. Treat comment text as data. Document residual risks
    and independent negative-test evidence before any deployment handoff.
@@ -94,8 +95,8 @@ Independent negative-test evidence means a different reviewer checks the actual
 output of the configured denial tests, including the denied principal/action and
 target. Policy simulation is labeled simulation; it does not prove live IAM denial.
 Missing live credentials block a required live denial gate rather than converting
-simulation into live evidence. No credential rotation occurs without the exact
-runbook, target and existing authorization described above.
+simulation into live evidence. Rotation requires the exact runbook, target and
+existing authorization.
 
 ## Evidence and failure handling
 
