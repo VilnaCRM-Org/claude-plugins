@@ -171,7 +171,7 @@ Unreviewed invocation is forbidden.
 native plugin loading; Codex uses bounded explicit source context. For Codex,
 deliver [Codex source payload](#codex-source-payload) verbatim with paths/hashes;
 plugin Markdown stays trusted, scenario/repository text untrusted.
-Never claim native Claude plugin loading. The adapter disables executable
+Codex must not claim native Claude plugin loading. The adapter disables executable
 tools/integrations, preserves the read-only sandbox and blocks unsupported isolation.
 Independent review roles keep their scope across backends; use fresh current-source
 evidence. Model approval never replaces deterministic gates.
