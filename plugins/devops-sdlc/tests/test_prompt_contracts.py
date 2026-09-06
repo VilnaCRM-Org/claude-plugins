@@ -10,13 +10,22 @@ import json
 import os
 import pathlib
 import re
+import subprocess
+import sys
 import tempfile
 import unittest
 
-from ledger_reference import transaction
-from ledger_reference.storage import _save
-
 PLUGIN = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PLUGIN / "tests"))
+REFERENCE = importlib.import_module("ledger_reference")
+STORAGE = importlib.import_module("ledger_reference.storage")
+if (
+    pathlib.Path(REFERENCE.__file__).resolve()
+    != PLUGIN / "tests/ledger_reference/__init__.py"
+):
+    raise ImportError("Unexpected ledger reference import path")
+transaction = REFERENCE.transaction
+_save = STORAGE._save
 CONTRACTS = {
     "command": {
         "profile validation": "validate-profile --repo .",
@@ -177,11 +186,43 @@ class ReferenceSourceTests(unittest.TestCase):
                 ast.dump(ast.parse(documented)), ast.dump(ast.parse(checked_in))
             )
 
+    def test_absolute_loader_works_without_test_directory_on_search_path(self):
+        code = "\n".join(
+            (
+                "import importlib.util, pathlib, sys",
+                "path = pathlib.Path(sys.argv[1])",
+                "assert str(path.parent) not in sys.path",
+                "spec = importlib.util.spec_from_file_location('isolated', path)",
+                "module = importlib.util.module_from_spec(spec)",
+                "spec.loader.exec_module(module)",
+                "assert module.PromptContractTests.__name__ == 'PromptContractTests'",
+                "expected = path.parent / 'ledger_reference/__init__.py'",
+                "assert pathlib.Path(module.REFERENCE.__file__).resolve() == expected",
+                "assert module.transaction is module.REFERENCE.transaction",
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-I",
+                    "-c",
+                    code,
+                    str(pathlib.Path(__file__).resolve()),
+                ],
+                cwd=directory,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_fences_exactly_match_imported_reviewed_modules(self):
-        self.verify_reference((PLUGIN / "skills/AI-AGENT-GUIDE.md").read_text())
+        self.verify_reference((PLUGIN / "docs/atomic-ledger-reference.md").read_text())
 
     def test_changed_markdown_is_rejected_without_execution(self):
-        text = (PLUGIN / "skills/AI-AGENT-GUIDE.md").read_text()
+        text = (PLUGIN / "docs/atomic-ledger-reference.md").read_text()
         cases = (
             text.replace(
                 'return {"decision": "START_ONCE", **active}',
@@ -287,6 +328,109 @@ class AtomicLedgerReferenceTests(unittest.TestCase):
         self.assertEqual(entry["count"], 5)
         self.assertEqual(len(entry["history"]), 5)
         self.assertIsNone(entry["active"])
+        before = (self.path / "attempts.json").read_bytes()
+        self.identity[2] = "replacement-agent"
+        for action in ("initialize", "reserve", "start"):
+            result = self.call(action, verified_new_task_reference="new claim")
+            self.assertEqual(result["decision"], "BLOCKED")
+            self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+
+    def test_new_agent_cannot_initialize_or_use_the_same_budget(self):
+        self.initialize()
+        original = list(self.identity)
+        for phase in range(2):
+            token = self.call("reserve")["token"] if phase else None
+            self.identity = [*original[:2], "other-agent", *original[3:]]
+            before = (self.path / "attempts.json").read_bytes()
+            for action in ("initialize", "reserve", "start", "observe", "finish"):
+                with self.subTest(action=action, token=token):
+                    result = self.call(
+                        action, token=token, verified_new_task_reference="new claim"
+                    )
+                    self.assertEqual(result["decision"], "BLOCKED")
+                    self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+            self.identity = original
+        self.assertEqual(self.read_entry()[1]["count"], 1)
+
+    def test_existing_conflicting_agents_block_both_sides_without_history_changes(self):
+        self.initialize()
+        data, entry = self.read_entry()
+        other = [*self.identity[:2], "other-agent", *self.identity[3:]]
+        data["entries"][json.dumps(other, separators=(",", ":"))] = copy.deepcopy(entry)
+        self.api["_save"](self.directory, data)
+        before = (self.path / "attempts.json").read_bytes()
+        for identity in (self.identity, other):
+            self.identity = identity
+            for action in ("initialize", "reserve", "start", "observe", "finish"):
+                result = self.call(action, verified_new_task_reference="new claim")
+                self.assertEqual(result["decision"], "BLOCKED")
+                self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+
+    def test_budget_identity_schema_is_validated_before_admission(self):
+        self.initialize()
+        original, entry = self.read_entry()
+        for key in (
+            "not-json",
+            "null",
+            "[1]",
+            json.dumps(self.identity),
+            json.dumps(["other-task", *self.identity[1:]], separators=(",", ":")),
+        ):
+            with self.subTest(key=key):
+                data = copy.deepcopy(original)
+                data["entries"][key] = copy.deepcopy(entry)
+                self.api["_save"](self.directory, data)
+                before = (self.path / "attempts.json").read_bytes()
+                self.assertEqual(self.call("reserve")["decision"], "BLOCKED")
+                self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+
+    def test_distinct_stage_target_and_environment_keep_separate_budgets(self):
+        self.initialize()
+        original = list(self.identity)
+        for position in (1, 3, 4):
+            self.identity = list(original)
+            self.identity[position] += "-separate"
+            self.identity[2] = "other-agent"
+            self.initialize()
+            self.assertEqual(self.call("reserve")["attempt"], 1)
+        data, _ = self.read_entry()
+        self.assertEqual(len(data["entries"]), 4)
+
+    def test_hard_kill_snapshot_is_retained_and_blocks_transaction(self):
+        self.initialize()
+        before = (self.path / "attempts.json").read_bytes()
+        code = "\n".join(
+            (
+                "import json, os, signal, sys",
+                "from ledger_reference import transaction",
+                "from ledger_reference import storage",
+                "def kill_before_replace(*args, **kwargs):",
+                "    os.kill(os.getpid(), signal.SIGKILL)",
+                "storage.os.replace = kill_before_replace",
+                "directory = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)",
+                "identity = json.loads(sys.argv[2])",
+                "def observed(current, entry):",
+                "    return dict(entry, verified=True, evidence='host', "
+                "identity=current)",
+                "request = {'owner':'child', 'action':'reserve'}",
+                "transaction(directory, identity, request, observed)",
+            )
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(self.path), json.dumps(self.identity)],
+            env={**os.environ, "PYTHONPATH": str(PLUGIN / "tests")},
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, -9, result.stderr)
+        leftovers = list(self.path.glob(".attempts-*"))
+        self.assertEqual(len(leftovers), 1)
+        snapshot = leftovers[0].read_bytes()
+        self.assertEqual(self.call("reserve")["decision"], "BLOCKED")
+        self.assertEqual(leftovers[0].read_bytes(), snapshot)
+        self.assertEqual((self.path / "attempts.json").read_bytes(), before)
 
     def test_live_lock_conflict_and_persisted_owner_prevent_double_reservation(self):
         self.initialize()

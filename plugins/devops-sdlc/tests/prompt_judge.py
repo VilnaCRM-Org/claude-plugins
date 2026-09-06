@@ -7,7 +7,6 @@ import argparse
 import dataclasses
 import hashlib
 import json
-import re
 import statistics
 import sys
 import tempfile
@@ -31,9 +30,11 @@ for folder in (
 import _model  # noqa: E402
 import agent_cli  # noqa: E402
 import calibration  # noqa: E402
+import citation_safety  # noqa: E402
 import judge  # noqa: E402
 import rubrics  # noqa: E402
 from redaction import redact_text as _redact_text  # noqa: E402
+from redaction import redacted_source_spans  # noqa: E402
 
 VOTES = 3
 EXPECTED_ARTIFACTS = 31
@@ -118,27 +119,26 @@ def validate_settings(settings: Settings, mode: str) -> None:
     rubric_dimensions(settings)
 
 
-def citation_choices(artifact_raw: str) -> list[str]:
-    choices = []
-    for line in artifact_raw.splitlines():
-        # Codex strict schemas reject escaped quote literals in enum strings.
-        # Split, never rewrite: every permitted fragment remains exact source text.
-        for literal in re.split(r'["\\\x00-\x1f]', line):
-            for start in range(0, len(literal), 120):
-                chunk = literal[start : start + 120]
-                if (
-                    chunk.strip()
-                    and chunk not in choices
-                    and _redact_text(chunk) == chunk
-                ):
-                    choices.append(chunk)
-                    if len(choices) == MAX_CITATIONS:
-                        return choices
-    return choices
+def citation_choices(
+    artifact_raw: str, spans: tuple[tuple[int, int], ...] | None = None
+) -> list[str]:
+    return citation_safety.citation_choices(artifact_raw, MAX_CITATIONS, spans)
 
 
-def verdict_schema(dimensions: list[rubrics.Dimension], artifact_raw: str = "") -> dict:
-    choices = citation_choices(artifact_raw)
+def citation_is_redaction_stable(
+    artifact_raw: str,
+    citation: str,
+    spans: tuple[tuple[int, int], ...] | None = None,
+) -> bool:
+    return citation_safety.citation_is_redaction_stable(artifact_raw, citation, spans)
+
+
+def verdict_schema(
+    dimensions: list[rubrics.Dimension],
+    artifact_raw: str = "",
+    spans: tuple[tuple[int, int], ...] | None = None,
+) -> dict:
+    choices = citation_choices(artifact_raw, spans)
     if artifact_raw and not choices:
         raise AssessmentError("Artifact has no literal-safe exact citation fragments.")
     entry = {
@@ -175,7 +175,10 @@ def verdict_schema(dimensions: list[rubrics.Dimension], artifact_raw: str = "") 
 
 
 def strict_verdict(
-    value: Any, dimensions: list[rubrics.Dimension], artifact_raw: str
+    value: Any,
+    dimensions: list[rubrics.Dimension],
+    artifact_raw: str,
+    spans: tuple[tuple[int, int], ...] | None = None,
 ) -> dict:
     if type(value) is not dict or set(value) != {"dimensions"}:
         raise AssessmentError("Verdict must contain exactly the requested dimensions.")
@@ -183,15 +186,20 @@ def strict_verdict(
         judge.validate_verdict(value, dimensions)
     except judge.JudgeError as exc:
         raise AssessmentError("Verdict failed shared rubric validation.") from exc
+    spans = redacted_source_spans(artifact_raw) if spans is None else spans
     for dimension in dimensions:
         try:
-            validate_entry(value["dimensions"][dimension.id], artifact_raw)
+            validate_entry(value["dimensions"][dimension.id], artifact_raw, spans)
         except AssessmentError as exc:
             raise AssessmentError(f"Verdict {dimension.id}: {exc}") from exc
     return value
 
 
-def validate_entry(entry: dict, artifact_raw: str) -> None:
+def validate_entry(
+    entry: dict,
+    artifact_raw: str,
+    spans: tuple[tuple[int, int], ...] | None = None,
+) -> None:
     if type(entry) is not dict or set(entry) != {"score", "evidence", "citation"}:
         raise AssessmentError("Verdict dimension has missing or extra fields.")
     evidence, citation = entry["evidence"], entry["citation"]
@@ -208,7 +216,14 @@ def validate_entry(entry: dict, artifact_raw: str) -> None:
         or any(ord(char) < 32 for char in citation)
     ):
         raise AssessmentError("Verdict citation must be bounded single-line text.")
-    if citation not in artifact_raw or _redact_text(citation) != citation:
+    try:
+        evidence.encode("utf-8")
+        citation.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise AssessmentError("Verdict text must be valid UTF-8.") from exc
+    if citation not in artifact_raw or not citation_is_redaction_stable(
+        artifact_raw, citation, spans
+    ):
         raise AssessmentError(
             "Verdict citation must be a bounded, redaction-stable "
             "exact artifact substring."
@@ -241,9 +256,15 @@ def redact_evidence(value: str) -> str:
     return _redact_text(value)
 
 
-def stored_dimensions(verdict: dict) -> dict:
+def stored_dimensions(
+    verdict: dict,
+    artifact_raw: str,
+    spans: tuple[tuple[int, int], ...] | None = None,
+) -> dict:
     stored = {}
+    spans = redacted_source_spans(artifact_raw) if spans is None else spans
     for identifier, entry in verdict["dimensions"].items():
+        validate_entry(entry, artifact_raw, spans)
         evidence = redact_evidence(entry["evidence"])
         citation = redact_evidence(entry["citation"])
         stored[identifier] = {
@@ -276,8 +297,9 @@ def vote_prompt(
     artifact: _model.Artifact,
     dimensions: list[rubrics.Dimension],
     context: str,
+    spans: tuple[tuple[int, int], ...] | None = None,
 ) -> str:
-    citation_lines = citation_choices(artifact.raw)
+    citation_lines = citation_choices(artifact.raw, spans)
     return (
         judge.build_prompt(artifact, dimensions, context)
         + "\n\n"
@@ -301,14 +323,15 @@ def one_vote(
     number: int,
     mode: str,
 ) -> dict:
-    prompt = vote_prompt(artifact, dimensions, context)
+    spans = redacted_source_spans(artifact.raw)
+    prompt = vote_prompt(artifact, dimensions, context, spans)
     attempts = []
     backend = settings.backend
     for repair in range(judge.MAX_REPROMPTS + 1):
         with tempfile.TemporaryDirectory(prefix="devops-prompt-judge-") as directory:
             result = agent_cli.run_prompt(
                 prompt,
-                verdict_schema(dimensions, artifact.raw),
+                verdict_schema(dimensions, artifact.raw, spans),
                 Path(directory),
                 backend=backend,
                 prefer=settings.prefer,
@@ -350,7 +373,9 @@ def one_vote(
                 "invalid_attempts": attempts,
             }
         try:
-            verdict = strict_verdict(result.get("output"), dimensions, artifact.raw)
+            verdict = strict_verdict(
+                result.get("output"), dimensions, artifact.raw, spans
+            )
         except AssessmentError as exc:
             attempts.append(
                 {
@@ -377,7 +402,7 @@ def one_vote(
         return {
             **metadata,
             "status": "SCORED",
-            "dimensions": stored_dimensions(verdict),
+            "dimensions": stored_dimensions(verdict, artifact.raw, spans),
             "invalid_attempts": attempts,
         }
     raise AssertionError("unreachable")

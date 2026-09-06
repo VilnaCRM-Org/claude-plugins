@@ -8,8 +8,8 @@ import stat
 from .actions import owned_action, reserve
 from .history import _coherent, _text
 from .observation import _refresh
-from .state import _saved_state
-from .storage import _read, _save
+from .state import _assignment_valid, _saved_state
+from .storage import _pending_snapshot, _read, _save
 
 
 def transaction(directory, identity, request, observe=None):
@@ -21,6 +21,11 @@ def transaction(directory, identity, request, observe=None):
         if not stat.S_ISREG(os.fstat(lock).st_mode):
             raise ValueError("Non-regular lock")
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if _pending_snapshot(directory):
+            return {
+                "decision": "BLOCKED",
+                "reason": "uncertain snapshot requires recovery",
+            }
         return _locked(directory, identity, request, observe)
     except BlockingIOError:
         return {"decision": "BLOCKED", "reason": "reservation conflict"}
@@ -130,6 +135,11 @@ def _locked(directory, identity, request, observe):
     if blocked is not None:
         return blocked
     _schema(data, identity)
+    if not _assignment_valid(data, identity):
+        return {
+            "decision": "BLOCKED",
+            "reason": "conflicting budget or agent reassignment",
+        }
     if action == "initialize":
         return _initialize(directory, data, key, request)
     return _dispatch(directory, data, identity, request, observe)

@@ -290,13 +290,19 @@ class PromptJudgeTests(unittest.TestCase):
             "api_token='WRAPPED_SENTINEL password=INNER_SENTINEL'",
         )
         for candidate in cases:
+            citation = "Stored citation."
+            entry_evidence = " ".join(candidate.splitlines())
             verdict = {
                 "dimensions": {
-                    "J1": {"score": 5, "evidence": candidate, "citation": candidate}
+                    "J1": {
+                        "score": 5,
+                        "evidence": entry_evidence,
+                        "citation": citation,
+                    }
                 }
             }
             with self.subTest(candidate=candidate):
-                stored = subject.stored_dimensions(verdict)
+                stored = subject.stored_dimensions(verdict, citation + "\n" + candidate)
                 self.assertNotIn("SENTINEL", json.dumps(stored))
                 self.assertEqual(stored["J1"]["score"], 5)
                 self.assertEqual(
@@ -331,10 +337,13 @@ class PromptJudgeTests(unittest.TestCase):
         exported = []
         for secret in ("guessable-one", "guessable-two"):
             raw = f"api_token={secret}"
+            citation = "Stored citation."
             verdict = {
-                "dimensions": {"J1": {"score": 5, "evidence": raw, "citation": raw}}
+                "dimensions": {
+                    "J1": {"score": 5, "evidence": raw, "citation": citation}
+                }
             }
-            entry = subject.stored_dimensions(verdict)["J1"]
+            entry = subject.stored_dimensions(verdict, citation + "\n" + raw)["J1"]
             exported.append(entry)
             self.assertEqual(entry["digest_scope"], "redacted UTF-8 text")
             for field in ("evidence", "citation"):
@@ -359,9 +368,116 @@ class PromptJudgeTests(unittest.TestCase):
         entry["citation"] = "Use bounded validation."
         subject.validate_entry(entry, source)
         self.assertEqual(
-            subject.stored_dimensions({"dimensions": {"J1": entry}})["J1"]["citation"],
+            subject.stored_dimensions({"dimensions": {"J1": entry}}, source)["J1"][
+                "citation"
+            ],
             entry["citation"],
         )
+
+    def test_invalid_utf8_verdict_text_is_rejected_before_persistence(self):
+        source = "Safe source."
+        for field in ("evidence", "citation"):
+            entry = {
+                "score": 5,
+                "evidence": "Observed source.",
+                "citation": source,
+            }
+            entry[field] = "\ud800"
+            with (
+                self.subTest(field=field),
+                self.assertRaisesRegex(subject.AssessmentError, "valid UTF-8"),
+            ):
+                subject.validate_entry(entry, source)
+
+    def test_citations_reject_values_detached_from_redacted_source_spans(self):
+        source = (
+            '{"token":"ORCHID","note":"safe"}\n'
+            "ORCHID public label\nUse bounded validation."
+        )
+        dimensions = [subject.rubrics.DIMENSIONS_BY_ID["J1"]]
+        choices = subject.citation_choices(source)
+        self.assertNotIn("ORCHID", choices)
+        self.assertIn("Use bounded validation.", choices)
+        reversed_source = (
+            'ORCHID\n{"token":"ORCHID","note":"safe"}\nUse bounded validation.'
+        )
+        self.assertNotIn("ORCHID", subject.citation_choices(reversed_source))
+        with mock.patch.object(subject, "MAX_CITATIONS", 1):
+            self.assertNotIn("ORCHID", subject.citation_choices(reversed_source))
+        secret = {
+            "dimensions": {
+                "J1": {
+                    "score": 5,
+                    "evidence": "Observed source.",
+                    "citation": "ORCHID",
+                }
+            }
+        }
+        with self.assertRaisesRegex(subject.AssessmentError, "redaction-stable"):
+            subject.strict_verdict(secret, dimensions, source)
+        with self.assertRaisesRegex(subject.AssessmentError, "redaction-stable"):
+            subject.stored_dimensions(secret, source)
+
+        safe = {
+            "dimensions": {
+                "J1": {
+                    "score": 5,
+                    "evidence": "Observed source.",
+                    "citation": "Use bounded validation.",
+                }
+            }
+        }
+        subject.strict_verdict(safe, dimensions, source)
+        stored = subject.stored_dimensions(safe, source)
+        self.assertEqual(stored["J1"]["citation"], "Use bounded validation.")
+        self.assertEqual(
+            stored["J1"]["citation_sha256"],
+            subject.digest(b"Use bounded validation."),
+        )
+
+    def test_citation_source_spans_reject_boundary_secrets_without_marker_rewrites(
+        self,
+    ):
+        source = "x" * 117 + " token=ORCHID\nSafe source."
+        secret_fragment = "ken=ORCHID"
+        self.assertIn(secret_fragment, source)
+        self.assertFalse(subject.citation_is_redaction_stable(source, secret_fragment))
+        self.assertNotIn(secret_fragment, subject.citation_choices(source))
+        with mock.patch.object(
+            subject.citation_safety,
+            "redacted_source_spans",
+            wraps=subject.citation_safety.redacted_source_spans,
+        ) as spans:
+            subject.citation_choices(source)
+        spans.assert_called_once_with(source)
+
+    def test_citation_choices_reject_public_duplicate_of_bare_secret_value(self):
+        source = "token=ORCHID\nORCHID\nSafe source."
+        self.assertNotIn("ORCHID", subject.citation_choices(source))
+        self.assertTrue(subject.citation_is_redaction_stable(source, "Safe source."))
+
+    def test_citation_span_safety_handles_unicode_shell_and_multiline_values(self):
+        dimensions = [subject.rubrics.DIMENSIONS_BY_ID["J1"]]
+        cases = (
+            ('{"token":"\u862d\u82b1","note":"safe"}', "\u862d\u82b1"),
+            ("token='ORCHID' public=ready", "ORCHID"),
+            ('token="ORCHID\ncontinued"\npublic=ready', "ORCHID"),
+        )
+        for source, citation in cases:
+            verdict = {
+                "dimensions": {
+                    "J1": {
+                        "score": 5,
+                        "evidence": "Observed source.",
+                        "citation": citation,
+                    }
+                }
+            }
+            with (
+                self.subTest(source=source),
+                self.assertRaisesRegex(subject.AssessmentError, "redaction-stable"),
+            ):
+                subject.strict_verdict(verdict, dimensions, source)
 
     def test_invalid_model_output_exports_no_raw_digest(self):
         raw_output = {"api_token": "guessable-secret"}
@@ -595,6 +711,25 @@ class PromptJudgeTests(unittest.TestCase):
                 artifact, dimensions, subject.CONTEXT, self.settings, 1, "fixture"
             )
         self.assertEqual(vote["status"], "SCORED")
+
+    def test_one_vote_scans_redaction_spans_once_per_artifact(self):
+        artifact = subject.artifact_inventory(
+            self.root, subject.plugin_snapshot(self.root)
+        )[0]
+        dimensions = subject.rubrics.applicable_dimensions(artifact.kind, artifact.name)
+        with (
+            mock.patch.object(
+                subject,
+                "redacted_source_spans",
+                wraps=subject.redacted_source_spans,
+            ) as spans,
+            mock.patch.object(subject.agent_cli, "run_prompt", side_effect=fake_agent),
+        ):
+            vote = subject.one_vote(
+                artifact, dimensions, subject.CONTEXT, self.settings, 1, "fixture"
+            )
+        self.assertEqual(vote["status"], "SCORED")
+        spans.assert_called_once_with(artifact.raw)
 
     def test_invalid_structured_output_repairs_only_until_valid(self):
         calls = []

@@ -238,5 +238,35 @@ class AgentCliSubprocessE2ETests(unittest.TestCase):
         self.assertFalse(self.marker.exists())
 
 
+class ShippedPluginContextTests(unittest.TestCase):
+    def test_complete_shipped_context_and_all_behavior_requests_fit_byte_limit(self):
+        plugin = ENTRYPOINT.parents[1]
+        spec = importlib.util.spec_from_file_location(
+            "behavior_context_e2e", plugin / "tests/behavior_judge.py"
+        )
+        behavior = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(behavior)
+        _, context, components = adapter.plugin_context(plugin)
+        expected = {
+            path.relative_to(plugin).as_posix()
+            for pattern in (
+                "commands/*.md",
+                "agents/*.md",
+                "skills/*/SKILL.md",
+                "skills/*.md",
+            )
+            for path in plugin.glob(pattern)
+        }
+        self.assertEqual({item["path"] for item in components}, expected)
+        self.assertEqual(len(components), len(expected))
+        catalog = behavior.load_catalog(plugin / "tests/scenarios.json")
+        for scenario in catalog["scenarios"]:
+            with self.subTest(scenario=scenario["id"]):
+                composed = adapter.codex_evaluation_prompt(
+                    context, behavior.runner_prompt(scenario)
+                )
+                self.assertLessEqual(len(composed.encode("utf-8")), adapter.MAX_CONTEXT)
+
+
 if __name__ == "__main__":
     unittest.main()

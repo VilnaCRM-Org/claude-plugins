@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 
 from redaction_scan import (
     json_string_end,
     json_string_tail_is_valid,
     secret_value_end,
 )
+from redaction_shell import decode_shell_word
 
 KEY_ASSIGNMENT_RE = re.compile(
     r'(?i)[{,]\s*(?P<json_name>"(?:[^"\\]|\\.)*")\s*:'
@@ -60,6 +62,53 @@ def _redact_json_string(value: str, start: int) -> tuple[int, str] | None:
     return end, rendered
 
 
+def _redact_shell_word(value: str, start: int) -> tuple[int, str] | None:
+    """Bound a nonsecret shell value before inspecting embedded assignments."""
+    end = secret_value_end(value, start)
+    source = value[start:end]
+    if not source:
+        return None
+    try:
+        decoded = decode_shell_word(source)
+    except ValueError:
+        # An unknown outer quote cannot safely delimit an embedded secret tail.
+        return (end, "'[REDACTED]'") if _has_secret_assignment(source) else None
+    redacted = _redact_assignments(decoded, decode_strings=False)
+    if redacted == decoded:
+        return end, source
+    if not _single_quoted_word(source):
+        # Decoding concatenated/escaped segments loses which spaces belonged to
+        # the embedded secret. Keep the outer word boundary, mask its contents.
+        return _shell_envelope_end(value, start, end), "'[REDACTED]'"
+    return end, shlex.quote(redacted)
+
+
+def _shell_envelope_end(value: str, start: int, end: int) -> int:
+    """Retain a following assignment, but cover a premature inner quote's tail."""
+    following = _value_start(value, end)
+    if following == len(value) or KEY_ASSIGNMENT_RE.match(value, following):
+        return end
+    source = value[start:end]
+    if not source or source[0] not in "\"'":
+        return end
+    for match in KEY_ASSIGNMENT_RE.finditer(source):
+        name = match["json_name"] or match["name"]
+        nested = _value_start(source, match.end())
+        if (
+            _secret_name(name, match["json_name"] is not None)
+            and nested < len(source)
+            and source[nested] == source[0]
+        ):
+            return max(end, secret_value_end(value, start + nested))
+    return end
+
+
+def _single_quoted_word(source: str) -> bool:
+    if source.startswith("'"):
+        return source.find("'", 1) == len(source) - 1
+    return source.startswith('"') and json_string_end(source, 0) == len(source)
+
+
 def _value_start(value: str, cursor: int) -> int:
     while cursor < len(value) and value[cursor].isspace():
         cursor += 1
@@ -80,16 +129,23 @@ def _assignment_edit(
             return None
         replacement = f'{name}:"[REDACTED]"' if json_value else f"{name}=[REDACTED]"
         return match.start(group), end, replacement
-    if decode_strings and json_value:
-        string = _redact_json_string(value, start)
+    if decode_strings:
+        string = (
+            _redact_json_string(value, start)
+            if json_value
+            else _redact_shell_word(value, start)
+        )
         if string is not None:
             end, rendered = string
             return start, end, rendered
     return None
 
 
-def _redact_assignments(value: str, decode_strings: bool) -> str:
+def _scan_assignments(
+    value: str, decode_strings: bool
+) -> tuple[str, tuple[tuple[int, int], ...]]:
     chunks = []
+    changed = []
     cursor = emitted = 0
     while match := KEY_ASSIGNMENT_RE.search(value, cursor):
         cursor = match.end()
@@ -97,9 +153,25 @@ def _redact_assignments(value: str, decode_strings: bool) -> str:
         if edit is not None:
             start, end, replacement = edit
             chunks.extend((value[emitted:start], replacement))
+            if replacement != value[start:end]:
+                changed.append((start, end))
             emitted = cursor = end
     chunks.append(value[emitted:])
-    return "".join(chunks)
+    return "".join(chunks), tuple(changed)
+
+
+def _redact_assignments(value: str, decode_strings: bool) -> str:
+    return _scan_assignments(value, decode_strings)[0]
+
+
+def redacted_source_spans(value: str) -> tuple[tuple[int, int], ...]:
+    """Return changed half-open character spans in unchanged original source.
+
+    Enclosing decoded JSON/shell values may be conservatively covered in full.
+    Offsets reveal no secret text. Consumers should scan once per source and
+    reject intersecting citations; do not insert markers into untrusted source.
+    """
+    return _scan_assignments(value, decode_strings=True)[1]
 
 
 def redact_text(value: str) -> str:

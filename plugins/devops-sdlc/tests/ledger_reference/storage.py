@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import stat
 import uuid
 
@@ -43,3 +44,11 @@ def _save(directory, value):
             os.unlink(name, dir_fd=directory)
         except FileNotFoundError:
             pass
+
+
+def _pending_snapshot(directory):
+    """Retain crash leftovers as uncertain evidence; never promote or delete them."""
+    with os.scandir(directory) as entries:
+        return any(
+            re.fullmatch(r"\.attempts-[0-9a-f]{32}", entry.name) for entry in entries
+        )

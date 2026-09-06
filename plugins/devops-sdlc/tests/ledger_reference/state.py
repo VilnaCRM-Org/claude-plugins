@@ -1,5 +1,7 @@
 """Reviewed ledger reference: state boundary."""
 
+import json
+
 from .history import _text
 
 
@@ -45,3 +47,37 @@ def _saved_state(entry):
     return (entry["ralph"] == "none" and entry["breaker"] == "clear") or _text(
         entry.get("ralph_evidence")
     )
+
+
+def _budget_key(identity):
+    return tuple(identity[:2] + identity[3:])
+
+
+def _record_identity(key, task_id):
+    identity = json.loads(key)
+    if not isinstance(identity, list) or len(identity) != 5:
+        raise ValueError("Invalid saved identity")
+    if not all(_text(value) for value in identity) or identity[0] != task_id:
+        raise ValueError("Invalid saved identity")
+    if key != json.dumps(identity, separators=(",", ":")):
+        raise ValueError("Noncanonical saved identity")
+    return identity
+
+
+def _assigned_agents(data):
+    assigned = {}
+    for key, entry in data["entries"].items():
+        identity = _record_identity(key, data["task_id"])
+        budget = _budget_key(identity)
+        if not isinstance(entry, dict) or budget in assigned:
+            raise ValueError("Conflicting budget records")
+        assigned[budget] = identity[2]
+    return assigned
+
+
+def _assignment_valid(data, identity):
+    try:
+        assigned = _assigned_agents(data)
+    except (ValueError, TypeError):
+        return False
+    return assigned.get(_budget_key(identity), identity[2]) == identity[2]

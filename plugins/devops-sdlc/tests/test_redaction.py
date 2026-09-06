@@ -21,8 +21,28 @@ class RedactionBoundaryTests(unittest.TestCase):
             "must": ["validate"],
             "must_not": ["mutate"],
         }
+        citation = "Reviewed safe source."
+        artifact = citation + "\n" + value
+        if len(value.splitlines()) > 1:
+            with self.assertRaises(prompt_judge.AssessmentError):
+                prompt_judge.stored_dimensions(
+                    {
+                        "dimensions": {
+                            "J1": {"score": 5, "evidence": value, "citation": citation}
+                        }
+                    },
+                    artifact,
+                )
+        # The persisted judge field requires single-line evidence. Raw multiline
+        # candidates still exercise the other three real redaction surfaces.
+        evidence = " ".join(value.splitlines())
         stored = prompt_judge.stored_dimensions(
-            {"dimensions": {"J1": {"score": 5, "evidence": value, "citation": value}}}
+            {
+                "dimensions": {
+                    "J1": {"score": 5, "evidence": evidence, "citation": citation}
+                }
+            },
+            artifact,
         )
         return (
             redaction.redact_text(value),
@@ -189,6 +209,12 @@ for n in (1000, 4000, 16000):
     text = '{"message":"token="' + (' ' * n) + 'ORCHID COBALT}'
     result = redact_text(text)
     assert 'ORCHID' not in result and 'COBALT' not in result
+    text = 'key="' + ('ordinary ' * n) + 'api_token=ORCHID"\\nusername=alice'
+    result = redact_text(text)
+    assert 'ORCHID' not in result and 'username=alice' in result
+    text = 'key=' + ('nested=' * n) + 'api_token=ORCHID\\nusername=alice'
+    result = redact_text(text)
+    assert 'ORCHID' not in result and 'username=alice' in result
 print('bounded-redaction-PASS')
 """
         result = subprocess.run(
