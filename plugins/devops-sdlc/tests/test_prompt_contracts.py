@@ -330,10 +330,21 @@ class AtomicLedgerReferenceTests(unittest.TestCase):
         self.assertIsNone(entry["active"])
         before = (self.path / "attempts.json").read_bytes()
         self.identity[2] = "replacement-agent"
-        for action in ("initialize", "reserve", "start"):
-            result = self.call(action, verified_new_task_reference="new claim")
-            self.assertEqual(result["decision"], "BLOCKED")
-            self.assertEqual((self.path / "attempts.json").read_bytes(), before)
+        for action in ("initialize", "reserve", "start", "observe", "finish"):
+            with self.subTest(action=action, count=5):
+                result = self.call(
+                    action,
+                    token=token,
+                    verified_new_task_reference="new claim",
+                    outcome="FAILED",
+                    evidence="fixture outcome",
+                    no_pending_verified=True,
+                )
+                self.assertEqual(result["decision"], "BLOCKED")
+                self.assertEqual(
+                    result["reason"], "conflicting budget or agent reassignment"
+                )
+                self.assertEqual((self.path / "attempts.json").read_bytes(), before)
 
     def test_new_agent_cannot_initialize_or_use_the_same_budget(self):
         self.initialize()

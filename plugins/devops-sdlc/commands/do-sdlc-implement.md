@@ -93,6 +93,12 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    use the independent review stage for Codex, without claiming that flag ran.
    Never disable approval/sandbox controls, invent completion flags or reset a
    tripped breaker. A started or uncertain run cannot trigger backend fallback.
+   When preflight selects Codex, the response must include its evaluation handoff:
+   inject the full Markdown of `commands/do-sdlc-implement.md`,
+   `skills/AI-AGENT-GUIDE.md` and each applicable `SKILL.md` selected by that guide,
+   with each inspected source path and current SHA-256. Require recorded content
+   and hashes before evaluation; `--plugin-root` alone is insufficient. In a
+   proposal, specify this payload and unknown hashes without claiming injection.
 3. Delegate independent file scopes to `infrastructure-implementer`; serialize
    shared IAM/backend/state work. Preserve other contributors' edits. Add
    meaningful regression tests before or with a fix, following repository gates.

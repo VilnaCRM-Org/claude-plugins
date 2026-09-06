@@ -4,6 +4,7 @@ These fixtures are real local processes, not live Claude or Codex vendor calls.
 They expose fixed version, authentication and output-envelope markers only.
 """
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -146,6 +147,30 @@ class AgentCliSubprocessE2ETests(unittest.TestCase):
     def executions(self):
         return [event for event in self.events() if event["event"] == "execute"]
 
+    def test_nested_markdown_and_skill_support_files_are_injected(self):
+        plugin = self.plugin()
+        nested = (
+            "commands/nested/step.md",
+            "agents/nested/reviewer.md",
+            "skills/sample/docs/guide.md",
+        )
+        for relative in nested:
+            path = plugin / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(f"Nested instructions: {relative}", encoding="utf-8")
+        (plugin / "skills/sample/docs/notes.txt").write_text("Not prompt Markdown.")
+        _, context, components = adapter.plugin_context(plugin)
+        by_path = {item["path"]: item["sha256"] for item in components}
+        self.assertEqual(
+            set(by_path), {"commands/example.md", "skills/sample/SKILL.md", *nested}
+        )
+        for relative in nested:
+            self.assertIn(f"Nested instructions: {relative}", context)
+            self.assertEqual(
+                by_path[relative],
+                hashlib.sha256((plugin / relative).read_bytes()).hexdigest(),
+            )
+
     def test_claude_to_codex_preflight_fallback_uses_explicit_context(self):
         with self.environment(SYNTHETIC_CODEX_AUTH="1"):
             result = self.invoke_prompt(
@@ -249,13 +274,9 @@ class ShippedPluginContextTests(unittest.TestCase):
         _, context, components = adapter.plugin_context(plugin)
         expected = {
             path.relative_to(plugin).as_posix()
-            for pattern in (
-                "commands/*.md",
-                "agents/*.md",
-                "skills/*/SKILL.md",
-                "skills/*.md",
-            )
-            for path in plugin.glob(pattern)
+            for folder in ("commands", "agents", "skills")
+            for path in (plugin / folder).rglob("*.md")
+            if path.is_file()
         }
         self.assertEqual({item["path"] for item in components}, expected)
         self.assertEqual(len(components), len(expected))

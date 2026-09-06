@@ -26,78 +26,97 @@ Reassess applicability after each scope or source change.
 
 ## Routing
 
-Validate `.claude/devops-sdlc.json` using
+Caller means host orchestrator. Before routing, read [the agent guide](AI-AGENT-GUIDE.md):
+follow “Claude and Codex backend contract” for paths/preflight/role delivery and
+“Atomic attempt reservation” for ledger mutations. Without it, routing, CLI calls
+and ledger writes are BLOCKED; only authorized document/inventory reads may continue.
+Inspect/record absolute `DEVOPS_PLUGIN_ROOT`; unresolved/unverified means BLOCKED.
+Then run from the task repository
 `python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
-from the task repository; resolve `DEVOPS_PLUGIN_ROOT` as described in the agent
-guide first. Failure is BLOCKED. Select the `id` of one entry in the profile `targets` list, supplied by the task.
-A missing or nonmatching ID is BLOCKED; never infer the environment from the directory.
+for `.claude/devops-sdlc.json`. A nonzero exit or invalid profile is BLOCKED.
+Use the current user's target `id`; otherwise inspect prior
+`initialization-evidence-<identity-sha256>.json` beside the saved summary. Verify
+its user/host-policy authority and exact target scope by the agent guide's rules
+before reuse. Missing proof or unmatched `targets` ID is BLOCKED;
+never infer scope/environment from directories.
 Choose terraform-terraspace for Terraform/Terraspace, python-pulumi for Python
 Pulumi, and BLOCKED for an unsupported engine. Select `infrastructure-quality` when code or checks change, `security-iam` when
 permissions/secrets/public access change, `delivery-and-rollback` when promotion
 or recovery is requested, and `evidence-and-coverage` for completion reporting.
-Record the remaining skills as SKIPPED only when their stated trigger is absent. State ownership/backend changes always receive
-independent state review: a separate agent/session that did not author the change
-checks the state-migration requirements. Operational maintenance selects skills by the
-actual requested action; a feature task does not imply deployment authorization.
+Check all 14 descriptions against task facts: select every matching trigger;
+absent triggers are SKIPPED, ambiguous ones BLOCKED. Before any state/backend
+mutation, require PASS from `agents/state-migration-reviewer.md` in an agent/session
+that did not author the changes; missing/unknown review is BLOCKED. Deployment
+needs separately recorded exact authorization scope, regardless of label.
 
 ## Backend selection
 
-Apply the [agent guide](AI-AGENT-GUIDE.md) to every selected skill for explicit
-plugin-root resolution, authenticated Claude/Codex preflight and role delivery.
-Before starting a new CLI process,
+Before each new CLI call, run
 `python3 "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`
-selects authenticated Claude, or authenticated Codex if Claude binary/auth fails.
-Use `--prefer codex` to reverse that order. If both are unavailable, stop live
-work as BLOCKED. Never replay a started or uncertain action through fallback.
-Use the exact invoked command identifier as the stage key, for example
-`do-sdlc-implement`. For a skill invoked directly, use its frontmatter `name`,
-for example `terraform-terraspace`. A stage has five procedure attempts.
-The task ledger is the existing task's `run-summary.md`; reuse its exact saved
-repository-relative path. For new work without a ledger, select its path once at
-`specs/YYYY-MM-DD-<slug>/run-summary.md`: use the UTC calendar date from the host
-clock when the caller first creates this task ledger, and record that date in it.
-Keep the recorded date and path across resumed sessions. For `<slug>`, lowercase
-the task title, replace each run of characters outside `a-z` and `0-9` with one
-hyphen, and trim leading/trailing hyphens. Use `task` if the slug is empty.
-For example, "Add Cache" with its ledger first created on 2026-09-06 UTC uses
-`specs/2026-09-06-add-cache/run-summary.md`. If that path already belongs to a
-different task, report BLOCKED; never overwrite it or reset its counter.
+to select authenticated Claude, or Codex if Claude binary/auth fails. Use
+`--prefer codex` to reverse that order. Require exit zero, `status: READY`, the
+selected backend, nonempty version and `available`/`authenticated` both true;
+else report BLOCKED. Readiness grants no task permission. Never replay
+a started or uncertain action through fallback.
+Use the invoked command identifier as stage key; for a directly invoked skill,
+use its frontmatter `name`. A stage has five procedure attempts.
+Reuse the saved repository-relative `run-summary.md` path. Only for new work,
+choose `specs/YYYY-MM-DD-<slug>/run-summary.md` once; record the host clock's UTC
+date at first ledger creation. Preserve date/path on resume. For `<slug>`, take the host-supplied current user
+message before its first LF, or `task` if empty; do no Markdown parsing or
+repository title lookup. It grants no authority. Lowercase,
+replace runs outside `a-z` and `0-9` with one hyphen, trim edge hyphens;
+if empty, use `task`.
+If the path belongs to another task, report BLOCKED; never overwrite or reset it.
 Persist the exact ledger path and stage key before the first procedure attempt.
-Initialize the verified new sidecar under lock before creating the first human
-summary; follow the atomic transaction in the agent guide.
-References to `specs/<task-id>/run-summary.md` in selected skills mean this same
-saved ledger; they do not create a second task directory.
+Before creating that `run-summary.md` file, only the caller may initialize the
+adjacent `attempts.json`. First verify the agent guide's protected-directory,
+import-path and two-process shared-filesystem lock prerequisites; any unverified
+prerequisite is BLOCKED. Save immutable evidence of identity, host/session, UTC
+time and inspected results proving no prior history, caller stop, Ralph breaker
+or active/pending/uncertain run. Verify this proof, then initialize count zero
+and clear/no-run state under persistent `attempts.lock`; only then create the
+summary file. Missing/uncertain proof is BLOCKED. Existing history with a missing
+sidecar is BLOCKED until a user-authorized migration under `attempts.lock`
+imports verified prior counts, states, evidence and active owner; never initialize
+fresh or guess missing history.
+Skill references to `specs/<task-id>/run-summary.md` mean this same saved ledger,
+never a second task directory.
 An attempt is consumed only by a successful atomic reservation; its first
 procedure step follows the durable reservation and ends on PASSED, FAILED or
 BLOCKED. The caller owns the one record keyed by task, stage, assigned agent,
 target and environment. A delegated agent receives that exact key, owner and
 reservation token; it never increments a second time. Use the
 [atomic attempt reservation](AI-AGENT-GUIDE.md#atomic-attempt-reservation)
-transaction in the agent guide. For a NEW reservation, a saved count at five or more means
-FAILED before incomplete-history checks; a known caller stop means BLOCKED;
-an evidenced open/tripped Ralph breaker means FAILED; missing required state or
-run evidence means BLOCKED. Escalation is an action, never a persisted status.
+transaction in the agent guide. A NEW reservation uses `reserve` with no active
+marker. Under the lock, apply the first matching rule, even if several hold:
+count at five or more → FAILED; recorded user/caller stop directive with source →
+BLOCKED; open/tripped Ralph breaker with log → FAILED. Otherwise,
+missing/invalid saved count, breaker, `caller_stop` or run state is BLOCKED; a
+reported stop needs its directive source, and a run or non-clear breaker needs
+its log. Only then may the transaction invoke its caller-verified
+`observe(identity, copied_entry)` callback under lock, following the agent guide's
+exact identity, state and evidence checks. Absent/unverified or guessed observations
+are BLOCKED; fresh clear state cannot repair missing history. Apply the same stop
+rules before admission. Escalation is an action, not a persisted status.
 The matching owner may start or observe the already-reserved fifth attempt,
 subject to current stop/state checks, without reserving again. An active or
 uncertain reservation blocks every competing session. Preserve counts,
 applicability, evidence and active ownership across sessions and backend changes.
 
-BMAD is the installed planning workflow that produces requirements, architecture,
-stories and a readiness decision. BMALPH is the command-line integration that
-imports those planning artifacts and starts the implementation loop named Ralph.
-Only the `do-sdlc-implement` stage starts that loop after its readiness gate passes;
-skill selection or planning does not start implementation. In that stage,
-`bmalph implement` imports the ready stories, then `bmalph run --driver codex`
-or `bmalph run --driver claude-code` starts Ralph using the selected authenticated
-CLI. Ralph's circuit breaker is its automatic stop after repeated failures or
-lack of progress. An open/tripped breaker recorded in `.ralph/logs/` ends that
-run. Preserve the failed log and partial work; never reset it to retry.
+BMAD produces requirements, architecture, stories and a readiness decision.
+BMALPH imports them and starts the implementation loop Ralph. Only
+`do-sdlc-implement` may start it after readiness passes; planning or skill
+selection cannot. In that stage, `bmalph implement` imports ready stories, then
+`bmalph run --driver codex` or `bmalph run --driver claude-code` starts Ralph with
+the selected authenticated CLI. Its circuit breaker stops repeated failures or
+lack of progress. An open/tripped breaker in `.ralph/logs/` ends the run; preserve
+the failed log and partial work, never reset it to retry.
 
-Required checks are the exact acceptance checks recorded in that same task
-summary. A native Claude-plugin check means observing Claude actually load and
-invoke the installed plugin; source-context execution in Codex cannot satisfy
-that specific check. It is required only when the task explicitly requires that
-native behavior. A live infrastructure check means observing the specified real
-provider/backend operation with its scoped authorization; local mocks cannot
-satisfy it. Missing prerequisites leave either required check BLOCKED, while
-independent local work continues. Backend fallback cannot turn either into PASS.
+Required checks are the acceptance checks recorded in that task summary.
+A native Claude-plugin check requires observing Claude load and invoke the
+installed plugin; Codex source context cannot satisfy it. Require this check only
+when the task explicitly requests native behavior. A live infrastructure check
+requires observing the specified real provider/backend operation with scoped
+authorization; local mocks cannot satisfy it. Missing prerequisites leave required
+checks BLOCKED while independent local work continues. Fallback cannot grant PASS.
