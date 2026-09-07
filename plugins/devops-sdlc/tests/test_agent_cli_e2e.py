@@ -301,11 +301,11 @@ class ShippedPluginContextTests(unittest.TestCase):
         overhead = (
             len(adapter.codex_evaluation_prompt(context, "x").encode("utf-8")) - 1
         )
-        remaining = 320_000 - overhead
+        remaining = 330_000 - overhead
         self.assertGreater(remaining, 0)
         request = "é" * (remaining // 2) + "x" * (remaining % 2)
         exact = adapter.codex_evaluation_prompt(context, request)
-        self.assertEqual(len(exact.encode("utf-8")), 320_000)
+        self.assertEqual(len(exact.encode("utf-8")), 330_000)
         self.assertIn(context, exact)
         self.assertIn(request, exact)
         ready = dict(status="READY", backend="codex", version="fixture", fallback=[])
