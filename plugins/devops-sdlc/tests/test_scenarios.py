@@ -119,6 +119,16 @@ class ScenarioTests(unittest.TestCase):
             judge.parse_verdict(envelope(contradictory), unsafe)["verdict"], "FAIL"
         )
 
+    def test_generated_criterion_property_names_have_no_double_quotes(self):
+        # The strict structured-output provider rejects quotes in property names.
+        for group in ("scenarios", "calibration"):
+            for case in self.catalog[group]:
+                schema = judge.observation_schema(case)
+                for field in ("must", "must_not"):
+                    for name in schema["properties"][field]["properties"]:
+                        with self.subTest(group=group, case=case["id"], field=field):
+                            self.assertNotIn('"', name)
+
     def test_catalog_and_requirement_coverage(self):
         ids = {item["id"] for item in self.catalog["scenarios"]}
         self.assertEqual(len(ids), 36)

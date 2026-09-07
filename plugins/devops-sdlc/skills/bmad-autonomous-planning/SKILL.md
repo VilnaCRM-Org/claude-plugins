@@ -55,9 +55,11 @@ for required independent review; otherwise BLOCKED.
 ## Applicability gate
 
 Apply when the requested action matches this skill's description above.
-Otherwise record SKIPPED with the unmatched trigger and route to the named sibling. Missing tools, authorization or
-required evidence is BLOCKED and cannot satisfy the corresponding gate. Every
-skill receives a verdict; no silent skips.
+Otherwise record SKIPPED with the unmatched trigger; select matching skills from
+the [Complete inventory](../AI-AGENT-GUIDE.md#complete-inventory). Missing tools, authorization or required evidence is BLOCKED and
+cannot satisfy the corresponding gate. Record a verdict for each of the 14 skills
+in that inventory: known nonmatches are SKIPPED with reasons; matching or
+command-required skills use their own gates and evidence. No silent skips.
 
 ## Procedure
 
@@ -84,8 +86,11 @@ skill receives a verdict; no silent skips.
    `"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`.
    If neither CLI is authenticated, finish independent planning but mark the live
    implementation handoff BLOCKED. Preserve the ledger and phase counters.
-9. Routine workflow menus use existing user intent. Missing production scope or
-   ownership does not authorize a mutation; list it as a later execution gate.
+9. At an installed workflow menu, choose the option for the current user-requested
+   planning step. For equivalent choices within that scope, use the workflow
+   definition's documented default and record the choice as an assumption. Missing
+   production scope or ownership does not authorize a mutation; list it as a later
+   execution gate.
 
 ## Evidence and failure handling
 

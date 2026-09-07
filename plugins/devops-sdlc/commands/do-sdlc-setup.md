@@ -48,9 +48,18 @@ If that capability or the role definition is absent, immediately BLOCK that
 review/QA gate; there is no role fallback or implementer self-approval.
 
 Stage prerequisites: Python 3, Git, both helper files and a resolved writable
-repository directory for a missing profile. Check executable availability/version
-for each non-null command mapping required by the requested next stage and one
-authenticated Claude/Codex backend. For planning/implementation next, also check
+repository directory for a missing profile. The requested next stage is the
+command explicitly named by the current task or its accepted caller handoff after
+setup; read that command's Inputs/Procedure to identify its required profile
+`commands` mappings (`validate`, `test`, `check`, `security`, `preview`) for each
+selected target.
+If only setup is requested, check setup prerequisites; do not invent a successor.
+An ambiguous requested stage is BLOCKED before dependent checks. After profile
+validation, check executable availability/version for each required non-null
+mapping's executable and its reviewed wrapper dependencies, plus one authenticated
+Claude/Codex backend. These dependencies are the selected engine tooling, determined
+from that target's `stack_type` and the implementations reviewed in step 3, not all
+three engines. For planning/implementation next, also check
 `bmalph --help`; bmalph is the tool connecting BMAD planning and Ralph execution.
 A null mapping is unavailable; if requested by the task it blocks that capability.
 For a new CLI invocation only, before it starts, binary/authentication preflight
@@ -86,14 +95,18 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    profile; for requested refresh, show changes and retain user-owned choices.
    Record unknown account/backend/environment values as unresolved, not guesses.
    Missing capabilities are null, never invented commands or unconditional PASS.
-5. Validate the profile. Verify Python, Git, BMALPH and selected engine tooling.
+5. Validate the profile, then verify Python, Git and the tools identified in
+   Stage prerequisites; BMALPH is required for planning/implementation next.
    Run `"$TRUSTED_PYTHON" -I "${DEVOPS_PLUGIN_ROOT}/scripts/agent_cli.py" detect --backend auto`
    with the user's `--prefer claude` or `--prefer codex` choice when supplied.
    Detection verifies binary and authentication, preserving fallback reasons.
    Explicit `--backend claude` or `--backend codex` blocks when unavailable;
    auto selection needs one authenticated backend, not credentials for both.
-   Record the selected backend/version and configured BMALPH driver. Verify
-   installed platform instructions and help; preserve existing initialization.
+   Record the selected backend/version and configured BMALPH driver. For
+   planning/implementation, read the installed BMALPH package's instructions for
+   that backend's driver and `bmalph --help`; compare them with existing project
+   BMAD/Ralph configuration without reinitializing it. These are the installed
+   platform instructions; they do not authorize starting Ralph during setup.
    Install a missing development dependency only when installation is included
    in the user's task scope and its exact version/source is declared by the
    repository lockfile or tool configuration. Otherwise record the missing

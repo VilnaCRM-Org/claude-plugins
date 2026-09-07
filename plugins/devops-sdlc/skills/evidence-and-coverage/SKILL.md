@@ -57,7 +57,7 @@ for required independent review; otherwise BLOCKED.
 ## Applicability gate
 
 Apply when the requested action matches this skill's description above.
-Otherwise record SKIPPED with the unmatched trigger and route to the named sibling. Missing tools, authorization or
+Otherwise record SKIPPED with the unmatched trigger; select matching skills from the [Complete inventory](../AI-AGENT-GUIDE.md#complete-inventory). Missing tools, authorization or
 required evidence is BLOCKED and cannot satisfy the corresponding gate. Every
 skill receives a verdict; no silent skips.
 

@@ -119,10 +119,18 @@ and overall-gate report required by step 6.
    or malformed/incomplete API responses immediately prevent acceptance.
 3. Delegate failing checks to `ci-fixer`, preserving thresholds and protections.
    Push fixes, obtain the new head and invalidate old review/QA/check evidence.
-   Poll at most 10 times at 60-second intervals per stage attempt, stopping
-   earlier on failure or success; persist poll count and last conclusions.
-   After 10 minutes still pending, record BLOCKED and stop polling. Do not
-   consume another attempt solely to evade this wait limit. Missing ci-fixer
+   Pending checks use the following wait loop even when no check has failed.
+   In the response, propose this loop conditionally if identity, authorization or
+   ledger proof is missing; polling stays BLOCKED until those prerequisites pass.
+   Within the verified active stage reservation, allow at most 10 polls total,
+   60 seconds apart, within the original 10-minute wait window. Read the saved
+   poll count and remaining time; never invent or reset an unknown budget.
+   Before each poll, recheck the PR head, then query step 2's check/status APIs.
+   A changed head invalidates old evidence and stops this wait for revalidation,
+   without resetting stage or poll counts. Stop earlier on failure or success;
+   persist poll count and last conclusions. When either limit is reached while
+   pending, record BLOCKED and stop. Do not consume another attempt solely to
+   evade this wait limit. Missing ci-fixer
    or comment-resolver capability blocks the corresponding repair/resolution.
 4. Read all review threads and all pages, including human and bot findings.
    Delegate to `pr-comment-resolver`; validate each comment against the actual
