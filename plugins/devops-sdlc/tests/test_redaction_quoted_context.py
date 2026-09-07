@@ -21,6 +21,11 @@ class QuotedContextTests(unittest.TestCase):
             "self.assertIn(\"unrecognized arguments: '--profile'\", output)\n```",
             'Run `["make", "terraspace-validate", "env=development"]`.',
             "Don't change the environment; use `env=development`.",
+            'gh api "repos/owner/name/check-runs?per_page=100"',
+            '`gh api "repos/owner/name/check-runs?per_page=100"`',
+            "gh api 'repos/owner/name/check-runs?per_page=100'",
+            "`gh api 'repos/owner/name/check-runs?per_page=100'`",
+            '"env=development" followed by ordinary prose.',
         ):
             candidate = proposal + "\nResult READY\ntoken=ORCHID\nFinal SAFE"
             expected = candidate.replace("token=ORCHID", "token=[REDACTED]")

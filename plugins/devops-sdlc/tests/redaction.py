@@ -158,9 +158,14 @@ def _standalone_string_edit(value: str, start: int) -> tuple[int, str] | None:
     except (ValueError, RecursionError):
         return (len(value), '"[REDACTED]"') if _has_secret_assignment(source) else None
     if not _standalone_tail_is_valid(value, end):
-        # A nonsecret prefix may contain the opening delimiter of a nested
-        # JSON assignment. Let the outer scanner inspect that original source.
-        return (len(value), '"[REDACTED]"') if _has_secret_assignment(decoded) else None
+        if _has_secret_assignment(decoded):
+            return len(value), '"[REDACTED]"'
+        # A complete nonsecret shell/Markdown word may precede ordinary prose.
+        # Consume its closer so inner assignments cannot reopen that quote.
+        if end < len(value) and (value[end].isspace() or value[end] == "`"):
+            return end, source
+        # An adjacent nonsecret prefix may open a nested JSON assignment.
+        return None
     redacted = _redact_assignments(decoded, decode_strings=False)
     if redacted == decoded:
         return end, source
