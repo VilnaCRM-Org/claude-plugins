@@ -7,57 +7,104 @@ description: "Use when selecting or running infrastructure lint, type, policy an
 
 ## Profile keys consumed
 
-`project.repo` and `targets` from `.claude/devops-sdlc.json`, validated with
-`python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`.
-Resolve `DEVOPS_PLUGIN_ROOT` to the inspected plugin directory before invocation.
-If profile validation fails, report BLOCKED; do not execute repository commands.
+Validate `.claude/devops-sdlc.json` with
+`python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .` after
+resolving `DEVOPS_PLUGIN_ROOT` to the inspected installed plugin directory. A
+validation failure is BLOCKED; do not execute repository commands.
 
-- Use `project.repo` for requested GitHub queries after it matches the intended
-  owner/repository. A mismatch blocks remote work; a local-only task makes no
-  GitHub query and records that branch explicitly.
-- Select the supplied target ID from `targets`; no match or an omitted/ambiguous
-  selection is BLOCKED. Resolve its root inside the repository. A contained root
-  may be inspected; a missing, escaping or symlinked root is BLOCKED.
-- If the selected engine is Terraform, use its reviewed HCL/plan entry points;
-  if Terraspace, use its stack-aware wrappers and environment binding; if Pulumi,
-  use its reviewed Python/uv entry points and explicit stack/backend binding.
-  A different engine is BLOCKED. An engine-specific skill skips the other engine
-  with a reason and routes to its sibling; it never runs the wrong toolchain.
-- Local static work may omit an environment. Preview or operational work must
-  select an existing environment entry; missing identity fields block that work.
-- If the stage needs a command, use its reviewed configured argv. A null command
-  blocks a required check; do not invent a substitute. Analysis-only work records
-  commands as not invoked and cannot claim an execution result.
+`project.repo` and `targets` are the only profile fields used for selection.
+The intended repository is the owner/repository named by the current request;
+if the request omits it, use the Git origin only after confirming it belongs to
+the selected working directory. `project.repo` must match that identity before
+any GitHub query. A mismatch blocks remote work; local-only work makes no query
+and records that branch.
 
-### Interpretation of the profile branches
+If the current request supplies a target ID, take its literal value; do not
+derive it from a directory, CI job, profile order, or summary. If, and only if,
+the request supplies no target ID, a resume may reuse the verified immutable
+initialization identity's target value unchanged. New work has no target
+fallback. Call the resulting value `TARGET_ID` and record its provenance as
+`current-request` or `verified-resume-identity`. An absent,
+ambiguous, or nonmatching value is BLOCKED. Match exactly one `targets[].id`,
+then resolve its `root`; a missing, escaping, or symlinked root is BLOCKED.
+If a supplied target ID differs from a resume's immutable identity target, stop
+BLOCKED before a ledger reservation; do not create a new counter or identity.
 
-The intended repository is the owner/repository named by the task; if omitted,
-use its Git origin after confirming it matches the selected working directory.
-A reviewed argv means the recorded profile command plus every local wrapper it
-calls has been read for side effects by an agent other than its author. Record
-that review and source hash; unavailable review blocks command execution.
-A command is needed when a procedure step or the task's acceptance checklist
-requires executing validation, tests, security checks or preview. If the task
-requests analysis or a plan only, describe those commands and mark them unexecuted.
-The acceptance checklist is the required outcomes in saved `run-summary.md`;
-missing outcomes needed for this skill are BLOCKED, never inferred as passed.
-Select each sibling whose trigger matches the requested action; SKIPPED only
-for nonmatching scope. Use an agent/session other than the implementation's author
-for required independent review; otherwise BLOCKED.
+The current request must likewise supply an environment for preview or
+operational work. Local static work may omit it. Only when the request omits
+the environment may a resume reuse the verified immutable initialization
+identity's environment unchanged. A supplied environment that differs from that
+immutable identity is BLOCKED before a ledger reservation; do not create a new
+counter or identity. `<no-environment>` is allowed only for verified local-static
+initialization, remains only in the ledger identity, and is never passed to the
+helper. The selected real environment must be an existing key in the selected
+target's `environments`; missing identity fields block that work.
 
-## Applicability gate
+Route the selected `stack_type` exactly as follows: `terraform` and
+`terraspace` require [terraform-terraspace](../terraform-terraspace/SKILL.md);
+`pulumi` requires [python-pulumi](../python-pulumi/SKILL.md). Any other value
+is BLOCKED. Terraform inspection covers HCL and reviewed plan entry points;
+Terraspace covers stack-aware wrappers and the selected environment binding;
+Pulumi covers Python/uv entry points and the selected stack/backend binding.
+Do not run another engine's toolchain.
 
-Apply when the requested action matches this skill's description above.
-Otherwise record SKIPPED with the unmatched trigger and route to the named sibling. Missing tools, authorization or
-required evidence is BLOCKED and cannot satisfy the corresponding gate. Every
-skill receives a verdict; no silent skips.
+There are two distinct stage values. The ledger `stage` is the invoking command
+basename without `.md`, or this frontmatter `name` for direct use; it is the
+second identity element and the existing `stage: n/5` report field. The
+`helper_stage` is exactly one of `validate`, `test`, `check`, `security`, or
+`preview`, selected for the specific required check. Read only
+`targets[].commands.<helper_stage>.argv` from the validated profile. Never use
+an invocation name such as `do-sdlc-qa` as a `commands` key. A required null
+command is BLOCKED; do not invent a substitute. Inspect the configured argv and
+every local wrapper it invokes for side effects before execution. Use the exact
+configured argv. The helper intention's `argv` records the selected plan; it
+does not replace review of the profile, CI source, or wrapper source. For
+analysis-only work, record commands as uninvoked and do not claim execution.
+
+A reviewed argv means its recorded profile command and every local wrapper it
+calls were read for side effects by an agent other than the implementation
+author. Record that review and the source hash. Missing independent review
+blocks execution. Required acceptance outcomes are those in the saved
+`run-summary.md`; missing required outcomes are BLOCKED, never inferred passed.
+
+## Complementary-skill matching
+
+Compare the current request facts with every item below, in this listed order.
+Select each named skill whose listed trigger is present; record SKIPPED with the
+absent trigger for every other item. If a fact could match but cannot be
+determined, record that named skill BLOCKED. This procedure replaces no skill's
+own gate.
+
+- `backup-recovery`: backups, restore drills, RPO/RTO, or disaster recovery.
+- `bmad-autonomous-planning`: BMAD requirements, architecture, stories, or readiness.
+- `cost-optimization`: infrastructure spend, budgets, quotas, or rightsizing.
+- `delivery-and-rollback`: saved-plan promotion, deployment health, or rollback.
+- `drift-management`: declared-versus-deployed comparison or drift reconciliation.
+- `environment-lifecycle`: project onboarding, upgrades, or environment retirement.
+- `evidence-and-coverage`: result provenance or frozen-baseline coverage.
+- `incident-response`: active outage, alert, or credential incident.
+- `infrastructure-quality`: lint, type, policy, or regression gates.
+- `observability`: logs, metrics, alarms, SLOs, or notification routing.
+- `python-pulumi`: Python Pulumi program creation, edits, previews, or engine tests.
+- `security-iam`: IAM, OIDC, KMS, secrets, public access, or privileged CI permissions.
+- `state-migration`: backend/state ownership transfer, resource import, or
+  Terraform-to-Pulumi transfer.
+- `terraform-terraspace`: Terraform HCL or Terraspace stack edit, validation,
+  or reviewed plan.
+
+Use a non-author agent/session for every required independent review; otherwise
+BLOCKED. Missing tools, authorization, or required evidence is BLOCKED and
+cannot satisfy its corresponding gate. Every listed skill receives a verdict;
+there are no silent skips.
 
 ## Procedure
 
 1. Inventory real CI and Make targets by source inspection. Select checks
    for the affected root and language; do not silently omit available gates.
-   A new Python helper requires explicit Ruff lint and format checks, configured
-   type analysis (ty where declared), and the actual unit/CLI regression suite;
+   Bind each selected check to its source path, `helper_stage`, and exact
+   configured `commands.<helper_stage>.argv`. A new Python helper requires
+   explicit Ruff lint and format checks, configured type analysis (ty where
+   declared), and the actual unit/CLI regression suite;
    `py_compile` alone covers neither lint nor types. For a reviewed uv/unittest
    repository, proposed command forms include `uv run ruff check scripts tests`,
    `uv run ruff format --check scripts tests`, `uv run ty check scripts`, and
@@ -75,10 +122,12 @@ skill receives a verdict; no silent skips.
    denied permissions, missing tooling and malformed or stale evidence.
 4. Pin source SHA and tool versions. Capture command, exit status and semantic
    outcome: a zero exit containing SKIPPED or placeholders is not PASSED.
-5. Run every explicitly selected profile target affected by the diff in a clean disposable checkout and installed plugin
-   path. Keep reports independent of implementation; fix causes and rerun impacted
-   cases plus regression. Apply independent calibrated LLM judging to prompts
-   and behavior; no credentials is BLOCKED for a required live judge.
+5. Process one selected target at a time in a clean disposable checkout and
+   installed plugin path. Repeat only for another diff-affected target that is
+   already explicitly authorized by the current request. Keep reports independent
+   of implementation; fix causes and rerun impacted cases plus regression. Apply
+   independent calibrated LLM judging to prompts and behavior; no credentials is
+   BLOCKED for a required live judge.
 
 Prompt assessment uses `tests/prompt_judge.py` with three independent votes,
 all applicable J1-J11 dimensions, median at least 4, no critical vote at or below
@@ -91,12 +140,13 @@ the required live evaluation is BLOCKED, while independent static checks continu
 
 ## Evidence and failure handling
 
-Return PASSED, FAILED, SKIPPED or BLOCKED with source SHA, selected target and,
-when used, environment, command results, artifact hashes and unresolved findings.
-Every applicable acceptance gate requires PASSED; SKIPPED is only for an action
-outside the requested scope, with its reason recorded before evaluating results.
-Missing input, tool, helper, reviewer, authentication or authorization:
-BLOCKED; name the exact prerequisite and stop dependent work immediately.
+Return PASSED, FAILED, SKIPPED or BLOCKED with source SHA, selected `TARGET_ID`,
+its provenance, and, when used, environment, command results,
+artifact hashes and unresolved findings. Every applicable acceptance gate
+requires PASSED; SKIPPED is only for an action outside the requested scope, with
+its reason recorded before evaluating results. Missing input, tool, helper,
+reviewer, authentication or authorization: BLOCKED; name the exact prerequisite
+and stop dependent work immediately.
 Continue independent work only. Fix root causes; never suppress findings, add
 baseline exceptions, lower thresholds, disable tests or edit quality config to pass.
 
@@ -127,5 +177,5 @@ reviewable plan. Never fabricate runtime observations, approval or cloud success
 
 ## Related skills
 
-Use [the decision guide](../SKILL-DECISION-GUIDE.md) to select complementary
-skills and [the agent guide](../AI-AGENT-GUIDE.md) for delegation boundaries.
+Use [the decision guide](../SKILL-DECISION-GUIDE.md) for the complete inventory
+and [the agent guide](../AI-AGENT-GUIDE.md) for delegation boundaries.

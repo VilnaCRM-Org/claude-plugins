@@ -43,8 +43,13 @@ The task ledger is the saved human `run-summary.md`; its acceptance checklist
 records the task's required outcomes before execution. Missing required outcomes
 are BLOCKED, never inferred as passed. Adjacent `attempts.json` is the canonical
 attempt-state sidecar, not the acceptance checklist.
-Select each sibling whose trigger matches the requested action; SKIPPED only
-for nonmatching scope. Use an agent/session other than the implementation's author
+Sibling means another shipped skill. Before routing, read the
+[Complete inventory](../AI-AGENT-GUIDE.md#complete-inventory) and compare each
+"Use when" trigger with the requested action, validated engine and changed
+resource/file scope. Every match and command-required skill is required; read
+its `SKILL.md` before dependent work. Record SKIPPED only for known nonmatches;
+missing or ambiguous facts or required skill content is BLOCKED.
+Use an agent/session other than the implementation's author
 for required independent review; otherwise BLOCKED.
 
 ## Applicability gate

@@ -41,13 +41,19 @@ Then resolve identity/scope from current user instructions and host policy:
    Preserve date/path; known history requires resume/migration, never a new budget.
 2. In the task checkout run
    `python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
-   on `.claude/devops-sdlc.json`; nonzero/invalid: BLOCKED. Take the target ID and environment name
-   explicitly supplied in the current user request; only absent selections may reuse verified step-1
-   initialization identity. A reused `<no-environment>` identity leaves helper
-   environment unset and requires continued local-static scope. New work has no fallback. Require one matching profile
-   `targets[].id` and, when selected, a key in that target's `environments`; absent/ambiguous: BLOCKED. Preview/
-   operations need environment; local static checks may omit it. Never infer
-   scope from directories or summary claims.
+   on `.claude/devops-sdlc.json`; nonzero/invalid: BLOCKED. Take the target ID and
+   environment name explicitly supplied in the current user request.
+   On resumption only, an absent target ID may reuse the saved identity's target;
+   an absent environment name may reuse its environment. This fallback requires
+   the initialization identity and current scope to pass step 1's verification.
+   It fills only these two absent fields. A supplied value conflicting with the
+   saved identity is BLOCKED; never replace that identity or create another budget.
+   A reused `<no-environment>` identity leaves helper environment unset and requires
+   continued local-static scope. New work has no saved-value fallback.
+   Require one matching profile `targets[].id` and, when selected, a key in that
+   target's `environments`; missing required values or ambiguity is BLOCKED.
+   Preview/operations need an environment; local static checks may omit it.
+   Never infer scope from directories or summary claims.
 3. For a verified NEW task restricted to local static checks with no selected
    environment, use `<no-environment>` only in the ledger identity. This reserved
    marker cannot be a profile environment; never pass it as helper `--environment`.
@@ -95,7 +101,16 @@ true `available`/`authenticated`; otherwise BLOCKED. Readiness grants no permiss
 Never replay started/uncertain work via fallback. In response/saved summary,
 record backend/version/fallback reason and proposed driver command even if BLOCKED:
 Claude → `bmalph run --driver claude-code`; Codex → `bmalph run --driver codex`.
-Apply the guide's model rules, never cross-backend translation.
+The following `--model` rule applies to `agent_cli.py run` evaluation, not
+`detect` or the BMALPH driver commands above.
+Pass `--model "$MODEL"` only if the user instruction or caller configuration
+supplies an explicit backend model. Before invocation, record its exact value/source
+in the task ledger. Otherwise omit it, use the CLI configured default, record
+`requested_model: null`, and report an observed model only if the CLI identifies it.
+Never infer a cross-backend alias.
+Set `MODEL` to that recorded explicit value when passing the option. If the CLI
+reports no observed model, record `observed_model: null` (unknown); a requested
+model is not an observation.
 
 ## Atomic admission
 

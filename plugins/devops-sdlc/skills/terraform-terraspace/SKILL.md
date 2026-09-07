@@ -41,8 +41,13 @@ requires executing validation, tests, security checks or preview. If the task
 requests analysis or a plan only, describe those commands and mark them unexecuted.
 The acceptance checklist is the required outcomes in saved `run-summary.md`;
 missing outcomes needed for this skill are BLOCKED, never inferred as passed.
-Select each sibling whose trigger matches the requested action; SKIPPED only
-for nonmatching scope. Use an agent/session other than the implementation's author
+Sibling means another shipped skill. Before routing, read the
+[Complete inventory](../AI-AGENT-GUIDE.md#complete-inventory) and compare each
+"Use when" trigger with the requested action, validated engine and changed
+resource/file scope. Every match and command-required skill is required; read
+its `SKILL.md` before dependent work. Record SKIPPED only for known nonmatches;
+missing or ambiguous facts or required skill content is BLOCKED.
+Use an agent/session other than the implementation's author
 for required independent review; otherwise BLOCKED.
 
 ## Applicability gate
