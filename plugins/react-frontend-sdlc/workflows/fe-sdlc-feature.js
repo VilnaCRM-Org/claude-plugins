@@ -90,9 +90,14 @@ const plan = await agent(
   ].join('\n'),
   { label: 'resolve-plan', phase: 'Resolve plan', schema: PLAN_SCHEMA },
 )
-if (!plan || plan.blocked || !plan.issue_url || !plan.slug || !plan.readiness_pass) {
-  return escalate('plan', '1/1', plan?.blocked || 'issue, specs slug or readiness PASS missing', 'run /fe-sdlc-issue and /fe-sdlc-plan interactively, then re-run')
+function planGap(p) {
+  if (!p) return 'plan agent returned nothing'
+  if (p.blocked) return p.blocked
+  const missing = [['issue_url', 'issue'], ['slug', 'specs slug'], ['readiness_pass', 'readiness PASS']].filter(([k]) => !p[k]).map(([, label]) => label)
+  return missing.length ? `${missing.join(', ')} missing` : null
 }
+const gap = planGap(plan)
+if (gap) return escalate('plan', '1/1', gap, 'run /fe-sdlc-issue and /fe-sdlc-plan interactively, then re-run')
 OPTS.slug = plan.slug
 OPTS.issue = plan.issue_url
 note(`plan resolved: ${plan.issue_url} specs/${plan.slug}/ stories=${plan.stories.length} done=${plan.stories.filter((s) => s.done).length}`)

@@ -260,6 +260,15 @@ function dropUnreachable(names) {
   }
 }
 
+const SENSOR_FIELDS = {
+  head: (s) => typeof s.head === 'string',
+  'ci.failing': (s) => Array.isArray(s.ci?.failing),
+  'ci.pending': (s) => Array.isArray(s.ci?.pending),
+  'unresolved.total': (s) => Number.isInteger(s.unresolved?.total),
+  reviewers: (s) => Array.isArray(s.reviewers),
+}
+const missingSensorFields = (s) => Object.entries(SENSOR_FIELDS).filter(([, ok]) => !ok(s)).map(([name]) => name)
+
 async function snapshot(waitSeconds, waitVerdicts) {
   phase(waitSeconds > 0 ? 'Wait' : 'Snapshot')
   const s = await agent(snapshotPrompt(waitSeconds, waitVerdicts || 'WAIT'), {
@@ -269,10 +278,9 @@ async function snapshot(waitSeconds, waitVerdicts) {
     effort: 'low',
   })
   if (!s) throw new Error('snapshot agent returned nothing')
-  const complete = s.ci && Array.isArray(s.ci.failing) && Array.isArray(s.ci.pending)
-    && s.unresolved && Number.isInteger(s.unresolved.total) && Array.isArray(s.reviewers) && typeof s.head === 'string'
-  if (!complete && s.verdict !== 'BLOCKED') {
-    return { verdict: 'BLOCKED', next: `malformed sensor payload — missing ${['ci', 'unresolved', 'reviewers', 'head'].filter((k) => s[k] == null).join(',') || 'fields'}`, pr: s.pr || 0, head: '', ci: { status: 'none', failing: [], pending: [] }, unresolved: { total: 0 }, reviewers: [], notes: [] }
+  const missing = missingSensorFields(s)
+  if (missing.length && s.verdict !== 'BLOCKED') {
+    return { verdict: 'BLOCKED', next: `malformed sensor payload — missing ${missing.join(',')}`, pr: s.pr || 0, head: '', ci: { status: 'none', failing: [], pending: [] }, unresolved: { total: 0 }, reviewers: [], notes: [] }
   }
   if (!OPTS.pr && s.pr) OPTS.pr = String(s.pr)
   for (const n of s.notes || []) degradeNotes.add(n)
