@@ -53,7 +53,7 @@ repository Makefiles, Python code, providers or either CLI agent itself.
 Preview credentials must actually be restricted by IAM, not merely acknowledged.
 
 Report observed evidence as PASSED, FAILED, SKIPPED or BLOCKED. Completion requires
-every required live test and independently verified current-source evidence;
+every live test in the saved summary `acceptance` checklist and independently verified current-source evidence;
 an agent's claim is insufficient.
 
 ## Claude and Codex backend contract
@@ -306,14 +306,14 @@ preview always requires it. First validate the profile for either case:
 "$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .
 ```
 
-With a selected environment, use the recipe matching the task's requested action.
 For a validation command intention only, without executing validation:
 
 ```bash
 "$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate --environment "$ENVIRONMENT"
 ```
 
-For requested local validation execution, already reviewed and authorized:
+After reviewing emitted argv/source and verifying current user/host permission,
+execute requested local validation:
 
 ```bash
 "$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate --environment "$ENVIRONMENT" --execute --trust-repo
