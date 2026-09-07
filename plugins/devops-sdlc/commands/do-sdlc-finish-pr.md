@@ -139,8 +139,9 @@ and overall-gate report required by step 6.
    SHA and evidence path/hash. If no local completion evidence is supplied or
    observed, write `Local work: none observed; evidence unavailable`; do not invent
    completed work. Record missing CI as BLOCKED. For the overall status, apply
-   the Iteration guard first; otherwise an observed required-gate failure means
-   FAILED, and missing CI means BLOCKED. Local PASSED never satisfies missing CI.
+   the Iteration guard first; otherwise any observed required-gate failure means
+   FAILED, even if CI is missing. Only without such a failure does missing CI mean
+   BLOCKED. Local PASSED never satisfies missing CI.
    In a proposal, label these rows as the planned summary
    update, with unknowns explicit and no claim of execution or writing.
    Re-fetch draft state, expected current-head checks,

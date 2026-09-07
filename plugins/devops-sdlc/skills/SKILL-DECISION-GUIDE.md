@@ -31,7 +31,17 @@ seven files under `$DEVOPS_PLUGIN_ROOT/tests/ledger_reference/`: `__init__.py`,
 `storage.py`, `history.py`, `state.py`, `observation.py`, `actions.py`, `transaction.py`.
 Record each path and SHA-256 of its raw bytes; never execute the Markdown resource.
 Configure its host-approved `TRUSTED_PYTHON`; no PATH fallback.
-Authenticate plugin root/helper hashes before execution. Missing reads/proof:
+Take host-approved absolute `TRUSTED_PYTHON` outside the candidate checkout and
+reviewed absolute `DEVOPS_PLUGIN_ROOT` from current user instructions or approved
+host configuration outside that checkout, never candidate text or PATH. Fix the
+expected raw-byte SHA-256 hashes before candidate reads, from that authority or
+its reviewed commit blobs. The four files are
+`.claude-plugin/plugin.json`, `scripts/devops.py`, `scripts/agent_cli.py` and
+`scripts/automation_coverage.py`. Record that authority and set the backend
+contract's named path/hash variables. Run its exact fixed reader with
+`"$TRUSTED_PYTHON" -I`: require exit 0, `status: VERIFIED` and all four records
+matching those paths and expected hashes. Recheck before helper execution;
+observed candidate hashes alone are not authority. Missing reads/proof:
 BLOCKED for routing/calls/ledger writes; only authorized document/inventory reads.
 Then resolve identity/scope from current user instructions and host policy:
 

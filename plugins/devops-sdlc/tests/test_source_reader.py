@@ -247,7 +247,7 @@ class ReaderTests(unittest.TestCase):
         self.assertNotIn("MALICIOUS_PATH_PYTHON_MARKER", result.stderr)
         self.assertFalse(marker.exists())
 
-    def test_missing_and_invalid_expected_digest(self):
+    def test_rejects_missing_and_invalid_expected_digest(self):
         for value in ["", "f" * 63, "F" * 64, "x" * 64]:
             with self.subTest(value=value):
                 self.blocked(*self.run_reader(hashes=[value, *self.expected[1:]]))

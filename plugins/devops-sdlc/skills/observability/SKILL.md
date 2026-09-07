@@ -59,8 +59,15 @@ passing results cannot define success.
 
 Unmatched description trigger: SKIPPED with reason.
 Use `incident-response` for active alerts, `security-iam` for logging permissions;
-use both if both apply. Direct use has no invoking command. Always record
-summary verdicts for every skill in the decision guide.
+use both if both apply. Direct use has no invoking command. Before selecting
+procedures, compare task facts with all 14 skills in the decision guide's
+[Complete inventory](../SKILL-DECISION-GUIDE.md#complete-inventory). Only matching
+or command-required skills require their procedures, under their own gates.
+Before returning, including direct use, record one saved-summary row per skill
+with status, reason and evidence: SKIPPED for known nonmatches; BLOCKED for
+unresolved applicability or prerequisites. For required skills, use their own
+PASSED, FAILED or BLOCKED outcome only from available evidence; no observed
+outcome means BLOCKED, not assumed completion. No silent omissions.
 Record author/reviewer agent-session IDs from the host handoff; verify
 reviewer non-authorship. Unknown/same identity blocks independent review.
 
