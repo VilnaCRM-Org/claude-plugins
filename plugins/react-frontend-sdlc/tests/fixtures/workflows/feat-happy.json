@@ -1,0 +1,10 @@
+{"args":"Add a currency field","replies":[
+ {"match":"^setup-check$","reply":{"ok":true,"message":"ok"}},
+ {"match":"^resolve-plan$","reply":{"issue_url":"https://github.com/acme/stub-frontend/issues/12","slug":"currency-field","readiness_pass":true,"stories":[{"id":"1.1","title":"field","done":false,"independent":true,"files_hint":[]},{"id":"1.2","title":"wiring","done":false,"independent":true,"files_hint":[]},{"id":"1.3","title":"tests","done":false,"independent":false,"files_hint":[]}],"blocked":null}},
+ {"match":"^story ","reply":{"status":"COMPLETE","exit_signal":true,"tests_status":"PASSING","files_modified":3,"recommendation":"next"}},
+ {"match":"^qa-visual-tester$","reply":[{"verdict":"FAIL","failures":["AC2: validation message missing"],"degrade_notes":[]},{"verdict":"PASS","failures":[],"degrade_notes":["lighthouse skipped: capability false"]}]},
+ {"match":"^pr create","reply":{"pr":7,"url":"https://github.com/acme/stub-frontend/pull/7","blocked":null}}
+],"workflows":{
+ "react-frontend-sdlc:fe-sdlc-review-panel":{"result":"SUCCESS","confirmed_total":1,"degrade_notes":[]},
+ "react-frontend-sdlc:fe-sdlc-pr-until-green":{"result":"SUCCESS","pr":7,"degrade_notes":[]}
+}}

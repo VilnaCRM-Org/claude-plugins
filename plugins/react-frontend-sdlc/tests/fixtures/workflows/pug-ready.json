@@ -1,0 +1,1 @@
+{"args":"7","replies":[{"match":"^pr-state$","reply":{"verdict":"READY","next":"exit condition met","pr":7,"url":"https://github.com/acme/stub-frontend/pull/7","head":"aaaa111","ci":{"status":"green","failing":[],"pending":[]},"unresolved":{"total":0},"reviewers":[{"name":"coderabbit","status":"APPROVED"},{"name":"cubic","status":"APPROVED"}],"notes":[]}}]}

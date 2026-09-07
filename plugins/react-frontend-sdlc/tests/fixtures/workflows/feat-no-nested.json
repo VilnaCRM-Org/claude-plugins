@@ -1,0 +1,4 @@
+{"args":"x","replies":[
+ {"match":"^setup-check$","reply":{"ok":true,"message":"ok"}},
+ {"match":"^resolve-plan$","reply":{"issue_url":"https://github.com/acme/stub-frontend/issues/12","slug":"s","readiness_pass":true,"stories":[{"id":"1.1","title":"t","done":true,"independent":true}],"blocked":null}}
+],"workflows":{}}

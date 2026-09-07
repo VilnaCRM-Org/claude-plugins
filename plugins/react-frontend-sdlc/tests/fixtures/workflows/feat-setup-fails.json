@@ -1,0 +1,1 @@
+{"args":"x","replies":[{"match":"^setup-check$","reply":{"ok":false,"message":"[react-sdlc][ERROR] profile missing"}}]}

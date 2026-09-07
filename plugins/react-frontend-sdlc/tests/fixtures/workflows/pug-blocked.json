@@ -1,0 +1,1 @@
+{"args":{"pr":7},"replies":[{"match":"^pr-state$","reply":{"verdict":"BLOCKED","next":"PR is MERGED; nothing bounded to do — reopen or stop","pr":7,"head":"aaaa111","reviewers":[],"notes":[]}}]}

@@ -65,17 +65,42 @@ the [schema reference](docs/profile-schema.md) for every key.
 | `/fe-sdlc-review` | 4 | Skill triage, multi-lens review, FR/NFR + accessibility gate loop |
 | `/fe-sdlc-qa` | 5 | Black-box visual + E2E + Lighthouse + a11y verification against the acceptance criteria |
 | `/fe-sdlc-finish-pr` | 6 | PR creation, CI-fix loop, comment-resolution loop |
+| `/fe-sdlc-request-reviews` | 6 | Ask CodeRabbit / cubic for a (re-)review with the exact mentions and the one-per-hour cadence; report reviewers no mention can reach |
+| `/fe-sdlc-skill-compile` | — | Compile a repository-learned skill (e.g. autoharness) into a shape-generalized, lint-clean plugin skill |
+
+## Workflows
+
+Three Workflow-tool scripts under `workflows/` run the parts of the loop that
+benefit from fan-out and unattended repetition (see
+[docs/workflows.md](docs/workflows.md)):
+
+| Workflow | Purpose |
+| --- | --- |
+| `/react-frontend-sdlc:fe-sdlc-pr-until-green` | Request CodeRabbit / cubic with the right mentions, wait, fix CI and review threads, push, repeat until every reachable reviewer approves the head and CI is green |
+| `/react-frontend-sdlc:fe-sdlc-review-panel` | Stage-4 review as parallel lenses (quality, FR/NFR, a11y per family, technique skills) with three-refuter verification and fix rounds until zero new findings |
+| `/react-frontend-sdlc:fe-sdlc-feature` | The whole loop for one planned feature: setup check, plan resolution, parallel story implementation, review panel, QA, PR, then pr-until-green |
+
+The finishing workflow reads the PR through `scripts/pr-state.sh`, a
+deterministic sensor that classifies every AI reviewer against the current
+head (`APPROVED`, `NOT_APPROVED`, `REQUESTED`, `STALE`, `NONE`, `SKIPPED`) and
+renders one verdict — `BLOCKED`, `FIX`, `REQUEST`, `WAIT`, or `READY`.
 
 Commands delegate to seven subagents (react-implementer,
 code-quality-reviewer, fr-nfr-reviewer, qa-visual-tester, ci-fixer,
-pr-comment-resolver, accessibility-auditor) and an 18-skill library with
+pr-comment-resolver, accessibility-auditor) and an 86-skill library with
 applicability triage — `skills/AI-AGENT-GUIDE.md` and
 `skills/SKILL-DECISION-GUIDE.md` decide which skills load per task and
 require every skill verdict to be recorded (no silent skips). The library
 spans architecture, code organization, complexity, frontend component
 development, quality, testing, performance/accessibility, CI, review,
 documentation, observability, load testing, Figma design check, plus the
-BMAD planning and FR/NFR-gate skills.
+BMAD planning and FR/NFR-gate skills — those 19 are the **process skills**.
+The other 67 are the **technique library**: gotchas learned by agents while
+working in the reference repositories (Stryker, Storybook, Playwright, qlty,
+dependency-cruiser, Bats, GitHub PR flow, CI diagnosis, MUI/a11y details),
+compiled into shape-generalized form by `/fe-sdlc-skill-compile`'s contract
+([docs/skill-compile-contract.md](docs/skill-compile-contract.md)) and loaded
+by description match when a change set shows their symptoms.
 
 Companion skills (optional): when the profile's `companion.skills` /
 `companion.agents` are set, the review and QA agents additionally lean on
@@ -99,5 +124,11 @@ an enhancement, never a hard dependency — every gate runs without them.
 - [Degrade matrix](docs/degrade-matrix.md) — behavior when a capability
   is missing (no CI, no reviewer app, no Lighthouse/visual/mutation, missing
   Make targets, …)
+- [Workflows](docs/workflows.md) — the three Workflow-tool scripts
+  (pr-until-green, review-panel, feature), their arguments, counters, and
+  the `pr-state.sh` verdict table
 - [Release process](docs/release-process.md) — versioning, tags,
   changelog, marketplace pinning
+- [Skill compile contract](docs/skill-compile-contract.md) — how a
+  repository-learned skill becomes a plugin skill (shapes, profile keys,
+  fidelity, lint)

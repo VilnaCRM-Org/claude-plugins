@@ -1,0 +1,6 @@
+{"args":"7","replies":[
+ {"match":"^pr-state$","reply":{"verdict":"FIX","next":"fix failing checks unit testing (ci-fixer); resolve 1 review thread(s) (pr-comment-resolver); then commit and push","pr":7,"url":"https://github.com/acme/stub-frontend/pull/7","head":"aaaa111","ci":{"status":"red","failing":["unit testing"],"pending":[]},"unresolved":{"total":1},"reviewers":[{"name":"coderabbit","status":"NOT_APPROVED"},{"name":"cubic","status":"STALE"}],"notes":[]}},
+ {"match":"^ci-fixer","reply":{"status":"FIXES-READY","summary":"tried"}},
+ {"match":"^pr-comment-resolver","reply":{"remaining_unresolved":1,"push_required":true}},
+ {"match":"^publish","reply":{"pushed":true,"head":"aaaa111","message":"fix"}}
+]}

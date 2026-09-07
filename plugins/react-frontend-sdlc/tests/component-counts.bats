@@ -1,15 +1,16 @@
 #!/usr/bin/env bats
 # Component-count + load-integrity tests (NFR-1).
 #
-# Asserts the exact install-cache layout — 8 commands / 7 agents /
-# 19 skills + 2 loose meta-guides — so the suite fails when any
+# Asserts the exact install-cache layout — 10 commands / 7 agents /
+# 86 skills + 2 loose meta-guides / 3 workflows — so the suite fails when any
 # component file is removed or added. Also checks the load-integrity
 # invariants the CI frontmatter-check and manifest-validate jobs
 # enforce, so a broken component is caught locally before push.
 #
 # `claude plugin` listing smoke (NFR-1): after
 # `claude plugin install react-frontend-sdlc@vilnacrm-plugins`, the
-# `/plugin` manager must list all 8 commands, 7 agents, and 19 skills;
+# `/plugin` manager must list all 10 commands, 7 agents, 86 skills and
+# 3 workflows;
 # these counts are the canonical reference for that manual check.
 
 setup() {
@@ -49,10 +50,10 @@ assert_frontmatter_keys() {
 
 # --- exact component counts (NFR-1) ---------------------------------------
 
-@test "exactly 8 command markdown files" {
+@test "exactly 10 command markdown files" {
   run bash -c "ls '$PLUGIN_ROOT'/commands/*.md | wc -l"
   [ "$status" -eq 0 ]
-  [ "$output" -eq 8 ]
+  [ "$output" -eq 10 ]
 }
 
 @test "exactly 7 agent markdown files" {
@@ -61,10 +62,20 @@ assert_frontmatter_keys() {
   [ "$output" -eq 7 ]
 }
 
-@test "exactly 19 skills (skills/*/SKILL.md)" {
+@test "exactly 86 skills (skills/*/SKILL.md)" {
   run bash -c "ls '$PLUGIN_ROOT'/skills/*/SKILL.md | wc -l"
   [ "$status" -eq 0 ]
-  [ "$output" -eq 19 ]
+  [ "$output" -eq 86 ]
+}
+
+@test "exactly 3 workflow scripts (workflows/*.js)" {
+  run bash -c "ls '$PLUGIN_ROOT'/workflows/*.js | wc -l"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 3 ]
+  for f in "$PLUGIN_ROOT"/workflows/*.js; do
+    head -n1 "$f" | grep -q '^export const meta = {' \
+      || { echo "workflow must open with an export const meta literal: $f"; return 1; }
+  done
 }
 
 @test "every skill directory contains a SKILL.md" {
