@@ -25,16 +25,18 @@ BACKENDS = ("claude", "codex")
 MAX_BYTES = 2_000_000
 MAX_CONTEXT = 330_000
 MAX_TRAVERSAL_ENTRIES = 512
+CODEX_FEATURES = (
+    "shell_tool",
+    "unified_exec",
+    "apps",
+    "plugins",
+    "hooks",
+    "multi_agent",
+    "browser_use",
+    "computer_use",
+    "image_generation",
+)
 CODEX_CONFIG = (
-    "features.shell_tool=false",
-    "features.unified_exec=false",
-    "features.apps=false",
-    "features.plugins=false",
-    "features.hooks=false",
-    "features.multi_agent=false",
-    "features.browser_use=false",
-    "features.computer_use=false",
-    "features.image_generation=false",
     "project_doc_max_bytes=0",
     'web_search="disabled"',
 )
@@ -391,6 +393,8 @@ def evaluation_argv(
             "--output-last-message",
             str(temporary / "answer.json"),
         ]
+        for feature in CODEX_FEATURES:
+            argv += ["--disable", feature]
         for value in CODEX_CONFIG:
             argv += ["-c", value]
     if model is not None:

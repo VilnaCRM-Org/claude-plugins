@@ -436,7 +436,25 @@ class AgentCliTests(unittest.TestCase):
                     self.assertIn("--plugin-dir", argv)
                 else:
                     self.assertIn("--ignore-user-config", argv)
-                    self.assertIn("features.shell_tool=false", argv)
+                    disabled = [
+                        argv[i + 1]
+                        for i, value in enumerate(argv[:-1])
+                        if value == "--disable"
+                    ]
+                    self.assertEqual(
+                        disabled,
+                        [
+                            "shell_tool",
+                            "unified_exec",
+                            "apps",
+                            "plugins",
+                            "hooks",
+                            "multi_agent",
+                            "browser_use",
+                            "computer_use",
+                            "image_generation",
+                        ],
+                    )
                     self.assertIn("read-only", argv)
                     self.assertEqual(
                         json.loads((self.root / "schema.json").read_text()), SCHEMA
