@@ -79,20 +79,33 @@ repo_slug="$(resolve_repo_slug)" \
 pr_json="$(gh pr view "$PR" --json isDraft,headRefOid,commits)" \
   || die "gh pr view failed for PR #$PR in $repo_slug"
 is_draft="$(python3 -c 'import json,sys; print(str(json.loads(sys.argv[1]).get("isDraft")).lower())' "$pr_json")"
-# The head's commit time bounds which bot comments still describe the current
+# The head's push moment bounds which bot comments still describe the current
 # diff: a "Review skipped" posted for an earlier, larger head must not keep
-# suppressing mentions after a push shrank the PR.
-head_epoch="$(python3 - "$pr_json" <<'PY'
+# suppressing mentions after a push shrank the PR. Check suites are created
+# when the commit reaches GitHub, so the earliest suite dates the push; the
+# commit timestamp is only the fallback (same rule as pr-state.sh).
+head_sha="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("headRefOid") or "")' "$pr_json")"
+pushed_at=""
+if [[ -n "$head_sha" ]]; then
+  pushed_at="$(gh api "repos/$repo_slug/commits/$head_sha/check-suites?per_page=100" \
+    --jq '[.check_suites[]? | .created_at] | map(select(. != null)) | min // empty' 2>/dev/null || true)"
+fi
+head_epoch="$(python3 - "$pr_json" "$pushed_at" <<'PY'
 import json, sys
 from datetime import datetime, timezone
-pr = json.loads(sys.argv[1])
-best = 0
-for c in pr.get("commits") or []:
+
+
+def epoch(ts):
     try:
-        best = max(best, int(datetime.strptime(c.get("committedDate") or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()))
+        return int(datetime.strptime((ts or "").strip('"'), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp())
     except ValueError:
-        pass
-print(best)
+        return 0
+
+
+pr = json.loads(sys.argv[1])
+commit_epoch = max([epoch(c.get("committedDate")) for c in pr.get("commits") or []] or [0])
+pushed = epoch(sys.argv[2])
+print(max(commit_epoch, pushed) if pushed else commit_epoch)
 PY
 )"
 

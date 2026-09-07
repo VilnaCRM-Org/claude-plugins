@@ -184,13 +184,13 @@ while (true) {
   degradeNotes.push(...(qa.degrade_notes || []))
   if (qa.verdict === 'SKIPPED') {
     const gate = await agent(
-      [PLUGIN_ROOT, '', 'Read .claude/react-sdlc.yml in the repository root and report, without running anything else, whether make.start_prod and make.start are both null (the only condition under which the QA stage may be skipped). Return {start_prod_null, start_null}.'].join('\n'),
-      { label: 'qa-skip-gate', phase: 'QA', effort: 'low', schema: { type: 'object', required: ['start_prod_null', 'start_null'], properties: { start_prod_null: { type: 'boolean' }, start_null: { type: 'boolean' } } } },
+      [PLUGIN_ROOT, '', 'Read .claude/react-sdlc.yml in the repository root and report, without running anything else, whether make.start_prod is null (the only condition under which the production-parity QA stage may be skipped). Return {start_prod_null}.'].join('\n'),
+      { label: 'qa-skip-gate', phase: 'QA', effort: 'low', schema: { type: 'object', required: ['start_prod_null'], properties: { start_prod_null: { type: 'boolean' } } } },
     )
-    if (!gate || !gate.start_prod_null || !gate.start_null || !(qa.degrade_notes || []).length) {
-      return escalate('qa', '-', 'qa-visual-tester returned SKIPPED although the profile maps a start target', 'run /fe-sdlc-qa by hand; a bootable stack must be QA-verified, not skipped')
+    if (!gate || !gate.start_prod_null || !(qa.degrade_notes || []).length) {
+      return escalate('qa', '-', 'qa-visual-tester returned SKIPPED although the profile maps a production-parity start target', 'run /fe-sdlc-qa by hand; a bootable stack must be QA-verified, not skipped')
     }
-    degradeNotes.push('QA skipped: make.start_prod and make.start are both null (verified against the profile)')
+    degradeNotes.push('QA skipped: make.start_prod is null (verified against the profile)')
     note('qa: SKIPPED (verified capability absence)')
     break
   }

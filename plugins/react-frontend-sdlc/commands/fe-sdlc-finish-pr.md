@@ -186,7 +186,7 @@ report instead of failing (NFR-4).
      and its review is still coming; go back to step 3, which respects
      the script's `WAIT:` interval instead of re-mentioning.
    - **`REQUEST`** — a reviewer has never reviewed this head (`NONE`,
-     `STALE`, or unacknowledged `NOT_APPROVED`); go back to step 3 to
+     `STALE`, or `NOT_APPROVED` with no unresolved threads); go back to step 3 to
      post the mention.
 
    Either route may instead hand the PR to the

@@ -300,7 +300,7 @@ while (true) {
   note(`head=${(state.head || '').slice(0, 7)} verdict=${state.verdict} next=${state.next}`)
 
   if (state.verdict === 'READY') {
-    if (state.ci.status === 'red' || state.unresolved.total > 0 || state.reviewers.some((r) => !['APPROVED', 'SKIPPED'].includes(r.status))) {
+    if (!['green', 'none'].includes(state.ci.status) || state.unresolved.total > 0 || state.reviewers.some((r) => !['APPROVED', 'SKIPPED'].includes(r.status))) {
       return report('ESCALATED', { escalation: escalation('sensor reported READY with contradicting facts', 'upgrade the plugin; the sensor and the workflow disagree') })
     }
     const skipped = (state.reviewers || []).filter((r) => r.status === 'SKIPPED')

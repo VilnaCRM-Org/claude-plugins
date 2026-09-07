@@ -198,7 +198,7 @@ run_wf() { # <workflow-file> <scenario-file>
 @test "feature: a QA SKIPPED verdict is accepted only when the profile really maps no start target" {
   run_wf fe-sdlc-feature.js feat-qa-skipped-rejected.json
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("returned SKIPPED although the profile maps a start target"))'
+  echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("returned SKIPPED although the profile maps a production-parity start target"))'
   run_wf fe-sdlc-feature.js feat-qa-skipped-accepted.json
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.result.result == "SUCCESS-WITH-REPORT" and (.result.degrade_notes | any(contains("verified against the profile")))'

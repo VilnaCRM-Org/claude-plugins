@@ -36,6 +36,8 @@ case "$1 $2" in
     cat "$GH_COMMENTS_FIXTURE" ;;
   "pr comment")
     exit "$GH_COMMENT_EXIT" ;;
+  "api repos/acme/stub-frontend/commits/a1b2c3d4/check-suites?per_page=100")
+    [[ -n "${GH_PUSHED_AT:-}" ]] && printf '"%s"\n' "$GH_PUSHED_AT" ;;
   *)
     echo "unexpected gh call: $*" >&2; exit 9 ;;
 esac
@@ -175,4 +177,14 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"gh pr view failed for PR #7"* ]]
   ! grep -q 'pr comment' "$GH_LOG"
+}
+
+@test "a Review-skipped comment posted between commit and push still counts against the pushed head" {
+  export GH_COMMENTS_FIXTURE="$FIXTURES/pr-issue-comments-oversized.ndjson"
+  export GH_HEAD_DATE="2026-09-01T09:50:00Z"
+  export GH_PUSHED_AT="2026-09-01T10:10:00Z"
+  export SDLC_NOW_EPOCH=1788265800
+  run "$SCRIPT" --pr 7 --reviewers coderabbit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"REQUESTED: coderabbit @coderabbitai review"* ]]
 }
