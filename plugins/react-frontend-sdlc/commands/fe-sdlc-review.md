@@ -1,5 +1,5 @@
 ---
-description: "Review implemented frontend changes: 19-skill applicability triage, multi-lens quality + FR/NFR review with a MANDATORY accessibility gate, looping until zero new findings and a clean a11y verdict"
+description: "Review implemented frontend changes: applicability triage over every shipped skill (19 process skills + 67 technique skills), multi-lens quality + FR/NFR review with a MANDATORY accessibility gate, looping until zero new findings and a clean a11y verdict"
 argument-hint: "[slug | PR-URL]"
 allowed-tools: ["Bash", "Read", "Glob", "Grep", "Task"]
 ---
@@ -50,7 +50,10 @@ runs no git).
 ## Procedure
 
 1. **Applicability triage (ADR-5, NFR-5)** — for EVERY skill directory
-   at `${CLAUDE_PLUGIN_ROOT}/skills/*/SKILL.md` (19 in v1):
+   at `${CLAUDE_PLUGIN_ROOT}/skills/*/SKILL.md` (86 in v0.2: the 19 process
+   skills plus the 67-skill technique library listed in the decision guide;
+   technique skills are triaged from their frontmatter exactly like process
+   skills — a matching symptom in the change set is an EXECUTE):
    - Decide from the skill's frontmatter (`name` + trigger-rich
      `description`, including profile-gating conditions like "Skip when
      `capabilities.figma` is false") plus the decision guide — and
@@ -164,7 +167,7 @@ runs no git).
    That dispatch-commit-reinvoke cycle is one iteration of the loop
    below.
 5. **Report** — render the report template below. Every section is
-   mandatory; verdicts must cover 19/19 skills, and threshold rows must
+   mandatory; verdicts must cover 86/86 skills, and threshold rows must
    cite the actual values read from the profile.
 
 ### Report template
@@ -172,10 +175,10 @@ runs no git).
 ```text
 # SDLC Review Report — <slug>, iteration <n>/5
 
-## Skill triage (19/19 verdicts)
+## Skill triage (86/86 verdicts)
 | skill | verdict | evidence / reason |
 |---|---|---|
-| <one row per skill, all 19> | EXECUTE \| NOT-APPLICABLE | <one line> |
+| <one row per skill, all 86> | EXECUTE \| NOT-APPLICABLE | <one line> |
 | frontend-performance-accessibility | EXECUTE \| NOT-APPLICABLE | <a11y/perf static checks against the changed UI surface when in scope; the live a11y verdict is owned by the always-dispatched accessibility-auditor agent> |
 
 ## code-quality-reviewer
