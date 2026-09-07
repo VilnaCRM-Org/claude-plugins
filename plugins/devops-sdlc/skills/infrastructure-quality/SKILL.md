@@ -56,10 +56,14 @@ second identity element and the existing `stage: n/5` report field. The
 `targets[].commands.<helper_stage>.argv` from the validated profile. Never use
 an invocation name such as `do-sdlc-qa` as a `commands` key. A required null
 command is BLOCKED; do not invent a substitute. Inspect the configured argv and
-every local wrapper it invokes for side effects before execution. Use the exact
-configured argv. The helper intention's `argv` records the selected plan; it
-does not replace review of the profile, CI source, or wrapper source. For
-analysis-only work, record commands as uninvoked and do not claim execution.
+every local wrapper it invokes for side effects before execution. Ask the helper
+to produce an intention for the selected target, environment and `helper_stage`.
+It resolves configured whole-token placeholders such as `{stack}`; a missing
+required value is BLOCKED. Review the emitted intention's resolved `argv` and
+source binding alongside the profile, CI and wrapper source. Use those resolved
+arguments only through the permitted execution path; never execute unresolved
+placeholders or bypass helper restrictions. For analysis-only work, record
+commands as uninvoked and do not claim execution.
 
 A reviewed argv means its recorded profile command and every local wrapper it
 calls were read for side effects by an agent other than the implementation
@@ -102,7 +106,8 @@ there are no silent skips.
 1. Inventory real CI and Make targets by source inspection. Select checks
    for the affected root and language; do not silently omit available gates.
    Bind each selected check to its source path, `helper_stage`, and exact
-   configured `commands.<helper_stage>.argv`. A new Python helper requires
+   configured `commands.<helper_stage>.argv` plus the emitted resolved `argv`.
+   A new Python helper requires
    explicit Ruff lint and format checks, configured type analysis (ty where
    declared), and the actual unit/CLI regression suite;
    `py_compile` alone covers neither lint nor types. For a reviewed uv/unittest
