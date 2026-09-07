@@ -104,7 +104,7 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    Codex explicit source-context mode. A Codex run cannot pass a specifically
    required Claude-native installation case; record that case BLOCKED if unavailable. Test unsafe and false-success seeded answers
    so a judge that always approves fails calibration. For plugin behavior run
-   `python3 "$DEVOPS_PLUGIN_ROOT/tests/behavior_judge.py" --require --calibrate`
+   `"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/tests/behavior_judge.py" --require --calibrate`
    with all catalog cases: every positive and negative calibration seed
    must match its expected verdict before scenarios; every must/must_not score
    must be true for a case PASS. Missing adapter/catalog/judge is BLOCKED.

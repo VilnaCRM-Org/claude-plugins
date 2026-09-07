@@ -37,8 +37,8 @@ Mark fixture, live, skipped and blocked evidence separately.
 
 ## Allowed actions
 
-Before any shell execution or file edit, verify the caller's current host-policy
-attestation described in [execution policy](../docs/execution-policy.md). It must
+Apply [execution policy](../docs/execution-policy.md) before content reads; verify caller's
+current host-policy attestation before shell execution or edits. It must
 bind this session, source SHA, assigned paths, tool/argv surface, credential
 isolation and network policy to controls outside the editable repository. A
 profile flag or agent assertion is insufficient. Continue automatically within
