@@ -75,14 +75,19 @@ entry barrels are exempt, because re-exporting the aggregate surface is their jo
 the tree named by `architecture.source_root`:
 
 ```bash # profile-example
-if grep -rnE "(from|import\()[[:space:]]*['\"]@/components/?['\"]" src \
+if grep -rnE "(import|from|import\()[[:space:]]*['\"]@/components/?['\"]" src \
   --include='*.ts' --include='*.tsx' | grep -vE '^src/(components/)?index\.tsx?:'; then
   echo 'source modules must import a component through its own barrel'
   exit 1
 fi
 ```
 
-The alternation covers both quote styles, a dynamic `import('@/components')`, and a trailing slash.
+The alternation covers both quote styles, a dynamic `import('@/components')`, a trailing slash, and —
+via the bare `import` alternative — a side-effect import (`import '@/components'`) that has neither a
+`from` clause nor parentheses and would otherwise slip past the gate. The bare alternative adds no
+false positives: `import('./foo')` and `import X from '@/components'` still match on their own
+alternatives, and `import` immediately followed by the aggregate specifier is exactly the side-effect
+form.
 Re-check it against the spellings the codebase actually uses before trusting a clean run, and keep
 the audit's own fixture coverage so it cannot pass vacuously.
 

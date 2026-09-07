@@ -1,0 +1,4 @@
+{"args":"7","replies":[
+ {"match":"^(pr-state|wait )","reply":{"verdict":"REQUEST","next":"request-ai-reviews.sh --pr 7 --reviewers coderabbit --full","pr":7,"url":"u","head":"bbbb222","ci":{"status":"green","failing":[],"pending":[]},"unresolved":{"total":0},"reviewers":[{"name":"coderabbit","status":"NOT_APPROVED","reason":"latest review on the head is CHANGES_REQUESTED"},{"name":"cubic","status":"APPROVED"}],"notes":[]}},
+ {"match":"^request","reply":{"requested":["coderabbit"],"waiting":[],"skipped":[]}}
+]}

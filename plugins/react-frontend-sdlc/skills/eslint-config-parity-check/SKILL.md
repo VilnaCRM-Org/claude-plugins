@@ -52,7 +52,7 @@ import { ESLint } from 'eslint';
 import { execFileSync } from 'node:child_process';
 
 const eslint = new ESLint();
-const files = execFileSync('git', ['ls-files', '*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs'])
+const files = execFileSync('git', ['ls-files', '*.ts', '*.tsx', '*.js', '*.jsx', '*.mjs', '*.cjs'])
   .toString()
   .trim()
   .split('\n');
@@ -73,7 +73,10 @@ console.log(JSON.stringify(dump, null, 2));
 ```
 
 Two details make the dump comparable. Listing files from the index and filtering with
-`isPathIgnored` resolves the same set the lint target does without paying for a full lint run.
+`isPathIgnored` resolves the same set the lint target does without paying for a full lint run — the
+glob list has to cover the linter's full default scope, `.cjs` included, or a change that only alters
+the resolved config of a CommonJS file (a `.cjs` config file, a `sourceType` flip) produces no
+differing entry and the parity check passes while the rule really did change.
 Replacing the parser object with its name keeps the diff readable — serialising the parser itself
 emits its entire syntax table into every file's entry.
 

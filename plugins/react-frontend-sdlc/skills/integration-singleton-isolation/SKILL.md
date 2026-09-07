@@ -59,15 +59,19 @@ Restore every process-level and singleton-level mutation after each test, and gi
 its own case:
 
 ```ts
+import i18n from '@/i18n';
+
 describe('locale formatter service (integration)', () => {
   const ORIGINAL_ENV = { ...process.env };
+  const ORIGINAL_LANGUAGE = i18n.language;
   const service = container.resolve<LocaleFormatter>(
     LOCALE_FORMATTER_TOKENS.LocaleFormatterService
   );
 
-  afterEach(() => {
+  afterEach(async () => {
     process.env = { ...ORIGINAL_ENV };
     localeFormatterCore.bindLanguageSource(null);
+    await i18n.changeLanguage(ORIGINAL_LANGUAGE);
   });
 
   it('falls back to the environment main language while no source is bound', () => {
@@ -76,16 +80,20 @@ describe('locale formatter service (integration)', () => {
   });
 
   it('prefers the bound language over the environment main language', async () => {
-    const { default: i18n } = await import('@/i18n');
     await i18n.changeLanguage('en');
+    localeFormatterCore.bindLanguageSource(i18n);
     process.env.REACT_APP_MAIN_LANGUAGE = 'uk';
     expect(service.currency(1234.5)).toBe('₴1,234.50');
   });
 });
 ```
 
-The second test binds the source; `afterEach` unbinds it, so the first test passes whatever the
-order. The `@/…` specifier is whichever alias `architecture.path_aliases` maps to the source root.
+The second test mutates three things: it binds the source, changes the shared i18n language, and
+sets the environment variable the fallback reads. One `afterEach` reverses all three — unbind,
+restore `process.env`, put the language back — so the first test passes whatever the order. Leaving
+the language changed would be the same leak in a slower form: every later test in the run would
+format against `en`. The `@/…` specifier is whichever alias `architecture.path_aliases` maps to the
+source root.
 
 ## Splitting and pinning
 
@@ -103,7 +111,8 @@ order. The `@/…` specifier is whichever alias `architecture.path_aliases` maps
 
 - Resetting in `beforeEach` only — the last test in the file still leaves state behind for the next
   file when the runner shares a module registry.
-- Restoring `process.env` but not the singleton (or the reverse) — capture both in one `afterEach`.
+- Restoring `process.env` but not the singleton, the bound source, or a shared library's own state
+  such as the active i18n language — reverse every mutation the test made, in one `afterEach`.
 - Using `jest.resetModules()` as the reset — it gives later tests a _different_ singleton instance
   than the one the outer `describe` resolved.
 - Ordering tests so the file passes, instead of removing the dependency.

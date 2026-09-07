@@ -54,21 +54,28 @@ side-effect branch swallows the other three:
 ```js
 // Overlapping — a bare "no named specifier" also matches default and namespace imports,
 // so neither of those branches can be pinned by a fixture.
-':has(ImportDefaultSpecifier)',
-':has(ImportNamespaceSpecifier)',
-":has(ImportSpecifier[importKind!='type'])",
-':not(:has(ImportSpecifier))',
+'ImportDeclaration:has(ImportDefaultSpecifier)',
+'ImportDeclaration:has(ImportNamespaceSpecifier)',
+"ImportDeclaration:has(ImportSpecifier[importKind!='type'])",
+'ImportDeclaration:not(:has(ImportSpecifier))',
 ```
 
 Narrow the catch-all by excluding what the earlier alternatives already claim:
 
 ```js
 const SIDE_EFFECT_IMPORT = [
+  'ImportDeclaration',
   ':not(:has(ImportSpecifier))',
   ':not(:has(ImportDefaultSpecifier))',
   ':not(:has(ImportNamespaceSpecifier))',
 ].join('');
 ```
+
+The leading `ImportDeclaration` is load-bearing, not decoration. `:not(:has(X))` matches every node
+that has no `X` descendant, and specifier nodes exist only under an import declaration, so an
+unprefixed negation chain matches `Program`, every statement, and every expression — as a
+`no-restricted-syntax` alternative it fires on virtually the whole file. Anchor the node type
+first, then negate.
 
 Now each alternative owns one spelling — `import x from`, `import * as x from`, `import { x } from`,
 `import 'y'` — so deleting any one makes its fixture pass when it must fail.
@@ -104,3 +111,5 @@ Now each alternative owns one spelling — `import x from`, `import * as x from`
 - Widening the documented-overlap map to clear a failure instead of restoring disjointness.
 - Landing a new rule with no fixture — the completeness assertion has no exemption list, so add the
   fixture in the same change rather than as a follow-up.
+- Writing a `:not(:has(…))` chain with no node type in front of it — it then matches every node that
+  lacks that descendant, so anchor it on the declaration type the rule is about.

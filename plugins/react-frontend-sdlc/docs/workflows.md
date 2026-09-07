@@ -60,7 +60,9 @@ Counters:
   changes the head. A reviewer that acknowledged but never reviewed the
   head within the budget is dropped with a degrade note.
 - `request` — one per mention round, max 3 per head; a reviewer that
-  stays silent after three requests is dropped with a degrade note. When
+  stays silent after three requests is dropped with a degrade note, while a
+  reviewer that reviewed the head without approving escalates — its findings
+  are outside the resolved threads and need a human. When
   `request-ai-reviews.sh` answers `WAIT:` (inside CodeRabbit's one-hour
   interval) the workflow waits through `REQUEST` verdicts instead of
   re-mentioning.

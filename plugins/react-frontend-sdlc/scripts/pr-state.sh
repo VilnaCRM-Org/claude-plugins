@@ -69,16 +69,19 @@ while [[ $# -gt 0 ]]; do
     *) die "unknown argument: $1 ($USAGE)" ;;
   esac
 done
-[[ "$WAIT" =~ ^[0-9]+$ ]] || die "--wait-seconds must be a non-negative integer, got: $WAIT"
-[[ "$INTERVAL" =~ ^[0-9]+$ ]] || die "--interval-seconds must be a non-negative integer, got: $INTERVAL"
+[[ "$WAIT" =~ ^(0|[1-9][0-9]*)$ ]] || die "--wait-seconds must be a non-negative integer without leading zeros, got: $WAIT"
+[[ "$INTERVAL" =~ ^(0|[1-9][0-9]*)$ ]] || die "--interval-seconds must be a non-negative integer without leading zeros, got: $INTERVAL"
 if (( WAIT > 0 && INTERVAL == 0 )); then die "--interval-seconds must be at least 1 when --wait-seconds is set"; fi
 [[ "$WAIT_VERDICTS" =~ ^(WAIT|REQUEST|FIX)(,(WAIT|REQUEST|FIX))*$ ]] || die "--wait-verdicts must list WAIT, REQUEST and/or FIX, got: $WAIT_VERDICTS"
-[[ "$REVIEWERS" =~ ^[a-z,]+$ ]] || die "--reviewers must be a comma-separated list, got: $REVIEWERS"
+[[ "$REVIEWERS" =~ ^[a-z]+(,[a-z]+)*$ ]] || die "--reviewers must be a comma-separated list without empty elements, got: $REVIEWERS"
+seen_reviewers=","
 for r in ${REVIEWERS//,/ }; do
   case "$r" in
     coderabbit|cubic|qodo|qlty|sonarcloud) ;;
     *) die "unknown reviewer '$r' (known: coderabbit,cubic,qodo,qlty,sonarcloud)" ;;
   esac
+  [[ "$seen_reviewers" == *",$r,"* ]] && die "duplicate reviewer '$r' in --reviewers"
+  seen_reviewers+="$r,"
 done
 
 command -v gh >/dev/null 2>&1 || die "gh CLI not found on PATH"
@@ -113,6 +116,18 @@ snapshot() {
     || die "gh api failed listing comments for PR #$PR in $repo_slug"
   "$SCRIPT_DIR/get-pr-comments.sh" --pr "$PR" --unresolved-only --json >"$work/threads.json" \
     || die "get-pr-comments.sh failed for PR #$PR"
+  # The head's push moment: check suites are created when the commit reaches
+  # GitHub, so the earliest suite dates the push; a commit's own timestamp is
+  # only the fallback (a mention posted between commit and push must not read
+  # as a request for that head).
+  head_sha="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("headRefOid") or "")' "$work/pr.json")"
+  if [[ -n "$head_sha" ]]; then
+    gh api "repos/$repo_slug/commits/$head_sha/check-suites?per_page=100" \
+      --jq '[.check_suites[]? | .created_at] | map(select(. != null)) | min // empty' >"$work/pushed_at" 2>/dev/null \
+      || : >"$work/pushed_at"
+  else
+    : >"$work/pushed_at"
+  fi
 
   python3 - "$work" "$repo_slug" "$REVIEWERS" "$REQUIRED" "${SDLC_NOW_EPOCH:-$(date -u +%s)}" "$JSON_OUT" <<'PY'
 import json, sys
@@ -146,7 +161,9 @@ comments = ndjson(f"{work}/comments.ndjson")
 threads = json.load(open(f"{work}/threads.json", encoding="utf-8"))
 
 head = pr.get("headRefOid") or ""
-head_epoch = max([epoch(c.get("committedDate")) for c in pr.get("commits") or []] or [0])
+commit_epoch = max([epoch(c.get("committedDate")) for c in pr.get("commits") or []] or [0])
+pushed_at = open(f"{work}/pushed_at", encoding="utf-8").read().strip().strip('"')
+head_epoch = max(commit_epoch, epoch(pushed_at)) if pushed_at else commit_epoch
 notes = []
 
 # --- CI -----------------------------------------------------------------
@@ -166,7 +183,7 @@ scope = required if required else list(checks)
 failing = sorted(n for n in scope if checks.get(n) in FAILING)
 pending = sorted(n for n in scope if n in checks and checks[n] not in FAILING and checks[n] not in PASSING)
 missing = sorted(n for n in required if n not in checks)
-if not checks:
+if not checks and not required:
     ci_status = "none"
     notes.append("CI: the PR reports no checks — the CI half of the exit condition is satisfied-with-report, not verified")
 elif failing:

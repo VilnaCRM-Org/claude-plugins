@@ -60,17 +60,27 @@ There are two correct answers, and which one applies depends on whether decoding
 ```js
 // Reject before the allow-list tables ever see the URI: a dot segment satisfies
 // the directory and extension tests while resolving somewhere else entirely,
-// and a percent escape hides the leading dot from the dotfile check.
+// a percent escape hides the leading dot from the dotfile check, and a backslash
+// is a segment separator to the normalizers downstream but not to split('/').
 function isUnsafeUri(uri) {
-  var parts = uri.split('/');
+  if (uri.indexOf('%') !== -1 || uri.indexOf('\\') !== -1) {
+    return true;
+  }
+  var parts = uri.split(/[/\\]/);
   for (var i = 0; i < parts.length; i++) {
     if (parts[i] === '.' || parts[i] === '..') {
       return true;
     }
   }
-  return uri.indexOf('%') !== -1;
+  return false;
 }
 ```
+
+Splitting on `/` alone is the same defect as reading the encoded URI: `/images/..\..\secret` has no
+dot segment at a slash boundary and no `%`, so it passes a slash-only gate, and a proxy, IIS origin
+or CDN handler that treats `\` as a separator then resolves it upward. Split on both separators and
+refuse the backslash outright — no shipped asset name needs one, so the two together leave no
+spelling of the traversal that reaches the allow-list tables.
 
 The extension reader itself must also treat a dotfile as extensionless: with `lastDot <= 0` covering
 "no dot at all" and a leading-dot test covering every dotfile, `/images/.env.js` never reports `js`.
@@ -96,3 +106,5 @@ escaping defect static analysis flags.
   decides.
 - Assuming no dot segments arrive because the router normalises them — an edge handler is given the
   raw URI.
+- Splitting on `/` only, so a backslash-separated traversal has no segment to test — split on both
+  separators and refuse `\` alongside `%`.

@@ -1,6 +1,6 @@
 ---
 name: mutation-gate-barrel-leaf-extraction
-description: Use when one Stryker shard runs far longer than its peers and the slow files import a small helper through a component barrel, when jest --findRelatedTests reports an unexpectedly large related-suite count, or when a leaf style, predicate, or formatting helper lives inside a component directory but is consumed from other directories through that barrel.
+description: Use when a leaf helper — a style map, a predicate, or a formatting function — lives inside one component directory but is imported from other directories through that component's barrel, so the mutation runner's findRelatedTests pulls that component's whole suite set into every mutant run for the consuming files.
 ---
 
 # Mutation gate barrel leaf extraction
@@ -34,13 +34,15 @@ precise related-test set.
 
 ## When to use
 
-- One shard's wall clock sits close to its `timeout-minutes` cap while its peers finish in half the
-  time.
 - A small style or predicate helper is exported from a component barrel and imported by components
   in other directories.
-- `jest --findRelatedTests` on a component file lists suites that have nothing to do with it.
+- `jest --findRelatedTests` on that helper lists the whole component's suites rather than its own
+  consumers.
+- A shard carrying those consuming files runs long, and the cause traces back to that one
+  cross-directory leaf rather than to the shard's own file count.
 - Not for: a slow shard whose files genuinely own many tests — that is a shard-count question, not
-  an import-graph one.
+  an import-graph one. Not for a module importing an aggregate index instead of a component's own
+  entry — that is the barrel-import trap, and no file needs to move.
 
 ## Applicability by repository shape
 

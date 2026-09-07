@@ -67,8 +67,12 @@ make test-bats
 
 2. **Collect the discovered set from every runner**, once per environment the config switches on
    (`jest --listTests` per `TEST_ENV`, plus `playwright test --list --reporter=json`). Strip Jest's
-   absolute container paths to repo-relative.
+   absolute container paths to repo-relative, concatenate the runners, then put the union through
+   `sort -u` — neither runner promises sorted output, and Playwright's JSON is emitted in suite
+   order.
 3. **Diff and fail on orphans** (`comm -23 declared discovered`), printing each undiscovered file.
+   `comm` compares two sorted streams line by line and silently reports nonsense on an unsorted
+   one, so both sides must have been through `sort -u` under the same collation (`LC_ALL=C`).
 4. **Add a zero-discovery guard.** Assert every runner returns a non-empty list, so a config that
    silently narrows to nothing cannot pass as "no orphans".
 5. **Probe the extension filter.** Plant a throwaway `describe()` file for each JS/TS-family
@@ -99,3 +103,5 @@ make test-bats
 - Discarding runner stderr, so a module-resolution error reads as an empty discovery list — capture
   it and replay it on failure.
 - Deleting a probe sweep because "the test cleans up" — the sweep exists for the run that dies.
+- Feeding `comm` a runner list that was never sorted — it assumes sorted input and reports a wrong
+  diff without erroring, so `sort -u` both sides under one collation before comparing.

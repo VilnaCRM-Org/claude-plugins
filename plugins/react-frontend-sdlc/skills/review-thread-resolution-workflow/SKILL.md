@@ -70,11 +70,15 @@ make pr-comments PR=123 FORMAT=json
 
 ## Gotchas
 
-- **Thread listing can silently under-report.** GitHub's GraphQL connection caps `first` at 100.
-  The React SPA shape's review-thread script requests `reviewThreads(first: 250)`, which the API
-  rejects; the fix is to page the query at 100 with an `after` cursor, as the Next.js shape's copy
-  of the script already does. Do not conclude "no unresolved threads" from a failed or truncated
-  listing.
+- **Thread listing is capped, and the bundled script refuses rather than truncates.** GitHub's
+  GraphQL connections cap `first` at 100. The bundled listing script resolved from
+  `make.pr_comments` requests `reviewThreads(first: 100)` — plus `comments(first: 100)` on each
+  thread and on the pull request — and requests `pageInfo { hasNextPage }` on every one of them. It
+  does **not** page: when any connection reports `hasNextPage` it dies with a message naming the
+  cap, because a truncated fetch could report "0 unresolved" while threads sit past the first page.
+  Cursor-based paging is not implemented in any shape today. So on a pull request that large the
+  listing gives no count at all — split the pull request, or fetch the remaining pages by hand — and
+  never read a failed or refused listing as "no unresolved threads".
 - A reviewer bot that rewrites the pull-request body on push silently drops issue-closing keywords
   added by hand. Keep those keywords in the commit messages, and set the body after the final push.
 - Findings that assume a toolchain the repository does not use (npm/yarn commands when the profile's

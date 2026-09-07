@@ -54,7 +54,7 @@ const PLUGIN_ROOT = [
   'First resolve the react-frontend-sdlc plugin root into a shell variable P and echo it:',
   '  P="$CLAUDE_PLUGIN_ROOT"',
   '  [ -n "$P" ] || P="$(ls -d ~/.claude/plugins/cache/*/react-frontend-sdlc/*/ 2>/dev/null | sort -V | tail -1)"',
-  '  [ -n "$P" ] || P="$(find "$HOME" -maxdepth 5 -path "*/plugins/react-frontend-sdlc/.claude-plugin/plugin.json" 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"',
+  '  [ -n "$P" ] || P="$(find "$HOME" -maxdepth 8 -path "*/plugins/react-frontend-sdlc/.claude-plugin/plugin.json" 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"',
   'If P is empty, stop and return status BLOCKED with reason "plugin root not found".',
   'Run every plugin script as "$P/scripts/<name>.sh" (they are executable and self-contained).',
 ].join('\n')
@@ -65,7 +65,7 @@ const requiredFlag = () => (OPTS.requiredChecks ? `--required-checks "${OPTS.req
 
 const STATE_SCHEMA = {
   type: 'object',
-  required: ['verdict', 'next', 'pr'],
+  required: ['verdict', 'next', 'pr', 'head', 'ci', 'unresolved', 'reviewers', 'notes'],
   properties: {
     pr: { type: 'integer' },
     url: { type: 'string' },
@@ -74,17 +74,19 @@ const STATE_SCHEMA = {
     next: { type: 'string' },
     ci: {
       type: 'object',
+      required: ['status', 'failing', 'pending'],
       properties: {
-        status: { type: 'string' },
+        status: { type: 'string', enum: ['green', 'red', 'pending', 'none'] },
         failing: { type: 'array', items: { type: 'string' } },
         pending: { type: 'array', items: { type: 'string' } },
       },
     },
-    unresolved: { type: 'object', properties: { total: { type: 'integer' } } },
+    unresolved: { type: 'object', required: ['total'], properties: { total: { type: 'integer' } } },
     reviewers: {
       type: 'array',
       items: {
         type: 'object',
+        required: ['name', 'status'],
         properties: {
           name: { type: 'string' },
           status: { type: 'string' },
@@ -111,7 +113,8 @@ function snapshotPrompt(waitSeconds, waitVerdicts) {
     wait
       ? `The script polls for up to ${waitSeconds} seconds; run it with a ${Math.min(waitSeconds + 60, 600)}-second tool timeout and do not poll yourself.`
       : 'Run it exactly once.',
-    'Do not edit anything, post anything, or interpret the verdict — the workflow decides. If the script exits non-zero, return {"verdict":"BLOCKED","next":"<the script\'s error line>","pr":0}.',
+    'Do not edit anything, post anything, or interpret the verdict — the workflow decides. If the script exits non-zero, return',
+    '{"verdict":"BLOCKED","next":"<the script\'s error line>","pr":0,"head":"","ci":{"status":"none","failing":[],"pending":[]},"unresolved":{"total":0},"reviewers":[],"notes":[]}.',
   ].join('\n')
 }
 
@@ -266,6 +269,11 @@ async function snapshot(waitSeconds, waitVerdicts) {
     effort: 'low',
   })
   if (!s) throw new Error('snapshot agent returned nothing')
+  const complete = s.ci && Array.isArray(s.ci.failing) && Array.isArray(s.ci.pending)
+    && s.unresolved && Number.isInteger(s.unresolved.total) && Array.isArray(s.reviewers) && typeof s.head === 'string'
+  if (!complete && s.verdict !== 'BLOCKED') {
+    return { verdict: 'BLOCKED', next: `malformed sensor payload — missing ${['ci', 'unresolved', 'reviewers', 'head'].filter((k) => s[k] == null).join(',') || 'fields'}`, pr: s.pr || 0, head: '', ci: { status: 'none', failing: [], pending: [] }, unresolved: { total: 0 }, reviewers: [], notes: [] }
+  }
   if (!OPTS.pr && s.pr) OPTS.pr = String(s.pr)
   for (const n of s.notes || []) degradeNotes.add(n)
   return s
@@ -284,6 +292,9 @@ while (true) {
   note(`head=${(state.head || '').slice(0, 7)} verdict=${state.verdict} next=${state.next}`)
 
   if (state.verdict === 'READY') {
+    if (state.ci.status === 'red' || state.unresolved.total > 0 || state.reviewers.some((r) => !['APPROVED', 'SKIPPED'].includes(r.status))) {
+      return report('ESCALATED', { escalation: escalation('sensor reported READY with contradicting facts', 'upgrade the plugin; the sensor and the workflow disagree') })
+    }
     const skipped = (state.reviewers || []).filter((r) => r.status === 'SKIPPED')
     const result = degradeNotes.size || skipped.length || unreachable.size ? 'SUCCESS-WITH-REPORT' : 'SUCCESS'
     return report(result, { exit_condition: 'met' })
@@ -349,7 +360,13 @@ while (true) {
 
   if (state.verdict === 'REQUEST') {
     if (requestsForHead >= OPTS.maxRequestRounds) {
-      const silent = (state.reviewers || []).filter((r) => ['NONE', 'STALE', 'REQUESTED', 'NOT_APPROVED'].includes(r.status)).map((r) => r.name)
+      const notApproved = (state.reviewers || []).filter((r) => r.status === 'NOT_APPROVED').map((r) => r.name)
+      if (notApproved.length) {
+        return report('ESCALATED', {
+          escalation: escalation(`${notApproved.join(',')} reviewed head ${String(state.head).slice(0, 7)} and did not approve after ${OPTS.maxRequestRounds} re-review requests`, 'read the reviewer\'s latest review; its findings are outside the resolved threads'),
+        })
+      }
+      const silent = (state.reviewers || []).filter((r) => ['NONE', 'STALE', 'REQUESTED'].includes(r.status)).map((r) => r.name)
       degradeNotes.add(`${silent.join(',')} did not review head ${String(state.head).slice(0, 7)} after ${OPTS.maxRequestRounds} requests — reported as missing, not passed`)
       dropUnreachable(silent)
       note(`request budget spent for this head; continuing without ${silent.join(',')}`)

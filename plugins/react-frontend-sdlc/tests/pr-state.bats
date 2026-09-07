@@ -24,6 +24,7 @@ setup() {
   export GH_REVIEWS_FIXTURE="$FX/reviews-approved.ndjson"
   export GH_COMMENTS_FIXTURE="$FX/comments-quiet.ndjson"
   export GH_THREADS_FIXTURE="$FX/threads-empty.json"
+  export GH_PUSHED_AT=""
   cat >"$WORK/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf 'gh %s\n' "$*" >>"$GH_LOG"
@@ -35,6 +36,8 @@ case "$1 $2 ${3:-}" in
   "api repos/acme/stub-frontend/pulls/7/reviews?per_page=100 --paginate") cat "$GH_REVIEWS_FIXTURE" ;;
   "api repos/acme/stub-frontend/issues/7/comments?per_page=100 --paginate") cat "$GH_COMMENTS_FIXTURE" ;;
   "api graphql -f") cat "$GH_THREADS_FIXTURE" ;;
+  "api repos/acme/stub-frontend/commits/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/check-suites?per_page=100 --jq")
+    [[ -n "$GH_PUSHED_AT" ]] && printf '"%s"\n' "$GH_PUSHED_AT" ;;
   *) echo "unexpected gh call: $*" >&2; exit 9 ;;
 esac
 EOF
@@ -226,4 +229,34 @@ EOF
   run "$SCRIPT" --pr 7 --wait-seconds 5 --interval-seconds 0
   [ "$status" -eq 1 ]
   [[ "$output" == *"--interval-seconds must be at least 1"* ]]
+}
+
+@test "a mention posted after the commit but before the push does not count as a request for this head" {
+  export GH_REVIEWS_FIXTURE="$FX/reviews-none.ndjson"
+  export GH_COMMENTS_FIXTURE="$FX/comments-requested.ndjson"
+  export GH_PUSHED_AT="2026-09-01T10:40:00Z"
+  run "$SCRIPT" --pr 7
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"coderabbit status=NONE"* ]]
+  [[ "$output" == *"VERDICT: REQUEST"* ]]
+}
+
+@test "--required-checks on a PR with an empty check rollup reports the checks as missing, never READY" {
+  export GH_PR_FIXTURE="$FX/pr-open-nochecks.json"
+  run "$SCRIPT" --pr 7 --required-checks "unit testing"
+  [[ "$output" == *"CI: pending failing=[] pending=[] missing=[unit testing]"* ]]
+  [[ "$output" == *"VERDICT: WAIT"* ]]
+  [[ "$output" != *"reports no checks"* ]]
+}
+
+@test "leading-zero durations, empty reviewer elements and duplicate reviewers are usage errors" {
+  run "$SCRIPT" --pr 7 --wait-seconds 08 --interval-seconds 1
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"without leading zeros"* ]]
+  run "$SCRIPT" --pr 7 --reviewers ","
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"without empty elements"* ]]
+  run "$SCRIPT" --pr 7 --reviewers cubic,cubic
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"duplicate reviewer 'cubic'"* ]]
 }

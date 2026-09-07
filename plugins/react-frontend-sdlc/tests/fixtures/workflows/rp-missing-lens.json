@@ -1,0 +1,5 @@
+{"args":"alpha-login","replies":[
+ {"match":"^scope$","reply":{"base":"origin/main","files":["src/modules/alpha/features/login/login-form.tsx"],"ui_files":[],"specs_present":true,"slug":"alpha-login","execute_skills":["code-review","quality-standards"],"not_applicable":[{"skill":"storybook-visual-baselines","reason":"no stories changed"}],"profile_valid":true,"blocked":null}},
+ {"match":"^code-quality-reviewer$","reply":{"status":"OK","findings":[]}},
+ {"match":"^fr-nfr-reviewer$","reply":null}
+]}

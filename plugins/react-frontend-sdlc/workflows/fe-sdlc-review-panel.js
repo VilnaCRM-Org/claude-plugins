@@ -29,7 +29,7 @@ const PLUGIN_ROOT = [
   'Resolve the react-frontend-sdlc plugin root into P and echo it:',
   '  P="$CLAUDE_PLUGIN_ROOT"',
   '  [ -n "$P" ] || P="$(ls -d ~/.claude/plugins/cache/*/react-frontend-sdlc/*/ 2>/dev/null | sort -V | tail -1)"',
-  '  [ -n "$P" ] || P="$(find "$HOME" -maxdepth 5 -path "*/plugins/react-frontend-sdlc/.claude-plugin/plugin.json" 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"',
+  '  [ -n "$P" ] || P="$(find "$HOME" -maxdepth 8 -path "*/plugins/react-frontend-sdlc/.claude-plugin/plugin.json" 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"',
   'If P is empty return status BLOCKED. Plugin skills live under "$P/skills/<name>/SKILL.md", scripts under "$P/scripts/".',
 ].join('\n')
 
@@ -67,7 +67,7 @@ const VERDICT_SCHEMA = {
 
 const SCOPE_SCHEMA = {
   type: 'object',
-  required: ['base', 'files', 'specs_present', 'execute_skills'],
+  required: ['base', 'files', 'specs_present', 'execute_skills', 'not_applicable', 'profile_valid'],
   properties: {
     base: { type: 'string' },
     files: { type: 'array', items: { type: 'string' } },
@@ -75,7 +75,10 @@ const SCOPE_SCHEMA = {
     specs_present: { type: 'boolean' },
     slug: { type: ['string', 'null'] },
     execute_skills: { type: 'array', items: { type: 'string' } },
-    not_applicable_count: { type: 'integer' },
+    not_applicable: {
+      type: 'array',
+      items: { type: 'object', required: ['skill', 'reason'], properties: { skill: { type: 'string' }, reason: { type: 'string' } } },
+    },
     profile_valid: { type: 'boolean' },
     blocked: { type: ['string', 'null'] },
   },
@@ -106,16 +109,17 @@ const scope = await agent(
     '   files = `git diff --name-only <base>...HEAD` plus uncommitted changes (`git status --porcelain` paths). ui_files = the .tsx/.css/.scss subset.',
     `3. specs bundle: ${OPTS.slug ? `specs/${OPTS.slug}/` : 'the newest specs/<slug>/ directory whose stories mention the changed files, else none'} — specs_present says whether prd/architecture/epics-stories exist there; set slug.`,
     '4. Skill triage per "$P/skills/SKILL-DECISION-GUIDE.md": read every skill description under "$P/skills/*/SKILL.md", decide EXECUTE or NOT-APPLICABLE from the changed files,',
-    '   list the EXECUTE skill names in execute_skills and count the rest in not_applicable_count. The process skills code-review and quality-standards are always EXECUTE.',
+    '   list the EXECUTE skill names in execute_skills and every other skill in not_applicable as {skill, reason} — the reason names the absent symptom (every verdict recorded, no silent skips). The process skills code-review and quality-standards are always EXECUTE.',
     'Return the structured output only; edit nothing.',
   ].join('\n'),
   { label: 'scope', phase: 'Scope', schema: SCOPE_SCHEMA },
 )
-if (!scope || scope.blocked || scope.profile_valid === false) {
+if (!scope || scope.blocked || scope.profile_valid !== true) {
   return { result: 'ESCALATED', escalation: escalationBlock(0, scope?.blocked || 'scope agent returned nothing', 'run /fe-sdlc-setup, then re-run') }
 }
 if (!scope.files.length) return { result: 'SUCCESS', note: 'empty change set — nothing to review', scope }
-log(`scope: ${scope.files.length} files, ${scope.execute_skills.length} EXECUTE skills, specs ${scope.specs_present ? 'present' : 'absent'}`)
+log(`scope: ${scope.files.length} files, ${scope.execute_skills.length} EXECUTE / ${(scope.not_applicable || []).length} NOT-APPLICABLE skills, specs ${scope.specs_present ? 'present' : 'absent'}`)
+const triage = { execute: scope.execute_skills, not_applicable: scope.not_applicable || [] }
 
 function escalationBlock(iteration, finding, action) {
   return [
@@ -138,6 +142,7 @@ function lenses(iteration) {
     ...scope.files.map((f) => `  - ${f}`),
     '',
     'Report only findings you can point at (file, line, evidence); a finding without a root-cause fix is not a finding. Never propose a suppression, a threshold change, or a skipped test. Edit nothing.',
+    `Skill triage for this change set — EXECUTE: ${triage.execute.join(', ') || 'none'}; NOT-APPLICABLE: ${triage.not_applicable.map((n) => `${n.skill} (${n.reason})`).join('; ') || 'none'}.`,
   ]
   const out = []
   out.push({
@@ -181,19 +186,24 @@ const REFUTERS = [
 const keyOf = (f) => `${f.file}:${f.title.toLowerCase().replace(/\s+/g, ' ').trim()}`
 const seen = new Set()
 const confirmedAll = []
+let carry = []
 let iteration = 0
 
 while (iteration < OPTS.maxIterations) {
   iteration += 1
   phase('Review')
-  const raw = (
-    await parallel(
-      lenses(iteration).map((l) => () =>
-        agent(l.prompt, { label: l.label, phase: 'Review', schema: FINDINGS_SCHEMA, ...(l.agentType ? { agentType: l.agentType } : {}) })
-          .then((r) => (r ? { ...r, lens: l.label } : null)),
-      ),
-    )
-  ).filter(Boolean)
+  const expected = lenses(iteration)
+  const rawAll = await parallel(
+    expected.map((l) => () =>
+      agent(l.prompt, { label: l.label, phase: 'Review', schema: FINDINGS_SCHEMA, ...(l.agentType ? { agentType: l.agentType } : {}) })
+        .then((r) => (r ? { ...r, lens: l.label } : null)),
+    ),
+  )
+  const missingLenses = expected.filter((_, i) => !rawAll[i]).map((l) => l.label)
+  if (missingLenses.length) {
+    return { result: 'ESCALATED', escalation: escalationBlock(iteration, `lens returned no result: ${missingLenses.join(', ')}`, 'a required review perspective is missing — re-run; if it repeats, check the agent definition'), journal }
+  }
+  const raw = rawAll.filter(Boolean)
   const blockedLens = raw.find((r) => r.status === 'BLOCKED')
   if (blockedLens) {
     return { result: 'ESCALATED', escalation: escalationBlock(iteration, `${blockedLens.lens} BLOCKED — ${blockedLens.note || ''}`, 'fix the blocking cause and re-run'), journal }
@@ -201,7 +211,7 @@ while (iteration < OPTS.maxIterations) {
   const skipped = raw.filter((r) => r.status === 'SKIPPED').map((r) => `${r.lens}: ${r.note || 'skipped'}`)
   const fresh = raw.flatMap((r) => r.findings.map((f) => ({ ...f, lens: r.lens }))).filter((f) => !seen.has(keyOf(f)))
   fresh.forEach((f) => seen.add(keyOf(f)))
-  log(`iteration ${iteration}: ${raw.length} lenses, ${fresh.length} new candidate findings`)
+  log(`iteration ${iteration}: ${raw.length} lenses, ${fresh.length} new candidate findings, ${carry.length} carried from the last iteration`)
 
   phase('Verify')
   const confirmed = (
@@ -222,22 +232,30 @@ while (iteration < OPTS.maxIterations) {
               { label: `verify:${r.lens}:${f.file.split('/').pop()}`, phase: 'Verify', schema: VERDICT_SCHEMA, effort: 'low' },
             ),
           ),
-        ).then((votes) => ({ ...f, votes: votes.filter(Boolean), survives: votes.filter(Boolean).filter((v) => !v.refuted).length >= 2 })),
+        ).then((votes) => {
+          const cast = votes.filter(Boolean)
+          const unverified = cast.length < REFUTERS.length
+          return { ...f, votes: cast, unverified, survives: unverified || cast.filter((v) => !v.refuted).length >= 2 }
+        }),
       ),
     )
   )
     .filter(Boolean)
     .filter((f) => f.survives)
-  confirmedAll.push(...confirmed)
-  journal.push(`iteration ${iteration}: candidates=${fresh.length} confirmed=${confirmed.length}${skipped.length ? ` skipped=[${skipped.join('; ')}]` : ''}`)
+  const unverifiedCount = confirmed.filter((f) => f.unverified).length
+  if (unverifiedCount) log(`${unverifiedCount} finding(s) kept unverified: a refuter returned no vote, so the finding stands`)
+  confirmedAll.push(...confirmed.filter((f) => !carry.includes(f)))
+  const toFix = [...carry, ...confirmed]
+  journal.push(`iteration ${iteration}: candidates=${fresh.length} confirmed=${confirmed.length} carried=${carry.length}${skipped.length ? ` skipped=[${skipped.join('; ')}]` : ''}`)
 
-  if (!confirmed.length) {
+  if (!toFix.length) {
     return {
       result: skipped.length ? 'SUCCESS-WITH-REPORT' : 'SUCCESS',
       iterations: iteration,
       exit_condition: 'zero new confirmed findings in the last iteration',
       confirmed_total: confirmedAll.length,
       fixed: confirmedAll.map((f) => `${f.file}: ${f.title}`),
+      triage,
       degrade_notes: skipped,
       journal,
     }
@@ -245,7 +263,7 @@ while (iteration < OPTS.maxIterations) {
 
   phase('Fix')
   const groups = new Map()
-  for (const f of confirmed) {
+  for (const f of toFix) {
     const dir = f.file.split('/').slice(0, 3).join('/')
     groups.set(dir, [...(groups.get(dir) || []), f])
   }
@@ -261,11 +279,16 @@ while (iteration < OPTS.maxIterations) {
       ),
     ),
   )
-  if (groups.size > 4) log(`fix fan-out capped at 4 groups; ${groups.size - 4} group(s) deferred to the next iteration`)
+  const groupList = [...groups.values()]
+  const deferred = groupList.slice(4).flat()
+  if (groups.size > 4) log(`fix fan-out capped at 4 groups; ${groups.size - 4} group(s) carried to the next iteration`)
   const blockedFix = fixes.filter(Boolean).find((r) => r.status === 'BLOCKED')
   if (blockedFix) {
     return { result: 'ESCALATED', escalation: escalationBlock(iteration, `react-implementer BLOCKED — ${blockedFix.recommendation}`, 'resolve the blocker by hand, then re-run'), journal }
   }
+  const incomplete = groupList.slice(0, 4).flatMap((group, i) => (fixes[i] && fixes[i].status === 'COMPLETE' ? [] : group))
+  carry = [...deferred, ...incomplete]
+  if (carry.length) log(`${carry.length} confirmed finding(s) carried to iteration ${iteration + 1}: not yet fixed`)
   journal.push(`iteration ${iteration}: fixed groups=${fixes.filter(Boolean).length} files=${fixes.filter(Boolean).reduce((n, r) => n + (r.files_modified || 0), 0)}`)
 }
 

@@ -61,7 +61,7 @@ runs no git).
    - Record one verdict per skill: `EXECUTE` with one-line evidence
      (which changed file or behavior triggers it) or `NOT-APPLICABLE`
      with a one-line reason (including profile-gated skips).
-   - All 19 verdicts are recorded before any body loads. Token bound
+   - All 86 verdicts are recorded before any body loads. Token bound
      (NFR-5): full SKILL.md bodies + reference files load only for
      EXECUTE verdicts.
 2. **Execute applicable skills** — load each EXECUTE skill's body and

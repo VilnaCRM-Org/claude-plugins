@@ -16,6 +16,11 @@ description: >-
 - `architecture.source_root`
 - `architecture.modules`
 
+Run the generated guard suite through the target mapped by `make.test_unit_client`; when that key
+maps to `null` the repository has no unit lane to host it — skip the run with a recorded
+capability-absent note and report which assertions went unverified, rather than invoking a target
+that does not exist. The same applies to the docs linter reached through `make.lint_md`.
+
 ## Overview
 
 Hand-maintained evidence documents rot the moment code moves. Locking the whole set — registry,
@@ -47,8 +52,8 @@ runtime exports, and asserts in both directions.
 
 ## Procedure
 
-The guard is a unit suite: run it through the target mapped by `make.test_unit_client`. Parse each
-artifact once at module scope, then generate cases with `it.each` over the parsed rows so every row
+The guard is a unit suite: run it through the target mapped by `make.test_unit_client` (skip with the
+recorded note above when that key maps to `null`). Parse each artifact once at module scope, then generate cases with `it.each` over the parsed rows so every row
 is its own named failure:
 
 ```ts

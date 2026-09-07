@@ -25,7 +25,7 @@ const PLUGIN_ROOT = [
   'Resolve the react-frontend-sdlc plugin root into P and echo it:',
   '  P="$CLAUDE_PLUGIN_ROOT"',
   '  [ -n "$P" ] || P="$(ls -d ~/.claude/plugins/cache/*/react-frontend-sdlc/*/ 2>/dev/null | sort -V | tail -1)"',
-  '  [ -n "$P" ] || P="$(find "$HOME" -maxdepth 5 -path "*/plugins/react-frontend-sdlc/.claude-plugin/plugin.json" 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"',
+  '  [ -n "$P" ] || P="$(find "$HOME" -maxdepth 8 -path "*/plugins/react-frontend-sdlc/.claude-plugin/plugin.json" 2>/dev/null | head -1 | xargs -r dirname | xargs -r dirname)"',
   'If P is empty return status BLOCKED. Commands to follow live under "$P/commands/", agents under "$P/agents/", scripts under "$P/scripts/".',
 ].join('\n')
 
@@ -46,7 +46,7 @@ function escalation(stage, iteration, finding, action) {
     '=== END ===',
   ].join('\n')
 }
-const escalate = (stage, iteration, finding, action, extra) => ({ result: 'ESCALATED', stage, escalation: escalation(stage, iteration, finding, action), journal, degrade_notes: degradeNotes, ...extra })
+const escalate = (stage, iteration, finding, action, extra) => ({ result: 'ESCALATED', stage, escalation: escalation(stage, iteration, finding, action), counters, journal, degrade_notes: degradeNotes, ...extra })
 
 // --- stage 0 ---------------------------------------------------------------
 phase('Setup check')
@@ -90,8 +90,8 @@ const plan = await agent(
   ].join('\n'),
   { label: 'resolve-plan', phase: 'Resolve plan', schema: PLAN_SCHEMA },
 )
-if (!plan || plan.blocked || !plan.issue_url || !plan.readiness_pass) {
-  return escalate('plan', '1/1', plan?.blocked || 'issue or readiness PASS missing', 'run /fe-sdlc-issue and /fe-sdlc-plan interactively, then re-run')
+if (!plan || plan.blocked || !plan.issue_url || !plan.slug || !plan.readiness_pass) {
+  return escalate('plan', '1/1', plan?.blocked || 'issue, specs slug or readiness PASS missing', 'run /fe-sdlc-issue and /fe-sdlc-plan interactively, then re-run')
 }
 OPTS.slug = plan.slug
 OPTS.issue = plan.issue_url
@@ -137,8 +137,8 @@ async function implement(stories, feedback) {
     )
     const blocked = results.filter(Boolean).find(({ r }) => r?.status === 'BLOCKED')
     if (blocked) return escalate('implement', `${counters.implement}/${OPTS.maxImplementRounds}`, `story ${blocked.story.id} BLOCKED — ${blocked.r.recommendation || ''}`, 'resolve the blocker (missing capability, breaker, failing dependency), then re-run')
-    for (const { story, r } of results.filter(Boolean)) if (r?.status === 'COMPLETE') story.done = true
-    note(`implement round ${counters.implement}: ${results.filter(Boolean).filter(({ r }) => r?.status === 'COMPLETE').length}/${batch.length} stories complete`)
+    for (const { story, r } of results.filter(Boolean)) if (r?.status === 'COMPLETE' && r?.exit_signal === true) story.done = true
+    note(`implement round ${counters.implement}: ${results.filter(Boolean).filter(({ r }) => r?.status === 'COMPLETE' && r?.exit_signal === true).length}/${batch.length} stories complete`)
     pending = stories.filter((s) => !s.done)
     feedback = null
   }
@@ -177,7 +177,19 @@ while (true) {
   )
   if (!qa) return escalate('qa', '-', 'qa-visual-tester returned nothing', 'run /fe-sdlc-qa by hand')
   degradeNotes.push(...(qa.degrade_notes || []))
-  if (qa.verdict !== 'FAIL') { note(`qa: ${qa.verdict}`); break }
+  if (qa.verdict === 'SKIPPED') {
+    const gate = await agent(
+      [PLUGIN_ROOT, '', 'Read .claude/react-sdlc.yml in the repository root and report, without running anything else, whether make.start_prod and make.start are both null (the only condition under which the QA stage may be skipped). Return {start_prod_null, start_null}.'].join('\n'),
+      { label: 'qa-skip-gate', phase: 'QA', effort: 'low', schema: { type: 'object', required: ['start_prod_null', 'start_null'], properties: { start_prod_null: { type: 'boolean' }, start_null: { type: 'boolean' } } } },
+    )
+    if (!gate || !gate.start_prod_null || !gate.start_null || !(qa.degrade_notes || []).length) {
+      return escalate('qa', '-', 'qa-visual-tester returned SKIPPED although the profile maps a start target', 'run /fe-sdlc-qa by hand; a bootable stack must be QA-verified, not skipped')
+    }
+    degradeNotes.push('QA skipped: make.start_prod and make.start are both null (verified against the profile)')
+    note('qa: SKIPPED (verified capability absence)')
+    break
+  }
+  if (qa.verdict === 'PASS') { note('qa: PASS'); break }
   counters.qa_loops += 1
   note(`qa: FAIL (${(qa.failures || []).length} failures) → loop-back ${counters.qa_loops}/${OPTS.maxQaLoops}`)
   if (counters.qa_loops > OPTS.maxQaLoops) return escalate('qa', `${counters.qa_loops}/${OPTS.maxQaLoops}`, `QA still failing: ${(qa.failures || []).slice(0, 3).join('; ')}`, 'fix the failures by hand, then re-run')

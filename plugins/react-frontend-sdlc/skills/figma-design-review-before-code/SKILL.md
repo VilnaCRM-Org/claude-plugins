@@ -5,9 +5,7 @@ description: >-
   a design handoff, a spec artifact, or a request to review a design against the existing
   components. Symptoms include no implementation file yet, only a Figma node id or a spec markdown,
   and open questions about semantics, accessible names, alt text, disabled states, or state
-  variants. This is the pre-code design read-through that returns a contract and mismatch inventory
-  (structure, accessible name, imagery, interaction); the separate `figma-design-check` skill is the
-  plugin's implementation-parity gate step run against code that already exists.
+  variants. Not the implementation-parity gate run against code that already exists.
 ---
 
 # Figma design review before code
@@ -68,8 +66,13 @@ of pixels: sizing and spacing parity belong to implementation-time verification.
    - **Imagery** — each icon or image is decorative (`aria-hidden`, empty `alt`) or informative (a
      described alternative). Say which, per node.
    - **Interaction** — clickable region boundaries, focus order, and how disabled is expressed.
-     Prefer `aria-disabled` on a still-focusable control so focus is never dropped mid-interaction,
-     never the native `disabled` attribute on a non-button element, where it carries no meaning.
+     On a native form control — `button`, `input`, `select`, `textarea`, `fieldset` — the native
+     `disabled` attribute is the correct expression: it blocks activation and, on an input, stops
+     the value being submitted. `aria-disabled` is for a custom or non-native control (a `div` or
+     `span` widget, a link) that has no native `disabled` to set: it keeps the control focusable so
+     focus is never dropped mid-interaction, and the handler must reject activation itself. Reach
+     for `aria-disabled` on a native control only when the design requires the disabled state to
+     stay focusable, and then the same handler-side rejection applies.
 5. Return the findings as text. Write no files during a review — no probes, no reports, no scratch
    output; a review that edits the working tree is no longer a review.
 

@@ -76,7 +76,25 @@ repo_slug="$(resolve_repo_slug)" \
 
 # Draft detection is informational: CodeRabbit's automatic review skips drafts,
 # but an explicit mention still runs, so the plan is unchanged.
-is_draft="$(gh pr view "$PR" --json isDraft --jq .isDraft 2>/dev/null || echo unknown)"
+pr_json="$(gh pr view "$PR" --json isDraft,headRefOid,commits)" \
+  || die "gh pr view failed for PR #$PR in $repo_slug"
+is_draft="$(python3 -c 'import json,sys; print(str(json.loads(sys.argv[1]).get("isDraft")).lower())' "$pr_json")"
+# The head's commit time bounds which bot comments still describe the current
+# diff: a "Review skipped" posted for an earlier, larger head must not keep
+# suppressing mentions after a push shrank the PR.
+head_epoch="$(python3 - "$pr_json" <<'PY'
+import json, sys
+from datetime import datetime, timezone
+pr = json.loads(sys.argv[1])
+best = 0
+for c in pr.get("commits") or []:
+    try:
+        best = max(best, int(datetime.strptime(c.get("committedDate") or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()))
+    except ValueError:
+        pass
+print(best)
+PY
+)"
 
 # One paginated read of the PR's issue comments as NDJSON (author, body, time).
 comments="$(gh api "repos/$repo_slug/issues/$PR/comments?per_page=100" --paginate \
@@ -91,7 +109,7 @@ now_epoch="${SDLC_NOW_EPOCH:-$(date -u +%s)}"
 comments_file="$(mktemp)"
 trap 'rm -f "$comments_file"' EXIT
 printf '%s\n' "$comments" >"$comments_file"
-plan="$(python3 - "$REVIEWERS" "$FULL" "$INTERVAL" "$FORCE" "$now_epoch" "$comments_file" <<'PY'
+plan="$(python3 - "$REVIEWERS" "$FULL" "$INTERVAL" "$FORCE" "$now_epoch" "$comments_file" "$head_epoch" <<'PY'
 import json, sys
 from datetime import datetime, timezone
 
@@ -100,6 +118,12 @@ full = sys.argv[2] == "1"
 interval_min = int(sys.argv[3])
 force = sys.argv[4] == "1"
 now = int(sys.argv[5])
+head_epoch = int(sys.argv[7])
+
+
+def norm_login(login):
+    login = (login or "").lower()
+    return login[:-5] if login.endswith("[bot]") else login
 
 comments = []
 for line in open(sys.argv[6], encoding="utf-8"):
@@ -112,7 +136,7 @@ for line in open(sys.argv[6], encoding="utf-8"):
         epoch = int(datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp())
     except ValueError:
         epoch = 0
-    comments.append({"user": (c.get("user") or "").lower(), "body": c.get("body") or "", "epoch": epoch})
+    comments.append({"user": norm_login(c.get("user")), "body": c.get("body") or "", "epoch": epoch})
 comments.sort(key=lambda c: c["epoch"])
 
 def last_by(user):
@@ -132,7 +156,7 @@ for r in reviewers:
     if r == "coderabbit":
         bot = last_by("coderabbitai")
         body = (bot or {}).get("body", "")
-        if bot and "exceed the limit of" in body and "review skipped" in body.lower():
+        if bot and "exceed the limit of" in body and "review skipped" in body.lower() and bot["epoch"] >= head_epoch:
             print("SKIP coderabbit diff exceeds CodeRabbit's changed-file limit; split the PR — a mention cannot lift it")
             continue
         req = last_request(("@coderabbitai review", "@coderabbitai full review"))

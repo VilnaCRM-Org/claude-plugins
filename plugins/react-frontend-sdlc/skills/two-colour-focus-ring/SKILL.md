@@ -37,11 +37,12 @@ layer in one `box-shadow` guarantees that at least one layer contrasts with what
 ## Verification gate
 
 The pattern itself is unconditional — it is CSS in the styling layer named by `framework.ui`. Its
-two verification steps are gated: run the accessibility check through the target mapped by
-`make.a11y`, and skip that step with a recorded note when `capabilities.accessibility_audit` is
-`false` or the key maps to `null`. Re-record the affected snapshots through the target mapped by
-`make.test_visual`, and skip that step with a recorded note when `capabilities.visual_testing` is
-`false`.
+two verification steps are gated, and only by a capability flag. Run the accessibility check
+through the target mapped by `make.a11y`; when that key is `null` the plugin substitutes its
+bundled a11y lane, so the check still runs — a null mapping is never a reason to skip it. Skip
+that step with a recorded note only when `capabilities.accessibility_audit` is `false`. Re-record
+the affected snapshots through the target mapped by `make.test_visual`, and skip that step with a
+recorded note when `capabilities.visual_testing` is `false`.
 
 ## Applicability by repository shape
 
@@ -105,3 +106,5 @@ selected, so the thicker focus ring always wins visual priority.
 - Applying the two-layer ring to every control, which adds weight where a single ring already
   contrasts.
 - Verifying only the rest state; check the ring in the selected, hovered, and disabled fills too.
+- Reading a `null` `make.a11y` as permission to skip the accessibility check — that mapping selects
+  the bundled a11y lane, so run it and gate only on `capabilities.accessibility_audit`.

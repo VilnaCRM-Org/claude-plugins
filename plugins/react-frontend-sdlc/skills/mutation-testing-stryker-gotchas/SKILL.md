@@ -39,12 +39,12 @@ from a shard which no longer owns the file. Each has a deterministic fix.
 
 - **React SPA shape** (feature modules under the source root, a bootable app, an aggregate CI
   target): yes — `stryker.config.mjs` runs `checkers: ['typescript']` with `ignoreStatic: true` and
-  a flat `{ high, low, break }` of 100; CI shards incrementally and
-  `scripts/ci/merge-mutation-reports.ts` merges by ownership.
+  a flat `{ high, low, break }` of 100; CI shards incrementally and the target mapped by
+  `make.merge_mutation_reports` merges by ownership.
 - **Next.js app shape** (routed pages, no aggregate duplication gate): partial — the
   equivalent-mutant and directive traps apply, but there is no `checkers` or `ignoreStatic` setting
-  and the mutate scope is four curated files; shards run cold and
-  `scripts/ci/merge-mutation-reports.ts` unions them, with `break` read from
+  and the mutate scope is four curated files; shards run cold and the target mapped by
+  `make.merge_mutation_reports` unions them, with `break` read from
   `config/mutation-policy.json`, so the stale-owner trap does not arise.
 - **Component-library shape** (Storybook-first, no bootable app, published package): partial — the
   same two traps apply; shards run cold and merge by union, thresholds are

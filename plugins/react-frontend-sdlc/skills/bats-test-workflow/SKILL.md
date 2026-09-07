@@ -31,13 +31,16 @@ catch, so the suite stays green on the vulnerable code.
 
 - **React SPA shape** (feature modules under the source root, a bootable app, an aggregate CI
   target): yes — specs in the Bats spec directory, the Bats suite target runs Bats in the dev
-  compose service; shared stubs live in the suite's shared test helper.
+  compose service; shared stubs live in the suite's shared helper (`tests/bats/test_helper.bash`).
 - **Next.js app shape** (routed pages, no aggregate duplication gate): yes — same paths and helper;
   the Bats suite target is host-only in either execution mode and needs a host install through the
   package manager named by `framework.package_manager` rather than a container.
 - **Component-library shape** (Storybook-first, no bootable app, published package): partial — same
-  paths and Bats suite target (in the package-manager compose service), but the helper carries only
-  the docker/make stubs, so a `gh` stub must be written in the spec.
+  paths and Bats suite target (in the package-manager compose service), but the helper is usually
+  thinner, so read it first and add the stub you need there when it is absent.
+
+Which helpers exist is a per-repository fact in every shape: open the helper and read it rather
+than porting a name from another suite.
 
 ## Procedure
 
@@ -51,11 +54,15 @@ catch, so the suite stays green on the vulnerable code.
    Resolve the single-file runner through the package runner for
    `framework.package_manager`, not a hardcoded one.
 
-2. Write the case around observable behaviour. Bats gives `run` plus `$status` and `$output`; the
-   repositories add their own helpers in the shared Bats test helper — `setup_stub_dir`,
-   `create_docker_stub`, `run_make_target`, `assert_log_contains`, `assert_output_contains`
-   everywhere, plus `create_gh_stub` in the React SPA and Next.js shapes. Use those rather than a
-   fresh ad-hoc stub, so the recorded command log stays comparable across files.
+2. Write the case around observable behaviour. Bats gives `run` plus `$status` and `$output`;
+   everything above that is repository-local. Before writing a line, read the suite's shared helper
+   — conventionally `tests/bats/test_helper.bash`, the file the existing specs `load` — and list
+   what it actually provides: which stub factories (a PATH-shadowing stub directory, per-command
+   stubs for `docker`, `make`, `gh`, …), which assertion helpers, and the variable name it records
+   invocations under. Call those names; never assume the names used in another repository's specs.
+   Reuse beats a fresh ad-hoc stub, so the recorded command log stays comparable across files. If
+   the helper has no stub for the command you need, add one there rather than inline, and if there
+   is no helper at all, create it and load it from the spec.
 3. **Prove the test goes red.** Restore the buggy version of the file under test, run the suite,
    confirm the new case fails, then restore the fix and confirm it passes:
 
@@ -77,9 +84,12 @@ catch, so the suite stays green on the vulnerable code.
 A stub that returns 0 for everything makes a presence check pass on both the vulnerable and the
 fixed code. Assert which branch ran instead.
 
+The helper names below are placeholders for whatever the suite's own helper defines — substitute
+the real ones you read in step 2.
+
 ```bash
 @test "comments on the existing alert instead of opening a duplicate" {
-  setup_stub_dir                      # puts the stub PATH first and clears COMMAND_LOG
+  setup_stub_dir                      # puts the stub PATH first and clears the command log
   export EXISTING_ALERTS_FIXTURE="$BATS_TEST_TMPDIR/open-alert.json"
   run create_alert 'release-"broken'  # a quote that malforms an interpolated jq filter
   [ "$status" -eq 0 ]
@@ -107,4 +117,5 @@ filter returns empty and the script falls through to creating a duplicate.
 - Asserting a substring both branches emit (an alert prefix that appears in create and in comment) —
   assert the branch-specific token, plus a negative assertion on the other branch.
 - Covering only the happy path — the policy asks for negative and boundary cases too.
-- Reaching for a fresh inline stub when the shared Bats test helper already has one.
+- Reaching for a fresh inline stub when the shared helper already has one — load the helper and call its stub.
+- Calling a helper name remembered from another repository's suite — read `tests/bats/test_helper.bash` and use the names it actually defines.

@@ -158,3 +158,60 @@ run_wf() { # <workflow-file> <scenario-file>
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("/react-frontend-sdlc:fe-sdlc-review-panel"))'
 }
+
+# --- review-fix regressions ------------------------------------------------------------
+
+@test "pr-until-green: a reviewer that reviewed the head without approving escalates instead of being dropped" {
+  run_wf fe-sdlc-pr-until-green.js pug-not-approved.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("coderabbit reviewed head bbbb222 and did not approve"))'
+  echo "$output" | jq -e '.result.degrade_notes == []'
+}
+
+@test "pr-until-green: a READY snapshot without the full sensor payload is rejected" {
+  run_wf fe-sdlc-pr-until-green.js pug-malformed-ready.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("malformed sensor payload"))'
+}
+
+@test "review-panel: a lens that returns nothing escalates instead of vanishing" {
+  run_wf fe-sdlc-review-panel.js rp-missing-lens.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("lens returned no result: fr-nfr-reviewer"))'
+}
+
+@test "review-panel: a confirmed finding whose fix is incomplete is carried into the next iteration" {
+  run_wf fe-sdlc-review-panel.js rp-carry.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "SUCCESS" and .result.iterations == 3 and .result.confirmed_total == 1'
+  echo "$output" | jq -e '[.calls[] | select(.label | startswith("fix:"))] | length == 2'
+  echo "$output" | jq -e '.result.triage.not_applicable[0].skill == "storybook-visual-baselines"'
+}
+
+@test "review-panel: a finding with a missing refuter vote is kept, not silently confirmed or dropped by majority" {
+  run_wf fe-sdlc-review-panel.js rp-unverified.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "SUCCESS" and .result.confirmed_total == 1'
+  echo "$output" | jq -e '.logs | any(contains("kept unverified"))'
+}
+
+@test "feature: a QA SKIPPED verdict is accepted only when the profile really maps no start target" {
+  run_wf fe-sdlc-feature.js feat-qa-skipped-rejected.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("returned SKIPPED although the profile maps a start target"))'
+  run_wf fe-sdlc-feature.js feat-qa-skipped-accepted.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "SUCCESS-WITH-REPORT" and (.result.degrade_notes | any(contains("verified against the profile")))'
+}
+
+@test "feature: COMPLETE without exit_signal never marks a story done" {
+  run_wf fe-sdlc-feature.js feat-incomplete-story.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and .result.counters.implement == 5 and (.result.escalation | contains("stories still open: 1.1"))'
+}
+
+@test "feature: a plan without a specs slug escalates before implementation" {
+  run_wf fe-sdlc-feature.js feat-null-slug.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and .result.stage == "plan"'
+}

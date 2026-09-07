@@ -170,9 +170,27 @@ report instead of failing (NFR-4).
    "${CLAUDE_PLUGIN_ROOT}/scripts/pr-state.sh" --pr <n>
    ```
 
-   A `REQUEST` or `WAIT` verdict here means a reviewer has not yet
-   reviewed the final head; go back to step 3 (or hand the PR to the
-   `fe-sdlc-pr-until-green` workflow, which drives this loop unattended). If ANY
+   A non-`READY` verdict is routed by its CAUSE, not by its name — the
+   sensor returns `WAIT` for two different states, and conflating them
+   burns counter-B budget on checks that are merely still running. Read
+   the snapshot's `CI:` line and its `REVIEWER:` rows before deciding:
+
+   - **`WAIT` with `ci: pending` (checks still running, non-empty
+     `pending`/`missing`)** — a step-4 comment-resolution push
+     re-triggers CI, so this is the common case here. Wait on the checks
+     (`pr-state.sh --pr <n> --wait-seconds 540`) or re-enter the step-2
+     loop when they come back red. Counter B is NOT touched, and no
+     re-dispatch of the comment resolver happens on this path.
+   - **`WAIT` with an in-flight review (a `REVIEWER:` row of status
+     `REQUESTED`) and checks not pending** — a mention is already posted
+     and its review is still coming; go back to step 3, which respects
+     the script's `WAIT:` interval instead of re-mentioning.
+   - **`REQUEST`** — a reviewer has never reviewed this head (`NONE`,
+     `STALE`, or unacknowledged `NOT_APPROVED`); go back to step 3 to
+     post the mention.
+
+   Either route may instead hand the PR to the
+   `fe-sdlc-pr-until-green` workflow, which drives this loop unattended. If ANY
    degrade path was taken, the status is SUCCESS-WITH-REPORT and the
    summary lists every degrade note. Always print: PR URL, checks
    state, unresolved count, counters used (`A <a>/5`, `B <b>/5`),

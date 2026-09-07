@@ -76,7 +76,10 @@ Supporting detail for the
 - Privileged jobs carry the same-repo guard.
 - Every input is read from the event payload and validated non-empty.
 - Actions are pinned to commit SHAs; checkout uses `persist-credentials: false`.
-- Concurrency cancels on pull-request workflows and never on deploy or release workflows.
+- Concurrency cancels on ordinary pull-request check workflows only. Sandbox provisioning is a
+  `pull_request` workflow that must still keep `cancel-in-progress: false`, as deploy and
+  release workflows do — cancelling it mid-run aborts the cloud pipeline it has already
+  triggered, leaving the environment half-provisioned.
 - Second-branch checkouts are excluded from the build context.
 - Install-gating config is copied before the install step.
 - Architecture-specific downloads resolve the target at build time.

@@ -1,0 +1,7 @@
+{"args":"alpha-login","replies":[
+ {"match":"^scope$","reply":{"base":"origin/main","files":["src/modules/alpha/features/login/login-form.tsx"],"ui_files":[],"specs_present":true,"slug":"alpha-login","execute_skills":["code-review","quality-standards"],"not_applicable":[{"skill":"storybook-visual-baselines","reason":"no stories changed"}],"profile_valid":true,"blocked":null}},
+ {"match":"^code-quality-reviewer$","reply":[{"status":"OK","findings":[{"file":"src/modules/alpha/features/login/login-form.tsx","line":42,"title":"Missing aria-describedby on error text","severity":"major","evidence":"e","fix":"f","requirement":null}]},{"status":"OK","findings":[]},{"status":"OK","findings":[]}]},
+ {"match":"^fr-nfr-reviewer$","reply":{"status":"OK","findings":[]}},
+ {"match":"^verify:","reply":{"refuted":false,"reason":"real"}},
+ {"match":"^fix:","reply":[{"status":"IN_PROGRESS","files_modified":1,"tests_status":"FAILING","recommendation":"continue"},{"status":"COMPLETE","files_modified":2,"tests_status":"PASSING","recommendation":"none"}]}
+]}

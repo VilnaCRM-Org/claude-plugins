@@ -83,10 +83,16 @@ fired, the permissions the job held, and where each value came from — not by r
 
 ## Common mistakes
 
-- Re-running a failed provisioning job instead of reading which event fired it.
-- Reading a value through an API call when the event payload already carries it.
-- Granting a workflow-wide write scope because one job needs one write scope.
-- Setting `cancel-in-progress: true` on a deploy workflow, killing in-flight production triggers.
-- Assuming a fork pull request failure is a code problem — it is a missing same-repo guard.
+- Re-running a failed provisioning job instead of reading which event fired it — open the run,
+  record the triggering event and payload, and fix the trigger list.
+- Reading a value through an API call when the event payload already carries it — read it from the
+  payload and validate it non-empty in an early step, so a rotated token cannot present as an
+  extraction failure.
+- Granting a workflow-wide write scope because one job needs one write scope — set top-level
+  `permissions: {}` and grant the minimum per job.
+- Setting `cancel-in-progress: true` on a deploy workflow, killing in-flight production triggers —
+  serialize deploy and provisioning workflows with `cancel-in-progress: false`.
+- Assuming a fork pull request failure is a code problem — it is a missing same-repo guard; add the
+  head-repository comparison against `project.repo` to the privileged job.
 - Rebuilding a Docker image without clearing cache after changing the Docker ignore file, then
-  concluding the exclusion did not work.
+  concluding the exclusion did not work — rebuild with the cache disabled before judging the change.

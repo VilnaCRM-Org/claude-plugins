@@ -20,13 +20,18 @@ setup() {
   export GH_LOG="$WORK/gh.log"
   export GH_COMMENTS_FIXTURE="$FIXTURES/pr-issue-comments.ndjson"
   export GH_IS_DRAFT=false
+  export GH_HEAD_DATE="2026-09-01T09:30:00Z"
+  export GH_PR_VIEW_EXIT=0
   export GH_COMMENT_EXIT=0
   cat >"$WORK/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf 'gh %s\n' "$*" >>"$GH_LOG"
 case "$1 $2" in
   "pr view")
-    if [[ "$*" == *isDraft* ]]; then echo "$GH_IS_DRAFT"; else echo 7; fi ;;
+    if [[ "$*" == *isDraft* ]]; then
+      [[ "$GH_PR_VIEW_EXIT" -eq 0 ]] || { echo "gh: PR not found" >&2; exit "$GH_PR_VIEW_EXIT"; }
+      printf '{"isDraft":%s,"headRefOid":"a1b2c3d4","commits":[{"committedDate":"%s"}]}\n' "$GH_IS_DRAFT" "$GH_HEAD_DATE"
+    else echo 7; fi ;;
   "api repos/acme/stub-frontend/issues/7/comments?per_page=100")
     cat "$GH_COMMENTS_FIXTURE" ;;
   "pr comment")
@@ -144,4 +149,30 @@ EOF
   CLAUDE_PLUGIN_ROOT="$CACHE" run "$CACHE/scripts/request-ai-reviews.sh" --pr 7 --reviewers cubic
   [ "$status" -eq 0 ]
   [[ "$output" == *"REQUESTED: cubic @cubic-dev-ai review"* ]]
+}
+
+@test "a Review-skipped comment older than the current head no longer suppresses the mention" {
+  export GH_COMMENTS_FIXTURE="$FIXTURES/pr-issue-comments-oversized.ndjson"
+  export GH_HEAD_DATE="2026-09-01T10:30:00Z"
+  export SDLC_NOW_EPOCH=1788265800
+  run "$SCRIPT" --pr 7 --reviewers coderabbit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"REQUESTED: coderabbit @coderabbitai review"* ]]
+}
+
+@test "bot logins with a [bot] suffix are recognised" {
+  sed 's/"coderabbitai"/"coderabbitai[bot]"/' "$FIXTURES/pr-issue-comments-oversized.ndjson" >"$WORK/oversized-bot.ndjson"
+  export GH_COMMENTS_FIXTURE="$WORK/oversized-bot.ndjson"
+  export SDLC_NOW_EPOCH=1788265800
+  run "$SCRIPT" --pr 7 --reviewers coderabbit
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SKIPPED: coderabbit — diff exceeds CodeRabbit's changed-file limit"* ]]
+}
+
+@test "a failed gh pr view is fatal instead of silently posting" {
+  export GH_PR_VIEW_EXIT=1
+  run "$SCRIPT" --pr 7 --reviewers cubic
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gh pr view failed for PR #7"* ]]
+  ! grep -q 'pr comment' "$GH_LOG"
 }
