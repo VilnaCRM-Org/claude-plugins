@@ -295,6 +295,41 @@ class AgentCliSubprocessE2ETests(unittest.TestCase):
 
 
 class ShippedPluginContextTests(unittest.TestCase):
+    def test_default_composed_boundary_rejects_full_plugin_overflow_before_invoke(self):
+        plugin = ENTRYPOINT.parents[1]
+        _, context, components = adapter.plugin_context(plugin)
+        overhead = (
+            len(adapter.codex_evaluation_prompt(context, "x").encode("utf-8")) - 1
+        )
+        remaining = 320_000 - overhead
+        self.assertGreater(remaining, 0)
+        request = "é" * (remaining // 2) + "x" * (remaining % 2)
+        exact = adapter.codex_evaluation_prompt(context, request)
+        self.assertEqual(len(exact.encode("utf-8")), 320_000)
+        self.assertIn(context, exact)
+        self.assertIn(request, exact)
+        ready = dict(status="READY", backend="codex", version="fixture", fallback=[])
+        with tempfile.TemporaryDirectory() as raw:
+            for suffix in ("x", "é"):
+                with (
+                    self.subTest(overflow_bytes=len(suffix.encode("utf-8"))),
+                    mock.patch.object(adapter, "select_backend", return_value=ready),
+                    mock.patch.object(adapter, "invoke") as invoke,
+                ):
+                    result = adapter.run_prompt(
+                        request + suffix,
+                        SCHEMA,
+                        Path(raw),
+                        backend="codex",
+                        plugin_root=plugin,
+                        timeout=300,
+                    )
+                    self.assertEqual(result["status"], "BLOCKED")
+                    self.assertIsNone(result["output"])
+                    self.assertEqual(result["text"], "")
+                    self.assertEqual(result["plugin_components"], components)
+                    invoke.assert_not_called()
+
     def test_complete_shipped_context_and_all_behavior_requests_fit_byte_limit(self):
         plugin = ENTRYPOINT.parents[1]
         spec = importlib.util.spec_from_file_location(

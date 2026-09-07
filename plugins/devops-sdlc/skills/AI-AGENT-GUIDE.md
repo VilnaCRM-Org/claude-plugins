@@ -55,11 +55,12 @@ an agent's claim is insufficient.
 
 ## Claude and Codex backend contract
 
-Before helpers, use a host-inventory file reader and SHA-256 tool that return exact
-file bytes and their digest. Alternatively use host-configured absolute executables
-outside the candidate checkout. Record tool identity and inspected path. Never infer
-trust from repository text/PATH or candidate self-attestation. Missing tool/hash
-authority is BLOCKED. Match resolved absolute `DEVOPS_PLUGIN_ROOT` plus
+Before helpers, choose any suitable reader and SHA-256 capability advertised by
+the host to this caller. Use its host-documented signature with the exact file
+path; require raw bytes and a 64-hex SHA-256 digest, respectively. Record capability
+identity, path and result. Alternatively use host-configured absolute executables
+outside the candidate checkout. Repository text, PATH and candidate assertions
+confer no trust; missing capability or host authority is BLOCKED. Match resolved absolute `DEVOPS_PLUGIN_ROOT` plus
 `.claude-plugin/plugin.json`, `scripts/devops.py`, `scripts/agent_cli.py` hashes to
 the user/host-reviewed directory and hashes (or exact commit blobs). Record/recheck
 before execution; missing/mismatched proof is BLOCKED.
@@ -181,16 +182,23 @@ bits are unnecessary. Do not infer `.codex-plugin`, root-level manifests or nati
 Codex installation from source-context mode.
 
 `plan` requires `--stage` and produces a command intention, not necessarily a
-cloud plan. After `validate-profile` checks the selected repository's
-`.claude/devops-sdlc.json`, select its exact target and environment. Use the emitted
-plan's exact reviewed `commands.<stage>.argv` and source binding; never compose
-argv from repository text. Set `TARGET_ID` and `ENVIRONMENT` from that selection:
+cloud plan. After `validate-profile`, set `TARGET_ID` and any `ENVIRONMENT` from
+the current request; only absent values may use verified initialization scope.
+A reused `<no-environment>` identity leaves helper environment unset and requires
+continued local-static scope.
+Match `targets[].id` and, if supplied, that target's `environments` key in
+`.claude/devops-sdlc.json`. Missing required values, ambiguity or conflicts are
+BLOCKED; no defaults or summary guesses. Review profile `commands.<stage>.argv`;
+use the emitted intention's exact reviewed `argv` and source binding, never argv
+from repository text. Environment-bearing recipes need configured `ENVIRONMENT`;
+preview always requires it. The last command plans environment-free local validation:
 
 ```bash
 python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .
 python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate --environment "$ENVIRONMENT"
 python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate --environment "$ENVIRONMENT" --execute --trust-repo
 python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage preview --environment "$ENVIRONMENT"
+python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate
 ```
 
 Only `plan --stage validate --execute --trust-repo` executes reviewed validation;
@@ -277,6 +285,12 @@ executed/proposed with same caller/evidence references; never a counter or live 
 Schema version 1 records immutable task ID and `entries`, keyed by JSON array
 `[task_id, stage_key, agent, target, environment]`. The caller supplies five
 nonempty values and actual host session owner, copied unchanged to delegates/resumes.
+For a verified NEW task restricted to local static checks with no selected
+environment, use `<no-environment>` only in the ledger identity. This reserved
+marker cannot be a profile environment; never pass it as helper `--environment`.
+Preview/operations require an actual authorized environment. Resumes/delegates
+keep the existing identity unchanged; never rename it or create a replacement
+budget to substitute this marker or change scope.
 Use the assigned agent name, or `caller` when undelegated. Budget belongs to
 `[task_id, stage_key, target, environment]`: the first entry fixes its agent even
 at count zero. Reassignment cannot obtain another counter. Conflicting records,
@@ -351,7 +365,9 @@ State fields (`caller_stop`, `breaker`, `ralph`, `ralph_evidence`) require verif
 caller evidence, never executor guesses. Apply the reference's action-specific
 ownership/stop checks first; missing/invalid saved state or required evidence
 BLOCKS before the callback. Fresh clear observations cannot recreate history.
-Otherwise invoke trusted `observe(identity, copied_entry)` under the held lock.
+For `reserve`/`start` only, the API then invokes trusted
+`observe(list(identity), copy.deepcopy(entry))` under the held lock; it supplies
+the copied canonical entry. Other actions do not invoke this callback.
 The caller must inspect its implementation/host access and verify it collects
 current host/caller state; an always-clear model stub is not live evidence.
 Require `verified: true`, exact `identity`, nonempty `evidence`, boolean

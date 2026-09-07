@@ -23,7 +23,7 @@ from typing import Any
 
 BACKENDS = ("claude", "codex")
 MAX_BYTES = 2_000_000
-MAX_CONTEXT = 300_000
+MAX_CONTEXT = 320_000
 MAX_TRAVERSAL_ENTRIES = 512
 CODEX_CONFIG = (
     "features.shell_tool=false",

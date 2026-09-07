@@ -14,7 +14,7 @@ Failure: BLOCKED before repository commands. In `.claude/devops-sdlc.json`,
 - `project.repo`: Match requested owner/repo, else verified checkout origin; mismatch blocks remote work. Local-only: no GitHub query.
 - `t.id`: Match one authorized target ID; else BLOCKED.
 - `t.root`: Inspect this repository-relative root; absent/escaping/symlinked: BLOCKED.
-- `t.stack_type`: `terraform`/`terraspace`: HCL/stack wrappers via `terraform-terraspace`; `pulumi`: Python/uv via `python-pulumi`. Skip other engine with reason; unsupported engines: BLOCKED.
+- `t.stack_type`: `terraform`/`terraspace`: HCL/stack wrappers via `terraform-terraspace`; `pulumi`: Python/uv via `python-pulumi`. Other stack types: BLOCKED.
 - `t.environments`: Preview/operations require NAME; only local static work may omit it. Unmatched NAME: BLOCKED.
 - `e.stack`, `e.account_id`, `e.region`, `e.backend`: Bind checks to stack, AWS account/region and backend. Missing/invalid fields or mismatched observations: BLOCKED. Changes need fresh intention/evidence.
 - `t.commands.validate/test/check/security/preview`: Null/ambiguous required command: BLOCKED, no substitutes. Non-command checks: helper fields inapplicable.
@@ -57,8 +57,9 @@ reviewer non-authorship. Unknown/same identity blocks independent review.
    checklist deployment, backup, IAM/OIDC, KMS and state-storage resources;
    explain exclusions. Check missing data, thresholds, deduplication and
    runbook context. Preserve redaction; avoid sensitive high-cardinality labels.
-3. For each checklist check needing a command, use its recorded
-   helper stage from the five keys above; match reviewed command argv to the check.
+3. For each checklist command check, select its recorded stage:
+   `validate`, `test`, `check`, `security` or `preview`. Match its reviewed argv to
+   the check.
    Missing/ambiguous mappings are BLOCKED.
    Set HELPER_STAGE to this key, TARGET to target ID, INTENTION to a new unused
    `.artifacts/devops-sdlc/` path. Substitute values.
@@ -76,7 +77,7 @@ reviewer non-authorship. Unknown/same identity blocks independent review.
    python3 "$helper" plan --repo . --target TARGET --stage HELPER_STAGE --output INTENTION
    ```
 
-   Verify either:
+   Verify the generated INTENTION file:
 
    ```sh
    python3 "$helper" verify-plan --repo . --plan INTENTION --max-age-seconds 3600

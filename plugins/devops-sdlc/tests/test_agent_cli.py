@@ -375,6 +375,15 @@ class AgentCliTests(unittest.TestCase):
             ):
                 adapter.read_plugin_components(plugin)
 
+    def test_default_request_limit_counts_utf8_bytes_at_exact_boundary(self):
+        exact = "é" * 160_000
+        self.assertEqual(len(exact.encode("utf-8")), 320_000)
+        self.assertEqual(
+            adapter.validate_request(exact, SCHEMA, self.root, None, 300), self.root
+        )
+        with self.assertRaisesRegex(adapter.AdapterError, "non-empty and bounded"):
+            adapter.validate_request(exact + "x", SCHEMA, self.root, None, 300)
+
     def test_request_validation(self):
         self.assertEqual(
             adapter.validate_request("hello", SCHEMA, self.root, None, 1), self.root
