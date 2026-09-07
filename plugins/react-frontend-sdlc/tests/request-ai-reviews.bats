@@ -109,7 +109,7 @@ EOF
   export GH_IS_DRAFT=true
   run "$SCRIPT" --pr 7 --reviewers cubic
   [ "$status" -eq 0 ]
-  [[ "$output" == *"NOTE: PR #7 is a draft"* ]]
+  [[ "$output" == *"INFO: PR #7 is a draft"* ]]
   [[ "$output" == *"REQUESTED: cubic @cubic-dev-ai review"* ]]
 }
 

@@ -316,7 +316,7 @@ else:
         extra += f" — {r['reason']}" if r["reason"] else ""
         print(f"REVIEWER: {r['name']} status={r['status']}{extra}")
     for n in notes:
-        print(f"NOTE: {n}")
+        print(f"INFO: {n}")
     print(f"VERDICT: {verdict}")
     print(f"NEXT: {nxt}")
 PY

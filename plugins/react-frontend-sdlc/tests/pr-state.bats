@@ -141,7 +141,7 @@ EOF
   [[ "$output" == *"coderabbit status=SKIPPED — diff exceeds CodeRabbit's changed-file limit"* ]]
   [[ "$output" == *"qodo status=SKIPPED — reviews are paused"* ]]
   [[ "$output" == *"qlty status=SKIPPED — status-check bot"* ]]
-  [[ "$output" == *"NOTE: every requested reviewer is unreachable"* ]]
+  [[ "$output" == *"INFO: every requested reviewer is unreachable"* ]]
   [[ "$output" == *"VERDICT: READY"* ]]
 }
 
@@ -149,7 +149,7 @@ EOF
   export GH_PR_FIXTURE="$FX/pr-open-nochecks.json"
   run "$SCRIPT" --pr 7
   [[ "$output" == *"CI: none"* ]]
-  [[ "$output" == *"NOTE: CI: the PR reports no checks"* ]]
+  [[ "$output" == *"INFO: CI: the PR reports no checks"* ]]
   [[ "$output" == *"VERDICT: READY"* ]]
 }
 

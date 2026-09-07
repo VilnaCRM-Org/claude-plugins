@@ -23,7 +23,7 @@
 #   WAIT: <reviewer> <minutes>m            inside the interval; nothing posted
 #   SKIPPED: <reviewer> — <reason>         no mention can help (paused seat,
 #                                          oversized diff, status-check bot)
-#   NOTE: <text>                           informational (draft PR, …)
+#   INFO: <text>                           informational (draft PR, …)
 # and a final `SUMMARY: requested=<n> waiting=<n> skipped=<n>` line. Exit 0
 # whenever the plan was computed and every requested post succeeded; exit 1
 # on usage errors, an unresolvable PR/repo, or a failed gh call. SDLC_NOW_EPOCH
@@ -157,7 +157,7 @@ for r in reviewers:
 PY
 )"
 
-[[ "$is_draft" == "true" ]] && echo "NOTE: PR #$PR is a draft — automatic CodeRabbit review skips drafts; explicit mentions still run"
+[[ "$is_draft" == "true" ]] && echo "INFO: PR #$PR is a draft — automatic CodeRabbit review skips drafts; explicit mentions still run"
 
 requested=0; waiting=0; skipped=0
 while IFS= read -r line; do
