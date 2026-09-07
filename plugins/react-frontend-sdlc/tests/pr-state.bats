@@ -37,7 +37,8 @@ case "$1 $2 ${3:-}" in
   "api repos/acme/stub-frontend/issues/7/comments?per_page=100 --paginate") cat "$GH_COMMENTS_FIXTURE" ;;
   "api graphql -f") cat "$GH_THREADS_FIXTURE" ;;
   "api repos/acme/stub-frontend/commits/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2/check-suites?per_page=100 --jq")
-    [[ -n "$GH_PUSHED_AT" ]] && printf '"%s"\n' "$GH_PUSHED_AT" ;;
+    [[ "${GH_SUITES_EXIT:-0}" -eq 0 ]] || { echo "gh: HTTP 502" >&2; exit "$GH_SUITES_EXIT"; }
+    if [[ -n "$GH_PUSHED_AT" ]]; then printf '"%s"\n' "$GH_PUSHED_AT"; fi ;;
   *) echo "unexpected gh call: $*" >&2; exit 9 ;;
 esac
 EOF
@@ -259,4 +260,11 @@ EOF
   run "$SCRIPT" --pr 7 --reviewers cubic,cubic
   [ "$status" -eq 1 ]
   [[ "$output" == *"duplicate reviewer 'cubic'"* ]]
+}
+
+@test "a failed check-suites lookup is fatal instead of silently dating the head by its commit" {
+  export GH_SUITES_EXIT=1
+  run "$SCRIPT" --pr 7
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gh api failed listing check suites"* ]]
 }

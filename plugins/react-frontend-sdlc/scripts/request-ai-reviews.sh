@@ -88,7 +88,8 @@ head_sha="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("head
 pushed_at=""
 if [[ -n "$head_sha" ]]; then
   pushed_at="$(gh api "repos/$repo_slug/commits/$head_sha/check-suites?per_page=100" \
-    --jq '[.check_suites[]? | .created_at] | map(select(. != null)) | min // empty' 2>/dev/null || true)"
+    --jq '[.check_suites[]? | .created_at] | map(select(. != null)) | min // empty')" \
+    || die "gh api failed listing check suites for commit $head_sha in $repo_slug (the push boundary cannot be dated; retry)"
 fi
 head_epoch="$(python3 - "$pr_json" "$pushed_at" <<'PY'
 import json, sys

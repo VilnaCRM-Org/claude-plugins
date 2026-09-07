@@ -37,7 +37,8 @@ case "$1 $2" in
   "pr comment")
     exit "$GH_COMMENT_EXIT" ;;
   "api repos/acme/stub-frontend/commits/a1b2c3d4/check-suites?per_page=100")
-    [[ -n "${GH_PUSHED_AT:-}" ]] && printf '"%s"\n' "$GH_PUSHED_AT" ;;
+    [[ "${GH_SUITES_EXIT:-0}" -eq 0 ]] || { echo "gh: HTTP 502" >&2; exit "$GH_SUITES_EXIT"; }
+    if [[ -n "${GH_PUSHED_AT:-}" ]]; then printf '"%s"\n' "$GH_PUSHED_AT"; fi ;;
   *)
     echo "unexpected gh call: $*" >&2; exit 9 ;;
 esac
@@ -187,4 +188,12 @@ EOF
   run "$SCRIPT" --pr 7 --reviewers coderabbit
   [ "$status" -eq 0 ]
   [[ "$output" == *"REQUESTED: coderabbit @coderabbitai review"* ]]
+}
+
+@test "a failed check-suites lookup is fatal instead of silently dating the head by its commit" {
+  export GH_SUITES_EXIT=1
+  run "$SCRIPT" --pr 7 --reviewers coderabbit
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"gh api failed listing check suites for commit a1b2c3d4"* ]]
+  ! grep -q 'pr comment' "$GH_LOG"
 }
