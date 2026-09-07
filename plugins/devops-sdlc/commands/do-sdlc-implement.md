@@ -36,8 +36,8 @@ Missing capability/definition blocks that review/QA gate; no role fallback or
 implementer self-approval.
 
 Prerequisites: Python 3/profile helper, Git, `bmalph --help`, readable
-specs/readiness and .ralph/@fix_plan.md, verified timeout supervisor and an
-authenticated Claude/Codex backend. BMALPH joins BMAD planning and Ralph through
+specs/readiness, verified timeout supervisor and an authenticated Claude/Codex
+backend. BMALPH joins BMAD planning and Ralph through
 bmalph. Missing quality argv mappings block their checks; never invent them.
 Auto binary/auth preflight may select the other authenticated backend before start.
 No fallback or replay is allowed after the invocation starts,
@@ -72,8 +72,8 @@ launch only on START_ONCE, never on observation alone.
    if needed, preserve unrelated files and verify all six hashes.
    Ambiguous/stale bundles are BLOCKED. Within the same reservation,
    `bmalph implement` prepares Ralph inputs/phase state without launching Ralph.
-   Verify existing preparation instead of forcing a transition. Inspect
-   `.ralph/@fix_plan.md`; the same owner obtains guarded START_ONCE admission
+   Verify existing preparation instead of forcing a transition. Require readable
+   `.ralph/@fix_plan.md`; inspect it; the same owner obtains guarded START_ONCE admission
    immediately before one `bmalph run`, without reserving or incrementing again.
    Recheck binary/authentication before launch; only preflight allows fallback.
    Map detected `claude` to `bmalph run --driver claude-code` and detected `codex`
