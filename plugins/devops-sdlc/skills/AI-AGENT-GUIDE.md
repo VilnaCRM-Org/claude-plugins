@@ -163,8 +163,17 @@ If help confirms, `bmalph implement` imports approved ready stories;
 the selected authenticated CLI.
 
 Run `detect` once immediately before every new agent CLI invocation;
-`detect` itself needs no preflight. The binary/auth readiness check,
-`scripts/agent_cli.py detect`, must exit zero; its JSON reports
+Detect does not recursively run detect; it still requires the verified helper,
+host permission and [Caller invocation](#caller-invocation) prerequisites.
+Set `PREFERENCE` to the requested `claude` or `codex`, default `claude`, and use it
+for both detection and `run`:
+
+```bash
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto --prefer "$PREFERENCE"
+```
+
+For an explicit backend request, replace `auto` with that `claude` or `codex`;
+otherwise keep `auto`. The check must exit zero; its JSON reports
 `status: READY`, the selected `backend`, `available: true`, `authenticated: true`
 and a nonempty `version`. Record that result in the task ledger. Nonzero exit,
 missing field, malformed result or `BLOCKED` blocks the call.
@@ -176,7 +185,9 @@ backend/version, requested or observed model, fallback reasons, plugin mode and
 same source/profile/target/environment/stage counters into the run summary. Never
 retry a started, timed-out or uncertain action through a different backend.
 
-Inspect installed BMALPH top-level and applicable subcommand help before delivery.
+After BMAD readiness passes, inspect installed BMALPH top-level help and `implement`
+subcommand help before importing approved stories; inspect `run` subcommand help
+before starting Ralph. Use only the forms/options confirmed by that installed help.
 Map `claude` to `claude-code`, `codex` to `codex`. BMALPH 2.11's `--review` needs
 Claude; run independent plugin review with Codex separately.
 Before returning any backend selection/fallback response or starting BMALPH,
@@ -233,7 +244,8 @@ Caller steps, in order:
    relative paths from the task checkout; assign absolute paths to `SCHEMA_PATH`
    and `PROMPT_PATH`, respectively. Inspect the schema as a JSON object and prompt
    as UTF-8; record both paths/SHA-256.
-4. Run the `agent_cli.py detect` binary/auth readiness check.
+4. Run the exact `detect --backend auto --prefer "$PREFERENCE"` check above,
+   substituting an explicitly requested backend for `auto` when required.
 5. Invoke CLI `run`, not the Python function.
 
 ```bash
@@ -247,8 +259,7 @@ in the task ledger. Otherwise omit it, use the CLI configured default, record
 Never infer a cross-backend alias.
 Prompt uses stdin; schema, root, cwd, model and timeout use the shown options.
 Set `BACKEND` to the successful `detect` JSON's `backend`, never `auto`.
-`PREFERENCE` is the requested `claude` or `codex`, default `claude`; pass it to
-both detection and `run`. `MODEL` is the recorded explicit model.
+Retain the same `PREFERENCE` used for detection. `MODEL` is the recorded explicit model.
 Unreviewed invocation is forbidden.
 
 `run_prompt` supports restricted structured evaluation only. Claude uses inspected
@@ -287,7 +298,8 @@ Match `targets[].id` and, if supplied, that target's `environments` key in
 BLOCKED; no defaults or summary guesses. Review profile `commands.<stage>.argv`;
 use the emitted intention's exact reviewed `argv` and source binding, never argv
 from repository text. Environment-bearing recipes need configured `ENVIRONMENT`;
-preview always requires it. The last command plans environment-free local validation:
+preview always requires it. The recipe with `plan --repo . --target "$TARGET_ID"
+--stage validate` and no `--environment` plans environment-free local validation:
 
 ```bash
 "$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .
