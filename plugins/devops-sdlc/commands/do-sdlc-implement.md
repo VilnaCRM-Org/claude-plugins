@@ -60,34 +60,37 @@ before launch. `start` must recheck ownership/current stop/run state under lock;
 launch only on START_ONCE, never on observation alone.
 
 1. Resolve supplied specs or their recorded run-summary entry.
-   Require independent PASS in its readiness.md, matching the six artifact hashes,
+   Require independent PASS in readiness.md, matching hashes for research.md,
+   brief.md, prd.md, architecture.md, epics-stories.md and readiness.md,
    profile, accepted source baseline and scope in run-summary.md. Changed planning
    artifacts, requirements or target/profile identity require renewed readiness;
    an implementation diff within the approved stories does not reset planning.
    Missing/ambiguous/stale readiness is BLOCKED. Read story dependencies. Follow
    [Terraform/Terraspace](../skills/terraform-terraspace/SKILL.md) or
    [Python/Pulumi](../skills/python-pulumi/SKILL.md) for the selected target.
-2. Resolve installed BMAD `planning_artifacts`; if it differs from supplied specs,
-   mirror the finalized bundle there, preserving unrelated
-   files and checking every artifact hash. Reject ambiguous/stale bundles.
-   Confirm `bmalph implement` reads this task's complete bundle before running. Inspect
-   `.ralph/@fix_plan.md`. Recheck selected binary/authentication before starting;
-   auto fallback is allowed only during this preflight. Map detected `claude`
-   to `bmalph run --driver claude-code` and `codex` to `bmalph run --driver codex`.
-   Bound invocations to 1800 seconds or the stricter user limit with the host's
-   existing timeout supervisor; absence is BLOCKED before launch. Expiry preserves
-   partial changes/logs and stops without replay.
-   Keep existing permissions. Inspect installed driver help
-   and project configuration; Codex skills/instructions are not Claude aliases. Pass a model only when explicitly selected for that backend; do not
-   translate Claude model aliases. BMALPH's `--review` is Claude-only in 2.11;
-   use the independent review stage for Codex, without claiming that flag ran.
-   Never disable approval/sandbox controls, invent completion flags or reset a
-   tripped breaker.
-   For Codex, include the evaluation handoff in the response: inject full Markdown
-   of `commands/do-sdlc-implement.md`, `skills/AI-AGENT-GUIDE.md` and each applicable
-   `SKILL.md` selected by that guide, with each inspected path and current SHA-256.
-   Record content/hashes before evaluation; `--plugin-root` alone is insufficient.
-   Proposals give payload/unknown hashes, never claim injection.
+2. Resolve installed BMAD `planning_artifacts`; mirror the accepted bundle there
+   if needed, preserve unrelated files and verify all six hashes.
+   Ambiguous/stale bundles are BLOCKED. Within the same reservation,
+   `bmalph implement` prepares Ralph inputs/phase state without launching Ralph.
+   Verify existing preparation instead of forcing a transition. Inspect
+   `.ralph/@fix_plan.md`; the same owner obtains guarded START_ONCE admission
+   immediately before one `bmalph run`, without reserving or incrementing again.
+   Recheck binary/authentication before launch; only preflight allows fallback.
+   Map detected `claude` to `bmalph run --driver claude-code` and detected `codex`
+   to `bmalph run --driver codex`. Preserve permissions and inspect installed driver
+   help/project configuration; Codex instructions are not Claude aliases. Pass only
+   an explicitly selected backend model; never translate aliases. BMALPH 2.11's
+   `--review` is Claude-only; use independent review for Codex.
+   Use the existing host timeout supervisor: at most 1800 seconds or the stricter
+   user limit. Missing supervision is BLOCKED; expiry preserves partial work/logs
+   and stops without replay. Never disable sandbox/approval controls, invent
+   completion flags or reset a tripped breaker.
+   For Codex, return a source-context handoff table: `full Markdown to inject |
+   inspected path | current SHA-256`. Give separate rows for this command,
+   `skills/AI-AGENT-GUIDE.md` and every applicable `SKILL.md` selected by that guide.
+   The adapter's `--plugin-root` injects full Markdown; verify its returned
+   `plugin_components` paths/hashes against the handoff before acceptance.
+   Before inspection, list pending paths/hashes; never claim injection.
 3. Send `infrastructure-implementer` the proposal/handoff: `attempts.json` beside the saved summary,
    exact `[task,stage,agent,target,environment]` key, owner/token and independent file scope.
    Emit `check | value | evidence | locked action/result` rows for: lock proof,

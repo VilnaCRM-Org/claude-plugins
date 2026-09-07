@@ -63,13 +63,15 @@ skill receives a verdict; no silent skips.
 
 1. Before helper proposals/calls, follow
    [root/hash verification](../AI-AGENT-GUIDE.md#claude-and-codex-backend-contract).
-   Return a table: file path, kind, readability, SHA-256, proof reference and
-   observed/supplied/proposed status. Include the native Claude manifest
-   `$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json` and regular readable Python
-   `$DEVOPS_PLUGIN_ROOT/scripts/devops.py` and
-   `$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py`. Use `"$TRUSTED_PYTHON" -I`; no executable-bit check.
-   Supplied proof is a user/host-reviewed root/hash record; cite it, never invent
-   execution. Neither `.codex-plugin` nor a root-level manifest substitutes.
+   Host-reviewed/observed facts replace `pending`:
+
+   | path | kind | regular/readable | SHA-256 | root/hash proof | status |
+   | --- | --- | --- | --- | --- | --- |
+   | `$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json` | manifest | pending | pending | pending | proposed |
+   | `$DEVOPS_PLUGIN_ROOT/scripts/devops.py` | Python helper | pending | pending | pending | proposed |
+   | `$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py` | Python helper | pending | pending | pending | proposed |
+
+   Use `"$TRUSTED_PYTHON" -I`; no executable-bit check; `.codex-plugin` or root manifest cannot substitute.
    Read `Pulumi.yaml`/`Pulumi.yml`, Python version, pyproject/uv lock,
    component layout, policy pack, tests and stack configuration filenames.
    Resolve the actual project root; do not assume a root-level program.
@@ -83,32 +85,30 @@ skill receives a verdict; no silent skips.
    unit/integration, coverage, mutation and CLI gates for every changed Python file and every existing required repository gate. Use
    Pulumi mocks for resource wiring and negative configuration tests, while
    recording that mocks do not validate actual IAM, provider or cloud behavior.
-4. Propose the selected target's reviewed `commands.preview.argv`.
-   Use the authenticated Python helper with `plan --repo . --stage preview
-   --target "$TARGET_ID" --environment "$ENVIRONMENT" --execute --trust-repo
-   --read-only-credentials --preview-authorization "$PREVIEW_AUTHORIZATION"`
-   after profile validation. The trusted host supplies that protected grant for
-   the exact actor, trusted non-fork source/head, operation, backend and temporary
-   role. Require its issuer to verify read-only IAM and isolate execution;
-   caller flags do not sandbox Python or prove permissions. The helper checks
-   grant bindings, protected source/toolchain, expiry and full STS identity before
-   preview. Follow the [authorization contract](../../docs/preview-authorization.md);
-   absent/mismatched proof is BLOCKED. Record mismatched backends and preserve
-   the grant; never propose changing it to admit the rejected destination,
-   self-issue a grant or run fork code with credentials.
-   Keep shared secrets KMS-encrypted; never use
+4. For requested preview, use selected target's reviewed `commands.preview.argv`;
+   for local static work, record preview evidence SKIPPED (outside task). For that
+   preview, use authenticated helper with `plan --repo . --stage preview --target "$TARGET_ID"
+   --environment "$ENVIRONMENT" --execute --trust-repo --read-only-credentials
+   --preview-authorization "$PREVIEW_AUTHORIZATION"` after profile validation.
+   Trusted host grant binds exact actor, non-fork source/head, operation, backend,
+   temporary role; issuer verifies read-only IAM/isolation. Flags do not sandbox Python
+   or prove permissions. Helper verifies bindings, protected source/toolchain, expiry,
+   full STS identity. Follow the [authorization contract](../../docs/preview-authorization.md);
+   absent/mismatched proof is BLOCKED. Preserve mismatched-backend grants; never alter,
+   self-issue or run fork code with credentials. Keep shared secrets KMS-encrypted; never use
    `--show-secrets`, raw exports or plaintext state.
-5. Require actual preview and saved-plan provenance; reject placeholder preview
-   files and metadata-only programs as deployment proof. Preserve test-to-prod
-   promotion at one source SHA and protected environment reviewers.
+5. Requested preview acceptance needs actual preview output/provenance; deployment
+   also needs saved-plan provenance. Reject placeholders/metadata-only programs as
+   deployment proof; preserve one-SHA promotion and protected reviewers. Local static
+   work records these gates SKIPPED (outside task).
 6. Review Output/secret propagation, stable logical names, aliases, replacements,
    protect/retain semantics, dependency order and provider versions. Imports,
    secrets-provider changes and `refresh` require separate state review.
 
-State review runs before any import, backend change or ownership transfer.
-Require an independent state-migration-reviewer verdict covering ownership,
-backup, exact target and recovery with zero unresolved blocking findings. If
-none of those operations is requested, record state review as inapplicable.
+State review precedes imports, backend, ownership, secrets-provider changes or `refresh`.
+Require an independent state-migration-reviewer verdict on ownership, backup, exact target
+and recovery with zero unresolved blocking findings. If none of these operations is requested,
+record state review inapplicable.
 
 ## Evidence and failure handling
 

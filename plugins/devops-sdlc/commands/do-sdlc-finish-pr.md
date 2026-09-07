@@ -123,12 +123,13 @@ and overall-gate report required by step 6.
    In the response, propose this loop conditionally if identity, authorization or
    ledger proof is missing; polling stays BLOCKED until those prerequisites pass.
    Within the verified active stage reservation, allow at most 10 polls total,
-   60 seconds apart, within the original 10-minute wait window. Read the saved
-   poll count and remaining time; never invent or reset an unknown budget.
+   60 seconds apart, within the original 10-minute wait window. At first poll,
+   persist a fixed deadline 10 minutes ahead; resumes derive remaining time from it,
+   and an unknown budget is BLOCKED without reset.
    Before each poll, recheck the PR head, then query step 2's check/status APIs.
    A changed head invalidates old evidence and stops this wait for revalidation,
    without resetting stage or poll counts. Stop earlier on failure or success;
-   persist poll count and last conclusions. When either limit is reached while
+   persist poll count, deadline and conclusions. When either limit is reached while
    pending, record BLOCKED and stop. Do not consume another attempt solely to
    evade this wait limit. Missing ci-fixer
    or comment-resolver capability blocks the corresponding repair/resolution.
