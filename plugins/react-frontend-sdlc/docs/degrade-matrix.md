@@ -54,6 +54,25 @@ These `null` mappings are the largest source of cross-repo divergence.
 | `make.lint_dup`     | no jscpd gate configured              | the frontend-quality-workflow skill skips the copy/paste duplication gate with a note; the `quality.jscpd_clones: 0` ceiling is not raised — there is simply no lane; the rest of `make.lint` still runs                                                           | The Next.js app configures no jscpd gate, so `make.lint_dup: null`; the SPA enforces it.                                                              |
 | `make.lint_metrics` | no rust-code-analysis gate configured | the frontend-quality-workflow skill skips the complexity gate with a note; `quality.metrics_enforced` stays `true` but there is no lane to run; the rest of `make.lint` still runs                                                                                 | The Next.js app configures no rust-code-analysis gate, so `make.lint_metrics: null`; the SPA enforces the hard-fail metrics policy.                   |
 
+## AI reviewer apps that do not run
+
+A reviewer app can be installed and still post nothing for a PR head: CodeRabbit
+skips drafts, rate-limits requested reviews to roughly one per hour per repo, and
+refuses diffs above its changed-file limit; cubic reviews only when mentioned;
+Qodo stops when its subscription lapses; qlty and SonarCloud are status-check
+bots with no mention command. `/fe-sdlc-finish-pr` step 3 and
+`/fe-sdlc-request-reviews` drive `scripts/request-ai-reviews.sh`, which posts the
+exact mention each bot accepts, waits out the CodeRabbit interval instead of
+re-mentioning, and reports every reviewer no mention can reach. A reviewer that
+did not run is recorded as a degrade note (SUCCESS-WITH-REPORT) — never as an
+implicit pass — and the comment source falls back to the reviewers that did run
+plus the plugin's own review loop. `scripts/pr-state.sh` makes the same
+distinction visible per head: a reviewer whose latest live review approves the
+current head is `APPROVED`; one that cannot be reached is `SKIPPED` with its
+reason and never satisfies the `READY` verdict. The `fe-sdlc-pr-until-green`
+workflow ([workflows.md](workflows.md)) drops a reviewer only after three
+unanswered requests or an exhausted wait budget, and always with a degrade note.
+
 ## Review-machinery substitution (bundled `scripts/*`)
 
 These five targets ship a **`null` default in every repo** and are the one

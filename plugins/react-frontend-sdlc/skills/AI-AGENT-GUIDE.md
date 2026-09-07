@@ -139,7 +139,9 @@ Accessibility is **non-negotiable** for any change that adds or alters user-faci
 
 The `accessibility-auditor` agent runs this gate as the blocking reviewer in the review stage, alongside the `code-quality-reviewer` and `fr-nfr-reviewer` agents. The review stage does not pass while the a11y gate has open findings. For deeper, technique-level coverage, pair the audit with the companion accessibility team described below.
 
-## Available Skills (19 Total)
+## Available Skills (86 Total)
+
+The 19 **process skills** below own the SDLC stages and gates; the **technique library** that follows them holds the 67 narrower, symptom-triggered skills.
 
 ### Autonomous Planning & Review-Gate Skills
 
@@ -189,6 +191,121 @@ The `accessibility-auditor` agent runs this gate as the blocking reviewer in the
 | **Documentation Sync**     | `documentation-sync/SKILL.md`            | Keep existing docs aligned after a code, command, tool, or workflow change.                                  |
 | **Observability**          | `observability-instrumentation/SKILL.md` | Add client telemetry (error boundaries, web-vitals, captured failures) to a RUM/Sentry or deferred log sink. |
 | **Load Testing**           | `load-testing/SKILL.md`                  | Create, run, or debug K6 load tests for the key SPA journeys (gated by `capabilities.load_testing`).         |
+
+<!-- technique-library:start -->
+
+### Technique library (67 skills)
+
+Gotchas learned by agents while working in the reference repository shapes, compiled into
+shape-generalized form under the plugin's skill compile contract (`docs/skill-compile-contract.md`
+at the plugin root). They carry no capability gate of their own: triage them from their
+`description` like every other skill — a matching symptom in the change set is an EXECUTE, and
+their `## Applicability by repository shape` section says whether the React SPA, Next.js, or
+component-library shape is affected.
+
+#### Mutation testing (Stryker)
+
+| Skill | File | When to Use |
+| --- | --- | --- |
+| `jsdom-mui-mutation-traps` | `jsdom-mui-mutation-traps/SKILL.md` | Use when mutants in MUI component styling or controlled-value handling survive despite tests that look like they cover the behaviour, when a test reads getComp… |
+| `mutation-gate-barrel-leaf-extraction` | `mutation-gate-barrel-leaf-extraction/SKILL.md` | Use when one Stryker shard runs far longer than its peers and the slow files import a small helper through a component barrel, when jest --findRelatedTests rep… |
+| `mutation-shard-capacity-growth` | `mutation-shard-capacity-growth/SKILL.md` | Use when a Stryker mutation shard approaches or exceeds an already-calibrated CI timeout-minutes because the mutate scope grew, when shard wall clocks are badl… |
+| `mutation-test-barrel-import-trap` | `mutation-test-barrel-import-trap/SKILL.md` | Use when one test suite re-runs for mutants in unrelated components and the mutation gate times out or drags, or when a source module imports from an aggregate… |
+| `mutation-testing-stryker-gotchas` | `mutation-testing-stryker-gotchas/SKILL.md` | Use when a Stryker survivor cannot be explained by a missing assertion — a mutant reported `Survived` with an empty `killedBy` or `testsCompleted` of zero, a `… |
+| `stryker-mutation-timeout-regression-alarm` | `stryker-mutation-timeout-regression-alarm/SKILL.md` | Use when a Stryker mutation workflow carries no `timeout-minutes` on its shard or merge job, when a mutation run's cost jumps an order of magnitude with no cha… |
+
+#### Storybook, visual and Playwright
+
+| Skill | File | When to Use |
+| --- | --- | --- |
+| `playwright-mobile-device-lane` | `playwright-mobile-device-lane/SKILL.md` | Use when adding or extending real mobile-device coverage to a Playwright suite — touch/tap specs, Pixel or iPhone device descriptors, `isMobile`/`hasTouch` con… |
+| `playwright-visual-baseline-grep-title` | `playwright-visual-baseline-grep-title/SKILL.md` | Use when a Playwright run filtered with -g / --grep exits 0 but an expected visual baseline PNG was never written, when a snapshot filter has to match a title… |
+| `storybook-controlled-components` | `storybook-controlled-components/SKILL.md` | Use when a Storybook story for a controlled component is frozen — picking an option, deleting a chip, typing, or toggling fires onChange but nothing on screen… |
+| `storybook-dev-host-launch` | `storybook-dev-host-launch/SKILL.md` | Use when the repository's Storybook dev-server target appears to hang and the browser cannot reach port 6006, when Storybook must be opened in a real browser f… |
+| `storybook-dev-server-visual-test-staleness` | `storybook-dev-server-visual-test-staleness/SKILL.md` | Use when a committed Playwright screenshot baseline shows an outdated render — wrong language, old design, a state the component no longer produces — while the… |
+| `storybook-figma-audit` | `storybook-figma-audit/SKILL.md` | Use when sweeping a whole component suite or showcase board against its Figma masters — before a release, after a design revision, or when several components a… |
+| `storybook-file-pattern-sync` | `storybook-file-pattern-sync/SKILL.md` | Use when the set of Storybook story file extensions changes — adding a .stories.js, .stories.jsx or .stories.mjs alongside .stories.tsx, renaming a story file,… |
+| `storybook-story-authoring` | `storybook-story-authoring/SKILL.md` | Use when adding or changing a `*.stories.tsx` file for a React component — a new shared primitive carrying `architecture.component_prefix`, a variant or state… |
+| `storybook-visual-state-nested-props` | `storybook-visual-state-nested-props/SKILL.md` | Use when a Storybook-driven screenshot test configures component state through `&args=` in the story URL and the state never applies — the story renders with d… |
+
+#### Testing patterns (Jest, Testing Library, Bats)
+
+| Skill | File | When to Use |
+| --- | --- | --- |
+| `access-control-safety-testing` | `access-control-safety-testing/SKILL.md` | Use when writing or reviewing the must-fail fixture for a gate that bans direct role or permission membership checks — an ESLint `no-restricted-syntax` selecto… |
+| `aria-label-split-text-rendering` | `aria-label-split-text-rendering/SKILL.md` | Use when one text value is rendered across two or more elements for styling — a typed prefix in one ink and the completion in another, a highlighted search mat… |
+| `auth-testing-with-seeded-tokens` | `auth-testing-with-seeded-tokens/SKILL.md` | Use when writing browser tests for sign-in redirects, protected-route bounces or destination-preservation in a repository whose production-parity test image se… |
+| `barrel-export-validation-testing` | `barrel-export-validation-testing/SKILL.md` | Use when writing or repairing a test that guards a public barrel — an index that re-exports components and their prop types — and the guard parses export lines… |
+| `bats-fixture-full-validation` | `bats-fixture-full-validation/SKILL.md` | Use when a Bats helper, stub or fixture in `tests/bats/` has been edited and the change is about to be staged. Symptoms include a filtered `bats -f "pattern"`… |
+| `bats-test-workflow` | `bats-test-workflow/SKILL.md` | Use when writing, running, or debugging Bats tests for infrastructure code — Makefile targets, shell scripts under the scripts and CI-scripts directories, jq f… |
+| `integration-singleton-isolation` | `integration-singleton-isolation/SKILL.md` | Use when an integration or unit test mutates module-level state that outlives it, such as `await import('@/…')` for a side effect, a `bind*` or `set` call on a… |
+| `jest-dom-aria-assertion-pattern` | `jest-dom-aria-assertion-pattern/SKILL.md` | Use when a component test asserts on ARIA attributes and ESLint reports jest-dom/prefer-required or jest-dom/prefer-to-have-attribute, when toBeRequired() cann… |
+| `test-discovery-contract` | `test-discovery-contract/SKILL.md` | Use when a test file exists, type-checks and lints clean but never runs — a spec under an e2e root named with a Jest `.test.ts` suffix, a file missing a requir… |
+| `test-naming-and-fixture-clarity` | `test-naming-and-fixture-clarity/SKILL.md` | Use when naming or reviewing a test whose title does not match what its fixture actually sets up, when a fixture keeps or removes files for a non-obvious reaso… |
+
+#### Architecture and code structure
+
+| Skill | File | When to Use |
+| --- | --- | --- |
+| `api-extractor-forgotten-export-resolution` | `api-extractor-forgotten-export-resolution/SKILL.md` | Use when a library build prints `Warning: (ae-forgotten-export) The symbol "X" needs to be exported by the entry point`, when a published `.d.ts` rollup shows… |
+| `architectural-reconciliation` | `architectural-reconciliation/SKILL.md` | Use when merging a long-lived feature branch whose conflicts are architectural rather than textual — the branch built a route manifest while the base adopted a… |
+| `compliance-drift-guard` | `compliance-drift-guard/SKILL.md` | Use when governance evidence lives in markdown — a component provenance registry, a deviation ledger, a definition-of-done compliance matrix, a coverage manife… |
+| `configuration-management` | `configuration-management/SKILL.md` | Use when adding, renaming or reading an environment variable, extending the typed config layer, or diagnosing a build that fails at boot with a schema error. T… |
+| `deferred-di-reflect-metadata-optimization` | `deferred-di-reflect-metadata-optimization/SKILL.md` | Use when a tsyringe application loads its DI container behind a dynamic `import()` and the eager entry bundle still pulls in `reflect-metadata`, or when a mobi… |
+| `depcruise-rule-alternative-disjointness` | `depcruise-rule-alternative-disjointness/SKILL.md` | Use when an architecture rule is written as several alternatives that must each be provable — a dependency-cruiser rule in `.dependency-cruiser.js`, or an esqu… |
+| `graphql-api-hardening` | `graphql-api-hardening/SKILL.md` | Use when editing an Apollo Server mock or any GraphQL resolver, error formatter, validation rule, or response shape, and when changing the pinned upstream API… |
+| `host-stack-infrastructure` | `host-stack-infrastructure/SKILL.md` | Use when adding or changing how a browser or memory-leak suite is executed — a host-built export instead of the Docker prod stack, a new executor mode, or a Ma… |
+| `mui-autocomplete-freesolo-ghost-text` | `mui-autocomplete-freesolo-ghost-text/SKILL.md` | Use when a MUI Autocomplete in freeSolo mode needs inline typeahead and the native autoComplete or autoHighlight props do nothing, or when completed text conca… |
+| `parser-library-preference` | `parser-library-preference/SKILL.md` | Use when a CI gate, validation script, or config check reads YAML, JSON, TOML, or XML with `grep`, `sed`, or hand-written regex. Triggers on fail-open gate bug… |
+| `rca-component-structuring` | `rca-component-structuring/SKILL.md` | Use when writing a new React UI component or growing an existing one and the rust-code-analysis complexity gate must pass first time — symptoms include the met… |
+| `react-ref-callback-cleanup` | `react-ref-callback-cleanup/SKILL.md` | Use when a React 19 component forwards a ref and also uses it internally — a ref-merge helper, a `React.RefCallback` built with useCallback, or an effect that… |
+| `shared-module-extraction` | `shared-module-extraction/SKILL.md` | Use when a duplication gate flags cloned component code — a jscpd failure, a qlty `similar-code` comment, or two components differing only in a path, a viewBox… |
+| `uri-path-validation-normalization` | `uri-path-validation-normalization/SKILL.md` | Use when code decides whether a request URI or a configured file path is allowed — extension allow-lists, directory allow-lists, edge/CDN request handlers, ser… |
+
+#### Quality tooling (qlty, ESLint, editorconfig, metrics)
+
+| Skill | File | When to Use |
+| --- | --- | --- |
+| `editorconfig-cyrillic-triage` | `editorconfig-cyrillic-triage/SKILL.md` | Use when a reviewer, bot, or editorconfig-checker reports a line over max_line_length while Prettier reports the file as formatted, and the line contains Cyril… |
+| `eslint-config-parity-check` | `eslint-config-parity-check/SKILL.md` | Use when changing ESLint configuration rather than code — dropping or replacing a shared preset, migrating to flat config, upgrading eslint or a plugin major,… |
+| `figma-design-review-before-code` | `figma-design-review-before-code/SKILL.md` | Use when a component's Figma design must be reviewed BEFORE any code exists — a new UI component, a design handoff, a spec artifact, or a request to review a d… |
+| `lint-rule-pattern-verification` | `lint-rule-pattern-verification/SKILL.md` | Use when a gate matches source with a regex or an AST selector — a check script under `scripts/ci/`, an esquery `no-restricted-syntax` entry, a drift guard tha… |
+| `performance-budget-calibration` | `performance-budget-calibration/SKILL.md` | Use when a byte budget is calibrated against the wrong unit and therefore cannot fire — setting or reviewing a Lighthouse `resource-summary` script or total si… |
+| `qlty-eslint-runtime-mismatch` | `qlty-eslint-runtime-mismatch/SKILL.md` | Use when a Qlty check is red with "Build errored. Check the log for more information." and the cloud build log ends in linter stderr rather than findings — an… |
+| `qlty-local-check-ts-sandbox-false-positive` | `qlty-local-check-ts-sandbox-false-positive/SKILL.md` | Use when a local `qlty check` reports a "Parsing error" naming TS5012 — cannot read the tsconfig.json under .qlty/cache/tools/eslint/\<version\>/ — on TypeScri… |
+| `qlty-transient-build-error` | `qlty-transient-build-error/SKILL.md` | Use when a Qlty check reports state failure with "Build errored. Check the log for more information." while its inline analysis comment reports no findings or… |
+| `two-colour-focus-ring` | `two-colour-focus-ring/SKILL.md` | Use when a keyboard focus indicator disappears on some states — a ring invisible on a selected or filled element but fine at rest, a ring clipped by a scrollin… |
+
+#### CI, Docker and GitHub workflow
+
+| Skill | File | When to Use |
+| --- | --- | --- |
+| `adding-ci-gates` | `adding-ci-gates/SKILL.md` | Use when adding new CI checks or gates to a repository — batching several gate tickets onto one branch, deciding whether a gate ships now or is deferred, re-ch… |
+| `batch-implementation-triage` | `batch-implementation-triage/SKILL.md` | Use when a list of open GitHub issues has to be filtered before automated or batch implementation — separating issues already landed on main, issues an open pu… |
+| `ci-infrastructure-failure-diagnosis` | `ci-infrastructure-failure-diagnosis/SKILL.md` | Use when a CI job fails for infrastructure reasons rather than code — a sandbox or deploy check dying in a cloud pipeline-start call, "PR number extraction fai… |
+| `ci-infrastructure-refactoring` | `ci-infrastructure-refactoring/SKILL.md` | Use when refactoring how CI executes rather than what it checks — moving a gate between host and container, changing compose service orchestration, altering ho… |
+| `ci-single-check-validation` | `ci-single-check-validation/SKILL.md` | Use when exactly one CI check on a pull request is red while the rest are green — a code-quality or code-scanning check, one Playwright shard, one lint or muta… |
+| `codeql-cache-corruption` | `codeql-cache-corruption/SKILL.md` | Use when a CodeQL analysis step fails with "Invalid checksum for page N of the compressed relation ... The database is corrupt and should be re-created", when… |
+| `dependency-cve-gate` | `dependency-cve-gate/SKILL.md` | Use when a dependency-CVE gate fails a pull request, when adding or renewing an entry in an osv-scanner ignore policy, or when designing, reviewing or porting… |
+| `dependency-upgrade-troubleshooting` | `dependency-upgrade-troubleshooting/SKILL.md` | Use when a dependency bump reddens CI rather than the code — Playwright reporting "Executable doesn't exist at", a Stryker shard dying with MODULE_NOT_FOUND on… |
+| `docker-dev-rebuild-after-migration` | `docker-dev-rebuild-after-migration/SKILL.md` | Use when the dev container behaves as though it is running older code after a Dockerfile, base image, Node version or package-manager change — "command not fou… |
+| `github-actions-workflow-authoring` | `github-actions-workflow-authoring/SKILL.md` | Use when a GitHub Actions workflow carries an `on.pull_request.paths` or `on.push.paths` filter and the gate can skip itself — a required check reporting succe… |
+| `github-pr-merge-readiness-audit` | `github-pr-merge-readiness-audit/SKILL.md` | Use when deciding whether one or several open pull requests can merge — a PR shows green checks but will not merge, an AI reviewer approval was dismissed after… |
+| `github-pr-workflow-approval-gate` | `github-pr-workflow-approval-gate/SKILL.md` | Use when a pull request will not merge although no check has failed, a workflow run sits in `action_required` or shows as waiting for approval, required checks… |
+| `husky-pre-commit-bypass` | `husky-pre-commit-bypass/SKILL.md` | Use when a Husky hook drags files the change never touched into a commit or rejects it for unrelated code — a `.husky/pre-commit` running the repository format… |
+| `make-target-maintenance` | `make-target-maintenance/SKILL.md` | Use when a Makefile target and its coverage manifest have drifted apart — the `bats` check failing with a `diff` between the Makefile target list and the targe… |
+| `rsbuild-dev-server-containerized-ci` | `rsbuild-dev-server-containerized-ci/SKILL.md` | Use when a containerized dev server becomes unreachable through its published Docker port — every job that starts the dev container fails at the start-containe… |
+| `shell-command-verification-robustness` | `shell-command-verification-robustness/SKILL.md` | Use when writing or reviewing a gate that greps source, docs, or workflows for command invocations — a Bats make-target coverage contract, a doc-references lin… |
+
+#### Pull requests and AI reviewers
+
+| Skill | File | When to Use |
+| --- | --- | --- |
+| `pr-batch-merge-validation` | `pr-batch-merge-validation/SKILL.md` | Use when several open pull requests are queued to land and the question is which of them can go in together. Triggers on stale branches behind `main`, "does th… |
+| `retriggering-ai-reviews` | `retriggering-ai-reviews/SKILL.md` | Use when a pull request has no CodeRabbit, cubic, or Qodo review after a push, a bot replies that the review was rate limited, that the review limit was reache… |
+| `review-thread-resolution-workflow` | `review-thread-resolution-workflow/SKILL.md` | Use when a pull request carries many open review threads from several reviewers (CodeRabbit, cubic, qlty, humans) and they need to be answered and resolved — i… |
+
+<!-- technique-library:end -->
 
 ## Companion skills and agents (installed via `/fe-sdlc-setup`)
 

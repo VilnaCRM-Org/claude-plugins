@@ -147,3 +147,25 @@ Capability gaps — no CI (`ci.provider: null`), no reviewer app, a `null`
 `capabilities.dynamic_a11y_testing` — do NOT escalate. They degrade the
 dependent lane with a skip-with-note; see the
 [degrade matrix](degrade-matrix.md).
+
+## Workflow form
+
+The same loop is available as Claude Code workflows for the stages that
+benefit from fan-out and unattended repetition — see
+[workflows.md](workflows.md):
+
+- `/react-frontend-sdlc:fe-sdlc-pr-until-green` runs stage 6 as a
+  sensor-driven state machine: `scripts/pr-state.sh` reads the PR and
+  renders one verdict (`BLOCKED`, `FIX`, `REQUEST`, `WAIT`, `READY`); the
+  workflow requests the AI reviewers with the exact mentions, waits for
+  their reviews, dispatches `ci-fixer` and `pr-comment-resolver`, pushes,
+  and repeats until every reachable reviewer approves the head and CI is
+  green. Its exit condition is stage 6's, made verifiable.
+- `/react-frontend-sdlc:fe-sdlc-review-panel` runs stage 4 with every
+  lens in parallel and three refuters per finding.
+- `/react-frontend-sdlc:fe-sdlc-feature` composes stages 0–6 for one
+  planned feature and nests the two workflows above.
+
+Every workflow keeps the per-stage counters and the canonical escalation
+block; a degrade path ends in `SUCCESS-WITH-REPORT` exactly as it does in
+the commands.

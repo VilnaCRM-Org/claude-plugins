@@ -1,0 +1,11 @@
+{"args":"alpha-login","replies":[
+ {"match":"^scope$","reply":{"base":"origin/main","files":["src/modules/alpha/features/login/login-form.tsx","src/modules/alpha/features/login/use-login.ts"],"ui_files":["src/modules/alpha/features/login/login-form.tsx"],"specs_present":true,"slug":"alpha-login","execute_skills":["code-review","quality-standards","frontend-component-development","mui-theme-overrides"],"not_applicable_count":82,"profile_valid":true,"blocked":null}},
+ {"match":"^code-quality-reviewer$","reply":[{"lens":"cq","status":"OK","note":null,"findings":[{"file":"src/modules/alpha/features/login/login-form.tsx","line":42,"title":"Missing aria-describedby on error text","severity":"major","evidence":"error text not linked","fix":"link via aria-describedby","requirement":null}]},{"lens":"cq","status":"OK","note":null,"findings":[]}]},
+ {"match":"^fr-nfr-reviewer$","reply":{"lens":"fr","status":"OK","note":null,"findings":[]}},
+ {"match":"^accessibility-auditor:","reply":{"lens":"a11y","status":"SKIPPED","note":"capabilities.dynamic_a11y_testing false; static lane clean","findings":[]}},
+ {"match":"^skills:","reply":{"lens":"skills","status":"OK","note":null,"findings":[]}},
+ {"match":"^verify:correctness","reply":{"refuted":false,"reason":"confirmed"}},
+ {"match":"^verify:standards","reply":{"refuted":false,"reason":"WCAG 3.3.1"}},
+ {"match":"^verify:remedy","reply":{"refuted":true,"reason":"maybe"}},
+ {"match":"^fix:","reply":{"status":"COMPLETE","files_modified":2,"tests_status":"PASSING","recommendation":"none"}}
+]}

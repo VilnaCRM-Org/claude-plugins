@@ -1,0 +1,1 @@
+{"args":"alpha-login","replies":[{"match":"^scope$","reply":{"base":"","files":[],"specs_present":false,"execute_skills":[],"profile_valid":false,"blocked":"run /fe-sdlc-setup"}}]}

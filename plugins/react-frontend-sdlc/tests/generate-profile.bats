@@ -209,3 +209,30 @@ JSON
   [ "$status" -eq 1 ]
   [[ "$output" == *"unknown argument: --bogus"* ]]
 }
+
+@test "tsconfig.json aliases survive JSONC comments that contain '/*' and globs that contain '*/'" {
+  rm -f "$REPO/tsconfig.paths.json"
+  cat >"$REPO/tsconfig.json" <<'JSONC'
+{
+  "compilerOptions": {
+    // @memlab/* pull in the untyped `minimist` (TS7016) — see upstream.
+    "skipLibCheck": true, /* keep */
+    "paths": {
+      "@/*": ["./src/*"],
+      "@landing/*": ["./src/features/landing/components/*"],
+      "@swagger/global": ["./src/features/swagger/global/_global.scss"],
+      "@swagger/*": ["./src/features/swagger/*"],
+    },
+  },
+  "include": ["src/**/*.tsx", "**/*.ts"],
+}
+JSONC
+  run "$GENERATE" "$REPO"
+  [ "$status" -eq 0 ]
+  run yaml_get_list "$PROFILE" architecture.path_aliases
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -qx '@'
+  [[ "$output" == *"@landing"* ]]
+  [[ "$output" == *"@swagger/global"* ]]
+  [[ "$output" == *"@swagger"* ]]
+}

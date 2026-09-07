@@ -119,10 +119,34 @@ pkg_alias_keys() {
     python3 - "$f" <<'PYEOF' && return 0
 import json, re, sys
 raw = open(sys.argv[1]).read()
-# tsconfig files allow // and /* */ comments and trailing commas — strip them.
-raw = re.sub(r'/\*.*?\*/', '', raw, flags=re.S)
-raw = re.sub(r'(^|\s)//.*$', '', raw, flags=re.M)
-raw = re.sub(r',(\s*[}\]])', r'\1', raw)
+
+
+def strip_jsonc(text):
+    # tsconfig files allow // and /* */ comments and trailing commas. Walk the
+    # text so a comment opener inside a string ("@/*", "**/*.tsx") or inside a
+    # line comment (@memlab/*) is never mistaken for a block comment.
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] != '"':
+                j += 2 if text[j] == '\\' else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith('//', i):
+            while i < n and text[i] != '\n':
+                i += 1
+        elif text.startswith('/*', i):
+            end = text.find('*/', i + 2)
+            i = n if end < 0 else end + 2
+        else:
+            out.append(c)
+            i += 1
+    return re.sub(r',(\s*[}\]])', r'\1', ''.join(out))
+
+
+raw = strip_jsonc(raw)
 try:
     data = json.loads(raw)
 except Exception:

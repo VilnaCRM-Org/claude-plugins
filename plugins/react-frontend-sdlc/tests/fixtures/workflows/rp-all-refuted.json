@@ -1,0 +1,5 @@
+{"args":{"slug":"alpha-login","base":"origin/main"},"replies":[
+ {"match":"^scope$","reply":{"base":"origin/main","files":["src/a.ts"],"ui_files":[],"specs_present":false,"slug":null,"execute_skills":["code-review","quality-standards"],"not_applicable_count":84,"profile_valid":true,"blocked":null}},
+ {"match":"^code-quality-reviewer$","reply":{"status":"OK","findings":[{"file":"src/modules/alpha/features/login/login-form.tsx","line":42,"title":"Missing aria-describedby on error text","severity":"major","evidence":"error text not linked","fix":"link via aria-describedby","requirement":null}]}},
+ {"match":"^verify:","reply":{"refuted":true,"reason":"not real"}}
+]}

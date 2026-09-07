@@ -98,7 +98,23 @@ report instead of failing (NFR-4).
 
 3. **Comment source selection** — if `review.coderabbit` is true (or
    any AI reviewer app posts review comments on the PR), the PR's own
-   threads are the comment source. Otherwise (no reviewer app), select
+   threads are the comment source. When a reviewer app is installed but
+   has posted nothing for the current head (automatic review paused,
+   draft detected, rate limited), request it once through the bundled
+   cadence-aware script before falling back — a reviewer that has not
+   run is a missing review, not a clean one:
+
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/scripts/request-ai-reviews.sh" --pr <n>
+   ```
+
+   Read its `REQUESTED:` / `WAIT:` / `SKIPPED:` lines: wait for a
+   requested bot's review (two to five minutes), respect a `WAIT:`
+   interval instead of re-mentioning, and treat a `SKIPPED:` reviewer
+   (paused subscription, diff above CodeRabbit's changed-file limit,
+   status-check bot) as absent — record the reason as a degrade note.
+   `/fe-sdlc-request-reviews` documents the full flow. Otherwise (no
+   reviewer app, or every reviewer skipped or silent), select
    the degraded source: `pr-comment-resolver` itself runs the AI review
    loop resolved from `make.ai_review_loop`
    (`ai-review-loop.sh --diff-base <default-branch> --max-iterations 1`
@@ -145,7 +161,36 @@ report instead of failing (NFR-4).
    otherwise escalate.
 
 5. **Final status** — SUCCESS when checks are green (or CI was
-   skipped-with-report) AND zero comments remain unresolved. If ANY
+   skipped-with-report) AND zero comments remain unresolved. Confirm the
+   claim with the bundled sensor rather than from memory — its `READY`
+   verdict is the exit condition, and its `REVIEWER:` lines show whether
+   each AI reviewer approved the current head:
+
+   ```bash
+   "${CLAUDE_PLUGIN_ROOT}/scripts/pr-state.sh" --pr <n>
+   ```
+
+   A non-`READY` verdict is routed by its CAUSE, not by its name — the
+   sensor returns `WAIT` for two different states, and conflating them
+   burns counter-B budget on checks that are merely still running. Read
+   the snapshot's `CI:` line and its `REVIEWER:` rows before deciding:
+
+   - **`WAIT` with `ci: pending` (checks still running, non-empty
+     `pending`/`missing`)** — a step-4 comment-resolution push
+     re-triggers CI, so this is the common case here. Wait on the checks
+     (`pr-state.sh --pr <n> --wait-seconds 540`) or re-enter the step-2
+     loop when they come back red. Counter B is NOT touched, and no
+     re-dispatch of the comment resolver happens on this path.
+   - **`WAIT` with an in-flight review (a `REVIEWER:` row of status
+     `REQUESTED`) and checks not pending** — a mention is already posted
+     and its review is still coming; go back to step 3, which respects
+     the script's `WAIT:` interval instead of re-mentioning.
+   - **`REQUEST`** — a reviewer has never reviewed this head (`NONE`,
+     `STALE`, or `NOT_APPROVED` with no unresolved threads); go back to step 3 to
+     post the mention.
+
+   Either route may instead hand the PR to the
+   `fe-sdlc-pr-until-green` workflow, which drives this loop unattended. If ANY
    degrade path was taken, the status is SUCCESS-WITH-REPORT and the
    summary lists every degrade note. Always print: PR URL, checks
    state, unresolved count, counters used (`A <a>/5`, `B <b>/5`),
