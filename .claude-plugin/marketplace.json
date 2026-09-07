@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "php-backend-sdlc",
-      "description": "Full-SDLC automation for PHP backend engineering: GitHub issue creation, BMAD-method planning, bmalph/Ralph autonomous implementation with Claude CLI, multi-skill code review with BMAD FR/NFR gate, QA verification, CI auto-fix, and AI review comment resolution — looping until the PR is fully finished.",
+      "description": "Full-SDLC automation for PHP backend engineering: GitHub issue creation, BMAD-method planning, bmalph/Ralph autonomous implementation with Claude CLI, multi-skill code review with BMAD FR/NFR gate, QA verification, CI auto-fix, and AI review comment resolution \u2014 looping until the PR is fully finished.",
       "author": {
         "name": "VilnaCRM",
         "url": "https://github.com/VilnaCRM-Org"
@@ -19,13 +19,23 @@
     },
     {
       "name": "react-frontend-sdlc",
-      "description": "Full-SDLC automation for React/TypeScript frontend engineering: GitHub issue creation, BMAD-method planning, bmalph/Ralph autonomous implementation with Claude CLI, multi-skill code review with BMAD FR/NFR gate plus a mandatory accessibility gate, visual/E2E/Lighthouse QA verification, CI auto-fix, and AI review comment resolution — looping until the PR is fully finished.",
+      "description": "Full-SDLC automation for React/TypeScript frontend engineering: GitHub issue creation, BMAD-method planning, bmalph/Ralph autonomous implementation with Claude CLI, multi-skill code review with BMAD FR/NFR gate plus a mandatory accessibility gate, visual/E2E/Lighthouse QA verification, CI auto-fix, and AI review comment resolution \u2014 looping until the PR is fully finished.",
       "author": {
         "name": "VilnaCRM",
         "url": "https://github.com/VilnaCRM-Org"
       },
       "category": "development",
       "source": "./plugins/react-frontend-sdlc"
+    },
+    {
+      "name": "devops-sdlc",
+      "description": "DevOps SDLC automation for Terraform, Terraspace and Python/Pulumi: BMAD planning, BMALPH implementation, infrastructure review, E2E QA, CI repair, draft PR completion and evidence-backed operations.",
+      "author": {
+        "name": "VilnaCRM",
+        "url": "https://github.com/VilnaCRM-Org"
+      },
+      "category": "development",
+      "source": "./plugins/devops-sdlc"
     }
   ]
 }

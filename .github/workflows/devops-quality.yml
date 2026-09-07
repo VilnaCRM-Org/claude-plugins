@@ -1,0 +1,46 @@
+name: DevOps Quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: DevOps runtime and coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install pinned uv
+        run: pipx install uv==0.9.21
+      - name: Runtime, CLI and adversarial regressions
+        run: |
+          uvx --with pyyaml==6.0.3 coverage@7.6.7 run --rcfile=/dev/null --branch --source=plugins/devops-sdlc/scripts \
+            -m unittest discover -s plugins/devops-sdlc/tests
+          uvx coverage@7.6.7 report --rcfile=/dev/null --fail-under=100
+      - name: Python lint and formatting
+        run: |
+          uvx ruff@0.15.6 check plugins/devops-sdlc
+          uvx ruff@0.15.6 format --check plugins/devops-sdlc
+      - name: Type checks
+        run: uvx ty@0.0.21 check plugins/devops-sdlc/scripts
+      - name: Security checks
+        run: uvx 'bandit[toml]@1.8.6' -c pyproject.toml -r plugins/devops-sdlc/scripts
+      - name: Complexity checks
+        run: |
+          uvx xenon@0.9.3 --max-absolute B --max-modules B --max-average A \
+            plugins/devops-sdlc/scripts
+      - name: Prompt and profile contracts
+        run: |
+          uv run --with pyyaml==6.0.3 --no-project python \
+            tools/plugin-quality/lint/lint_all.py plugins/devops-sdlc
