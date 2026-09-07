@@ -3,6 +3,8 @@
 import hashlib
 import json
 import os
+import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -12,7 +14,15 @@ from pathlib import Path
 PLUGIN = Path(__file__).resolve().parents[1]
 GUIDE_PATH = PLUGIN / "skills" / "AI-AGENT-GUIDE.md"
 GUIDE = GUIDE_PATH.read_text(encoding="utf-8")
-SCRIPT = GUIDE.split("<<'PY'\n", 1)[1].split("\nPY\n```", 1)[0] + "\n"
+READER_BLOCKS = [
+    block
+    for block in re.findall(r"(?ms)^```bash\n(.*?)^```[ \t]*$", GUIDE)
+    if "<<'PY'\n" in block
+]
+if len(READER_BLOCKS) != 1:
+    raise ValueError("Expected one complete documented reader shell block")
+READER_SHELL = READER_BLOCKS[0]
+SCRIPT = READER_SHELL.split("<<'PY'\n", 1)[1].rsplit("\nPY\n", 1)[0] + "\n"
 
 
 class ReaderTests(unittest.TestCase):
@@ -21,7 +31,13 @@ class ReaderTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.paths = [
-            self.root / name for name in ["manifest.json", "helper.py", "adapter.py"]
+            self.root / name
+            for name in [
+                "manifest.json",
+                "helper.py",
+                "adapter.py",
+                "automation_coverage.py",
+            ]
         ]
         for path, body in zip(
             self.paths,
@@ -29,6 +45,7 @@ class ReaderTests(unittest.TestCase):
                 b'{"name":"synthetic"}',
                 b"# synthetic helper\n",
                 'print("caf\u00e9")\n'.encode(),
+                b"# synthetic automation coverage helper\n",
             ],
         ):
             path.write_bytes(body)
@@ -58,21 +75,132 @@ class ReaderTests(unittest.TestCase):
             output, {"status": "BLOCKED", "reason": "Source verification failed"}
         )
 
+    def run_documented_reader_shell(self, environment):
+        return subprocess.run(
+            ["/bin/sh", "-c", READER_SHELL],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+            env=environment,
+        )
+
+    def test_documented_helper_uses_trusted_isolated_python(self):
+        helper_command = next(
+            line
+            for line in GUIDE.splitlines()
+            if line.startswith('"$TRUSTED_PYTHON"')
+            and "validate-profile --repo ." in line
+        )
+        self.assertEqual(
+            helper_command,
+            '"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" '
+            "validate-profile --repo .",
+        )
+        plugin_root = self.root / "plugin"
+        scripts = plugin_root / "scripts"
+        scripts.mkdir(parents=True)
+        helper = scripts / "devops.py"
+        helper.write_text(
+            "import json\n"
+            "import sys\n"
+            "print(json.dumps({'isolated': sys.flags.isolated, "
+            "'argv': sys.argv[1:]}))\n"
+        )
+        malicious_bin = self.root / "malicious-bin"
+        malicious_bin.mkdir()
+        marker = self.root / "malicious-path-python-ran"
+        startup_marker = self.root / "malicious-pythonpath-ran"
+        fake_python = malicious_bin / "python3"
+        fake_python.write_text(
+            "#!/bin/sh\nprintf executed > " + shlex.quote(str(marker)) + "\n"
+        )
+        fake_python.chmod(0o755)
+        (self.root / "sitecustomize.py").write_text(
+            "from pathlib import Path\n"
+            + "Path("
+            + repr(str(startup_marker))
+            + ').write_text("executed")\n'
+        )
+        environment = {
+            "PATH": str(malicious_bin),
+            "PYTHONPATH": str(self.root),
+            "TRUSTED_PYTHON": sys.executable,
+            "DEVOPS_PLUGIN_ROOT": str(plugin_root),
+        }
+        result = subprocess.run(
+            ["/bin/sh", "-c", helper_command],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            timeout=5,
+            env=environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(
+            json.loads(result.stdout),
+            {"isolated": 1, "argv": ["validate-profile", "--repo", "."]},
+        )
+        self.assertFalse(marker.exists())
+        self.assertFalse(startup_marker.exists())
+
+    def test_documented_reader_shell_reaches_all_four_inputs(self):
+        plugin_root = self.root / "documented plugin"
+        relative_paths = [
+            ".claude-plugin/plugin.json",
+            "scripts/devops.py",
+            "scripts/agent_cli.py",
+            "scripts/automation_coverage.py",
+        ]
+        for relative, source in zip(relative_paths, self.paths):
+            target = plugin_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source.read_bytes())
+        environment = {
+            "PATH": "",
+            "TRUSTED_PYTHON": sys.executable,
+            "DEVOPS_PLUGIN_ROOT": str(plugin_root),
+            "MANIFEST_SHA256": self.expected[0],
+            "DEVOPS_SHA256": self.expected[1],
+            "AGENT_CLI_SHA256": self.expected[2],
+            "AUTOMATION_COVERAGE_SHA256": self.expected[3],
+        }
+        result = self.run_documented_reader_shell(environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        output = json.loads(result.stdout)
+        self.assertEqual(output["status"], "VERIFIED")
+        self.assertEqual(len(output["files"]), 4)
+        for row, relative, source, digest in zip(
+            output["files"], relative_paths, self.paths, self.expected
+        ):
+            self.assertEqual(
+                row,
+                {
+                    "path": str(plugin_root / relative),
+                    "sha256": digest,
+                    "utf8_text": source.read_text(),
+                },
+            )
+
     def test_reader_is_extracted_from_shipped_guide(self):
         self.assertEqual(GUIDE.count("<<'PY'\n"), 1)
         self.assertEqual(GUIDE.count("\nPY\n```"), 1)
         self.assertTrue(SCRIPT.strip())
+        self.assertTrue(READER_SHELL.startswith('"$TRUSTED_PYTHON" -I - '))
+        self.assertTrue(READER_SHELL.endswith("\nPY\n"))
         command = next(
             x for x in GUIDE.splitlines() if x.startswith('"$TRUSTED_PYTHON"')
         )
         self.assertIn(" -I - ", command)
-        self.assertEqual(command.count("$DEVOPS_PLUGIN_ROOT/"), 3)
+        self.assertEqual(command.count("$DEVOPS_PLUGIN_ROOT/"), 4)
 
     def test_expected_bytes_text_and_digests(self):
         result, output = self.run_reader()
         self.assertEqual(result.returncode, 0)
         self.assertEqual(output["status"], "VERIFIED")
-        self.assertEqual(len(output["files"]), 3)
+        self.assertEqual(len(output["files"]), 4)
         for row, path, digest in zip(output["files"], self.paths, self.expected):
             self.assertEqual(
                 row,
@@ -81,7 +209,7 @@ class ReaderTests(unittest.TestCase):
             self.assertEqual(row["utf8_text"].encode(), path.read_bytes())
 
     def test_tampered_last_file_does_not_emit_earlier_source(self):
-        self.paths[2].write_text("changed")
+        self.paths[-1].write_text("changed")
         self.blocked(*self.run_reader())
 
     def test_unavailable_source(self):
@@ -89,14 +217,35 @@ class ReaderTests(unittest.TestCase):
         self.blocked(*self.run_reader())
 
     def test_unavailable_host_executable(self):
-        with self.assertRaises(FileNotFoundError):
-            subprocess.run(
-                [str(self.root / "missing-host-python"), "-I", "-"],
-                input=SCRIPT,
-                text=True,
-                capture_output=True,
-                timeout=5,
-            )
+        malicious_bin = self.root / "malicious-bin"
+        malicious_bin.mkdir()
+        marker = self.root / "malicious-path-python-ran"
+        fake_python = malicious_bin / "python3"
+        fake_python.write_text(
+            "#!/bin/sh\n"
+            + "printf 'MALICIOUS_PATH_PYTHON_MARKER'\n"
+            + "printf executed > "
+            + shlex.quote(str(marker))
+            + "\n"
+        )
+        fake_python.chmod(0o755)
+        environment = {
+            "PATH": str(malicious_bin),
+            "TRUSTED_PYTHON": str(self.root / "missing-trusted-python"),
+            "DEVOPS_PLUGIN_ROOT": str(self.root),
+            "MANIFEST_SHA256": self.expected[0],
+            "DEVOPS_SHA256": self.expected[1],
+            "AGENT_CLI_SHA256": self.expected[2],
+            "AUTOMATION_COVERAGE_SHA256": self.expected[3],
+            "PYTHONPATH": str(self.root),
+        }
+        result = self.run_documented_reader_shell(environment)
+        self.assertEqual(result.returncode, 127, result.stderr)
+        self.assertIn(environment["TRUSTED_PYTHON"], result.stderr)
+        self.assertNotIn("Syntax error", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertNotIn("MALICIOUS_PATH_PYTHON_MARKER", result.stderr)
+        self.assertFalse(marker.exists())
 
     def test_missing_and_invalid_expected_digest(self):
         for value in ["", "f" * 63, "F" * 64, "x" * 64]:
@@ -130,7 +279,7 @@ class ReaderTests(unittest.TestCase):
                 self.blocked(*self.run_reader(paths=[path, *self.paths[1:]]))
 
     def test_exact_total_bound_and_one_byte_overflow(self):
-        for path, data in zip(self.paths, [b"x" * 1_999_998, b"y", b"z"]):
+        for path, data in zip(self.paths, [b"x" * 1_999_997, b"y", b"z", b"q"]):
             path.write_bytes(data)
         self.expected = [hashlib.sha256(p.read_bytes()).hexdigest() for p in self.paths]
         result, output = self.run_reader()

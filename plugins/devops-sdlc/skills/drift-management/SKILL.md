@@ -7,9 +7,11 @@ description: "Use when comparing deployed infrastructure with declared configura
 
 ## Profile keys consumed
 
+Before helpers, read [the backend contract](../AI-AGENT-GUIDE.md#claude-and-codex-backend-contract)
+and configure its host-approved `TRUSTED_PYTHON` and root; no PATH fallback.
+
 `project.repo` and `targets` from `.claude/devops-sdlc.json`, validated with
-`python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`.
-Resolve `DEVOPS_PLUGIN_ROOT` to the inspected plugin directory before invocation.
+`"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`.
 If profile validation fails, report BLOCKED; do not execute repository commands.
 
 - Use `project.repo` for requested GitHub queries after it matches the intended

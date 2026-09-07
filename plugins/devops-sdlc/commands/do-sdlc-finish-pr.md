@@ -21,14 +21,15 @@ Once, set and record `DEVOPS_PLUGIN_ROOT` in the command environment as the
 inspected installed/source plugin's absolute path. Native Claude may use `CLAUDE_PLUGIN_ROOT`; Codex needs the explicit path.
 Verify its `.claude-plugin/plugin.json` and readable Python helpers (no executable
 bit needed); do not infer it from the project working directory. Aliases identify
-command files, not native Codex commands; Codex reads and follows them via this root. Follow the [backend guide](../skills/AI-AGENT-GUIDE.md)
+command files, not native Codex commands; Codex reads and follows them via this root. Before helpers, read the [backend guide](../skills/AI-AGENT-GUIDE.md)
+and configure its host-approved `TRUSTED_PYTHON`; no PATH fallback. Follow it
 for authenticated selection and preserve the same stage state across handoffs.
 Use the resolved task repository as cwd for `--repo .` and the profile.
 Static discovery needs no profile.
 If `.claude/devops-sdlc.json` is absent, report dependent work BLOCKED and hand off
 to `commands/do-sdlc-setup.md`; do not poll or retry. Only setup creates it. Resume after setup succeeds;
 validate its profile using
-`python3 "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`
+`"$TRUSTED_PYTHON" -I "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`
 before any repository-provided code, tests or operational command executes.
 Select target IDs and environments explicitly named by the user's task or its
 accepted run summary. Process multiple named targets separately with distinct
@@ -79,6 +80,9 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
 
 ## Procedure
 
+Even if an earlier prerequisite blocks execution, return the separate local-work
+and overall-gate report required by step 6.
+
 1. Confirm local review and QA evidence against the exact proposed head.
    Inspect the diff for unrelated files, secrets, raw plans/state and generated
    tooling. This command authorizes PR creation/update only for the specified branch
@@ -128,9 +132,18 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
 5. Re-query the head, checks and unresolved threads after all writes. If the head
    changed during verification, repeat against the new head. Retain draft status;
    neither merge nor publish a release as part of this command.
-6. Report PR URL, final SHA, check conclusions, review disposition, QA/judge
-   evidence and blockers. Report completed local work separately from CI; if none
-   is evidenced, say none observed. Local PASS never makes missing CI pass. Re-fetch draft state, expected current-head checks,
+6. In the response and saved run-summary update, report PR URL, final SHA,
+   check conclusions, review disposition, QA/judge evidence and blockers. Include
+   separate rows for local work and the overall finish-PR gate, even when CI is
+   absent. For each evidenced completed local action, record its status, source
+   SHA and evidence path/hash. If no local completion evidence is supplied or
+   observed, write `Local work: none observed; evidence unavailable`; do not invent
+   completed work. Record missing CI as BLOCKED. For the overall status, apply
+   the Iteration guard first; otherwise an observed required-gate failure means
+   FAILED, and missing CI means BLOCKED. Local PASSED never satisfies missing CI.
+   In a proposal, label these rows as the planned summary
+   update, with unknowns explicit and no claim of execution or writing.
+   Re-fetch draft state, expected current-head checks,
    independent review, required applicable runtime/manual QA, calibrated judge
    results and all review-thread pages. Require every gate PASSED and zero
    unresolved applicable findings before SUCCESS.

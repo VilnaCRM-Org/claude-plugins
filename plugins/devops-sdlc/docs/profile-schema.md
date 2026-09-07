@@ -87,14 +87,16 @@ example stack is deployed.
 
 ## Command planning and execution
 
-Run from any directory, substituting the installed plugin script path:
+Before helpers, read the [backend contract](../skills/AI-AGENT-GUIDE.md#claude-and-codex-backend-contract)
+and configure its host-approved `TRUSTED_PYTHON` and verified `DEVOPS_PLUGIN_ROOT`;
+missing proof is BLOCKED, with no PATH fallback. Run from any directory:
 
 ```sh
-python3 scripts/devops.py discover --repo /path/to/repository
-python3 scripts/devops.py validate-profile --repo /path/to/repository
-python3 scripts/devops.py plan --repo /path/to/repository --target platform --stage validate
-python3 scripts/devops.py plan --repo /path/to/repository --target platform --stage preview --environment test --output .artifacts/devops-sdlc/test-intention.json
-python3 scripts/devops.py verify-plan --repo /path/to/repository --plan .artifacts/devops-sdlc/test-intention.json
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" discover --repo /path/to/repository
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo /path/to/repository
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo /path/to/repository --target platform --stage validate
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo /path/to/repository --target platform --stage preview --environment test --output .artifacts/devops-sdlc/test-intention.json
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" verify-plan --repo /path/to/repository --plan .artifacts/devops-sdlc/test-intention.json
 ```
 
 Planning does not execute the configured command. It requires a Git repository

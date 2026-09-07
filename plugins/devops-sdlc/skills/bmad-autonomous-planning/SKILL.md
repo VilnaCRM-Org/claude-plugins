@@ -7,9 +7,11 @@ description: "Use when turning infrastructure work into BMAD requirements, archi
 
 ## Profile keys consumed
 
+Before helpers, read [the backend contract](../AI-AGENT-GUIDE.md#claude-and-codex-backend-contract)
+and configure its host-approved `TRUSTED_PYTHON` and root; no PATH fallback.
+
 `project.repo` and `targets` from `.claude/devops-sdlc.json`, validated with
-`python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`.
-Resolve `DEVOPS_PLUGIN_ROOT` to the inspected plugin directory before invocation.
+`"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`.
 If profile validation fails, report BLOCKED; do not execute repository commands.
 
 - Use `project.repo` for requested GitHub queries after it matches the intended
@@ -79,7 +81,7 @@ skill receives a verdict; no silent skips.
    remains. Otherwise report BLOCKED/FAILED with the missing item and stop.
 8. Hand the six verified inputs and their hashes to `do-sdlc-implement`; this
    planning skill does not run implementation. Include the selected backend from
-   `python3 "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`.
+   `"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`.
    If neither CLI is authenticated, finish independent planning but mark the live
    implementation handoff BLOCKED. Preserve the ledger and phase counters.
 9. Routine workflow menus use existing user intent. Missing production scope or

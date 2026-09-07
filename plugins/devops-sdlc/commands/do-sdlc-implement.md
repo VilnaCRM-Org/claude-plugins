@@ -18,12 +18,13 @@ Record `DEVOPS_PLUGIN_ROOT` as the inspected plugin's absolute path in the comma
 environment. Verify its `.claude-plugin/plugin.json` and readable Python helpers
 (no executable bit needed); never infer it from project cwd. Native Claude may
 use `CLAUDE_PLUGIN_ROOT`; Codex needs the explicit root to read these command
-files, not native aliases. Follow the [backend guide](../skills/AI-AGENT-GUIDE.md)
+files, not native aliases. Before helpers, read the [backend guide](../skills/AI-AGENT-GUIDE.md)
+and configure its host-approved `TRUSTED_PYTHON`; no PATH fallback. Follow it
 for authenticated selection and preserved handoff state. `--repo .` and the profile
 use resolved task-repository cwd. Static discovery needs no profile.
 Only setup creates `.claude/devops-sdlc.json`; hand an absent profile to setup.
 Dependent work waits for its result. Before repository code/tests/operations, run
-`python3 "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`.
+`"$TRUSTED_PYTHON" -I "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`.
 Use task/accepted-summary target IDs and environments, with separate profile and
 evidence records per target. Each helper selects one declared target and, for
 preview, one of its environments; local checks may omit environment. Ambiguous

@@ -7,10 +7,12 @@ description: "Use when selecting or running infrastructure lint, type, policy an
 
 ## Profile keys consumed
 
+Before helpers, read [the backend contract](../AI-AGENT-GUIDE.md#claude-and-codex-backend-contract)
+and configure its host-approved `TRUSTED_PYTHON` and root; no PATH fallback.
+
 Validate `.claude/devops-sdlc.json` with
-`python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .` after
-resolving `DEVOPS_PLUGIN_ROOT` to the inspected installed plugin directory. A
-validation failure is BLOCKED; do not execute repository commands.
+`"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`.
+A validation failure is BLOCKED; do not execute repository commands.
 
 `project.repo` and `targets` are the only profile fields used for selection.
 The intended repository is the owner/repository named by the current request;

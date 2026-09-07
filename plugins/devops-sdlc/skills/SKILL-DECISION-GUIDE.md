@@ -26,7 +26,11 @@ Reassess on scope/source changes.
 
 Caller means host orchestrator. First read [the agent guide](AI-AGENT-GUIDE.md):
 backend contract, task state and [atomic reservation](AI-AGENT-GUIDE.md#atomic-attempt-reservation),
-including every reference-package file and its linked exact-file reference.
+including [the exact-file reference](../docs/atomic-ledger-reference.md) and all
+seven files under `$DEVOPS_PLUGIN_ROOT/tests/ledger_reference/`: `__init__.py`,
+`storage.py`, `history.py`, `state.py`, `observation.py`, `actions.py`, `transaction.py`.
+Record each path and SHA-256 of its raw bytes; never execute the Markdown resource.
+Configure its host-approved `TRUSTED_PYTHON`; no PATH fallback.
 Authenticate plugin root/helper hashes before execution. Missing reads/proof:
 BLOCKED for routing/calls/ledger writes; only authorized document/inventory reads.
 Then resolve identity/scope from current user instructions and host policy:
@@ -40,7 +44,7 @@ Then resolve identity/scope from current user instructions and host policy:
    empty becomes `task`. No Markdown/title parsing. Path text grants no authority.
    Preserve date/path; known history requires resume/migration, never a new budget.
 2. In the task checkout run
-   `python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
+   `"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
    on `.claude/devops-sdlc.json`; nonzero/invalid: BLOCKED. Take the target ID and
    environment name explicitly supplied in the current user request.
    On resumption only, an absent target ID may reuse the saved identity's target;
@@ -65,11 +69,21 @@ Then resolve identity/scope from current user instructions and host policy:
    local-only marker above when applicable; reuse the saved identity exactly. Stage is command basename without `.md`, or direct
    skill's frontmatter `name`; agent is assigned name, else `caller`. Missing values BLOCK
    ledger actions. Record host-session owner; persist path/stage before attempts.
-4. Before ledger actions verify protected import and the guide's two-process
+4. Before ledger actions copy those seven reviewed files unchanged as
+   `ledger_reference/` into a caller-owned protected directory. Compare every
+   copied raw-byte SHA-256 with its reviewed source hash. Verify the retained
+   directory descriptor, owner/ACL controls and host isolation denying writes by
+   repository code and other callers; same-user mode bits alone are insufficient.
+   Record allowed writers and isolation evidence. In the permitted host process,
+   use only that parent as the explicit package import path, then
+   `from ledger_reference import transaction`; never use an unreviewed repository
+   import path. This is the protected import. Verify the guide's two-process
    shared-filesystem `flock`/replace/directory-`fsync` probe. Missing proof: BLOCKED.
    New tasks only: exclusively record `initialization-evidence-<identity-sha256>.json`
-   beside planned `attempts.json`, using the guide's filename/hash recipe. Never
-   overwrite this immutable evidence. Include
+   beside planned `attempts.json`. Here `identity-sha256` is lowercase SHA-256 of
+   `json.dumps(identity, ensure_ascii=False, separators=(",", ":")).encode("utf-8")`,
+   without a trailing newline; `identity` is the exact five-string array above.
+   Never overwrite this immutable evidence. Include
    identity, host/session, UTC and inspected proof of no history, stop, breaker or
    active/pending/uncertain run. Unknown/unverified proof: BLOCKED. Only the caller calls the
    transaction below with `action: initialize`, `owner` and verified proof
@@ -81,6 +95,18 @@ Then resolve identity/scope from current user instructions and host policy:
    counts, states, evidence and owner; never guess history or initialize fresh.
 
 Every `specs/<task-id>/run-summary.md` reference means this saved path.
+
+The acceptance summary is the `acceptance` checklist inside that exact saved
+`run-summary.md`, not `attempts.json`. Each row records its current requirement
+source, action/target/environment, expected result, required check, execution
+status and evidence path/hash; mark unknown results explicitly, never PASSED.
+On resume, verify the existing rows against current accepted scope. For new work
+without a summary, prepare rows from the current user requirements or the caller's
+accepted requirements handoff before initialization; save them as the first human
+summary only after step 4 returns INITIALIZED. Missing or ambiguous acceptance
+inputs, or a missing checklist on resume, BLOCK dependent work; never invent
+requirements or use passing results to define them. Independent preparation may
+continue without changing ledger state.
 
 ## Routing
 
@@ -94,7 +120,7 @@ from a non-author using `agents/state-migration-reviewer.md`; missing/unknown:
 BLOCKED. Deployment needs separately recorded exact authorization scope.
 
 Before each new agent CLI invocation, run once:
-`python3 "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`.
+`"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" detect --backend auto`.
 Detection itself needs no preflight. Binary/auth check prefers Claude, then Codex;
 `--prefer codex` reverses order. Require exit 0, `status: READY`, selected backend/nonempty version,
 true `available`/`authenticated`; otherwise BLOCKED. Readiness grants no permission.
@@ -116,7 +142,7 @@ model is not an observation.
 
 Each stage has five attempts; a durable reservation spends one before its first
 step, ending PASSED, FAILED or BLOCKED. Use
-`ledger_reference.transaction(directory, identity, request, observe)` with the
+`transaction(directory, identity, request, observe)` with the
 verified task-directory descriptor and request `owner`/`action`, plus returned
 `token` for owned actions. Caller implements `observe` using current host/caller
 directives and actual run/breaker logs; verify its code and host access before admission.
@@ -153,7 +179,7 @@ start Ralph with the mapped driver; never planning/selection. Repeated failures
 or no progress trip its breaker. Open/tripped in `.ralph/logs/` ends the run;
 retain failed log/partial work, never reset to retry.
 
-Required checks come from the saved acceptance summary. An explicit native-behavior
+Required checks come from that saved `acceptance` checklist. An explicit native-behavior
 request requires observing Claude load/invoke the installed plugin, never Codex
 source context. Live checks need the specified real provider/backend operation
 under scoped authorization, never mocks. Missing prerequisites keep required

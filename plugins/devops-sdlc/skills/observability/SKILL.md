@@ -7,7 +7,10 @@ description: "Use when designing or testing logs, metrics, alarms, SLOs and noti
 
 ## Profile keys consumed
 
-Set `DEVOPS_PLUGIN_ROOT` to the inspected plugin directory; in the checkout run `python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`.
+Before helpers, read [the backend contract](../AI-AGENT-GUIDE.md#claude-and-codex-backend-contract)
+and configure its host-approved `TRUSTED_PYTHON` and root; no PATH fallback.
+
+In the checkout run `"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`.
 Failure: BLOCKED before repository commands. In `.claude/devops-sdlc.json`,
 `t` is selected `targets[]`; `e` is `t.environments[NAME]`:
 
@@ -16,7 +19,8 @@ Failure: BLOCKED before repository commands. In `.claude/devops-sdlc.json`,
 - `t.root`: Inspect this repository-relative root; absent/escaping/symlinked: BLOCKED.
 - `t.stack_type`: `terraform`/`terraspace`: HCL/stack wrappers via `terraform-terraspace`; `pulumi`: Python/uv via `python-pulumi`. Other stack types: BLOCKED.
 - `t.environments`: Preview/operations require NAME; only local static work may omit it. Unmatched NAME: BLOCKED.
-- `e.stack`, `e.account_id`, `e.region`, `e.backend`: Bind checks to stack, AWS account/region and backend. Missing/invalid fields or mismatched observations: BLOCKED. Changes need fresh intention/evidence.
+- `e.stack`, `e.account_id`, `e.region`: Bind checks to the selected stack and AWS account/region. Missing/invalid fields or mismatched observations: BLOCKED. Changes need fresh intention/evidence.
+- `e.backend`: Select the destination-specific checks below; absent, unsupported or mismatched destinations are BLOCKED.
 - `t.commands.validate/test/check/security/preview`: Null/ambiguous required command: BLOCKED, no substitutes. Non-command checks: helper fields inapplicable.
 - Command `argv`: reviewed tokens. `requires_credentials`: false for local stages; true for preview, needing scoped credentials/authorization to execute.
 
@@ -25,6 +29,18 @@ its scoped authority; never summary values/defaults. Environment fields follow
 [profile schema](../../docs/profile-schema.md).
 Non-authors review argv/wrappers for effects; record review/source hash or BLOCK
 execution. Run required checks only; analysis/plans mark them unexecuted.
+
+For `s3://`, bind the checklist to the exact bucket/prefix and inspect authorized
+storage access/audit, encryption and delivery-failure evidence for that destination.
+For `https://`, bind it to the exact service endpoint/path and inspect authorized
+TLS/endpoint health, access/audit and service delivery-failure evidence; do not
+assume it is S3 or invent an AWS storage check. For `file:///`, resolve the absolute
+local destination and inspect its permissions, local access/error logging and
+filesystem failure evidence; remote service delivery checks are inapplicable.
+Use existing reviewed configuration and observations within the checklist's
+scope. Missing required observations are BLOCKED, not proof of a healthy backend.
+These branches authorize no login, backend initialization/change, write or probe;
+any execution still requires the existing scoped authorization and helper gates.
 
 Caller (host orchestrator) keeps one checklist in
 `specs/<task-id>/run-summary.md`, deriving outcomes/CI checks, drill scope and
@@ -68,19 +84,19 @@ reviewer non-authorship. Unknown/same identity blocks independent review.
    With NAME (required for preview/operations):
 
    ```sh
-   python3 "$helper" plan --repo . --target TARGET --stage HELPER_STAGE --environment NAME --output INTENTION
+   "$TRUSTED_PYTHON" -I "$helper" plan --repo . --target TARGET --stage HELPER_STAGE --environment NAME --output INTENTION
    ```
 
    Local static work without NAME (never preview):
 
    ```sh
-   python3 "$helper" plan --repo . --target TARGET --stage HELPER_STAGE --output INTENTION
+   "$TRUSTED_PYTHON" -I "$helper" plan --repo . --target TARGET --stage HELPER_STAGE --output INTENTION
    ```
 
    Verify the generated INTENTION file:
 
    ```sh
-   python3 "$helper" verify-plan --repo . --plan INTENTION --max-age-seconds 3600
+   "$TRUSTED_PYTHON" -I "$helper" verify-plan --repo . --plan INTENTION --max-age-seconds 3600
    ```
 
    Require exit 0, PLANNED/VERIFIED, `executed: false`. Stdout wraps `intention`;

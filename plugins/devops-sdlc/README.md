@@ -76,16 +76,18 @@ The plugin does not merge or publish a release.
 
 ## Repository helper
 
-The Python helper uses the standard library and emits JSON. Set `PLUGIN` to the
-installed plugin's absolute path:
+Before helpers, read the [backend contract](skills/AI-AGENT-GUIDE.md#claude-and-codex-backend-contract)
+and configure its host-approved `TRUSTED_PYTHON` and verified `DEVOPS_PLUGIN_ROOT`;
+missing proof is BLOCKED, with no PATH fallback. Set `PLUGIN="$DEVOPS_PLUGIN_ROOT"`.
+The standard-library helper emits JSON:
 
 ```bash
-python3 "$PLUGIN/scripts/devops.py" discover --repo .
-python3 "$PLUGIN/scripts/devops.py" validate-profile --repo .
-python3 "$PLUGIN/scripts/devops.py" plan --repo . --target example --stage validate
-python3 "$PLUGIN/scripts/devops.py" plan --repo . --target example --stage preview \
+"$TRUSTED_PYTHON" -I "$PLUGIN/scripts/devops.py" discover --repo .
+"$TRUSTED_PYTHON" -I "$PLUGIN/scripts/devops.py" validate-profile --repo .
+"$TRUSTED_PYTHON" -I "$PLUGIN/scripts/devops.py" plan --repo . --target example --stage validate
+"$TRUSTED_PYTHON" -I "$PLUGIN/scripts/devops.py" plan --repo . --target example --stage preview \
   --environment test --output .artifacts/devops-sdlc/preview-intention.json
-python3 "$PLUGIN/scripts/devops.py" verify-plan --repo . \
+"$TRUSTED_PYTHON" -I "$PLUGIN/scripts/devops.py" verify-plan --repo . \
   --plan .artifacts/devops-sdlc/preview-intention.json
 ```
 

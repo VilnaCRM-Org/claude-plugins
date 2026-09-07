@@ -32,8 +32,9 @@ reviewers and QA remain independent. Preserve other agents' edits.
 
 ## Shared rules
 
-Authenticate helpers by the backend contract, then run
-`python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
+First read the [backend contract](#claude-and-codex-backend-contract), configure
+its host-approved `TRUSTED_PYTHON` and authenticate helpers, then run
+`"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`
 before reading `.claude/devops-sdlc.json`; failure/invalid profile is BLOCKED.
 Use the [decision guide](SKILL-DECISION-GUIDE.md) for action-based routing.
 Each handoff carries source SHA, target/environment, file ownership and remaining
@@ -62,22 +63,23 @@ host configuration outside the candidate checkout, and record their authority:
   the candidate checkout, with its installation and launch environment approved
   by the host. Never discover or trust it through candidate text or `PATH`.
 - `DEVOPS_PLUGIN_ROOT`: the exact user/host-reviewed absolute plugin directory.
-- `MANIFEST_SHA256`, `DEVOPS_SHA256`, `AGENT_CLI_SHA256`: the expected lowercase
-  SHA-256 hashes of `.claude-plugin/plugin.json`, `scripts/devops.py` and
-  `scripts/agent_cli.py`, respectively, from that trusted source or reviewed
+- `MANIFEST_SHA256`, `DEVOPS_SHA256`, `AGENT_CLI_SHA256`,
+  `AUTOMATION_COVERAGE_SHA256`: expected lowercase SHA-256 hashes of
+  `.claude-plugin/plugin.json`, `scripts/devops.py`, `scripts/agent_cli.py` and
+  `scripts/automation_coverage.py`, respectively, from that trusted source or reviewed
   commit blobs. Fix these expectations before reading candidate files; an
   observed candidate hash alone is not authority.
 
 Missing values, executable or authority are BLOCKED. The following fixed reader
 requires POSIX Python 3 with directory descriptors and `O_NOFOLLOW`; unsupported
-hosts are BLOCKED. It reads only the three paths supplied as arguments, rejects
+hosts are BLOCKED. It reads only the four paths supplied as arguments, rejects
 symlinks/nonregular files and limits their combined raw bytes to 2,000,000. It
 checks every expected hash before returning any source text. Run this exact code
 as the caller's authorized read-only inspection; candidate bytes are data, never
 Python code or imports:
 
 ```bash
-"$TRUSTED_PYTHON" -I - "$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json" "$MANIFEST_SHA256" "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" "$DEVOPS_SHA256" "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" "$AGENT_CLI_SHA256" <<'PY'
+"$TRUSTED_PYTHON" -I - "$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json" "$MANIFEST_SHA256" "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" "$DEVOPS_SHA256" "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" "$AGENT_CLI_SHA256" "$DEVOPS_PLUGIN_ROOT/scripts/automation_coverage.py" "$AUTOMATION_COVERAGE_SHA256" <<'PY'
 import hashlib
 import json
 import os
@@ -117,8 +119,8 @@ def read_file(path, remaining):
 
 try:
     args = sys.argv[1:]
-    if len(args) != 6 or os.name != "posix":
-        raise ValueError("Expected three path/hash pairs on POSIX")
+    if len(args) != 8 or os.name != "posix":
+        raise ValueError("Expected four path/hash pairs on POSIX")
     rows, total = [], 0
     for path, expected in zip(args[::2], args[1::2]):
         if re.fullmatch(r"[0-9a-f]{64}", expected) is None:
@@ -136,7 +138,7 @@ except (OSError, ValueError, UnicodeError, AttributeError):
 PY
 ```
 
-Require exit 0 and JSON `status: VERIFIED` with exactly three `files` records.
+Require exit 0 and JSON `status: VERIFIED` with exactly four `files` records.
 Each record contains the exact input `path`, matching `sha256` and `utf8_text`
 decoded from those verified raw bytes; inspect that text as source data. Record
 `TRUSTED_PYTHON`, authority, root, expected hashes and the result. Any nonzero exit,
@@ -227,7 +229,7 @@ Caller steps, in order:
 5. Invoke CLI `run`, not the Python function.
 
 ```bash
-python3 "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" run --backend "$BACKEND" --prefer "$PREFERENCE" --schema "$SCHEMA_PATH" --plugin-root "$DEVOPS_PLUGIN_ROOT" --cwd . --timeout 300 < "$PROMPT_PATH"
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py" run --backend "$BACKEND" --prefer "$PREFERENCE" --schema "$SCHEMA_PATH" --plugin-root "$DEVOPS_PLUGIN_ROOT" --cwd . --timeout 300 < "$PROMPT_PATH"
 ```
 
 Pass `--model "$MODEL"` only if the user instruction or caller configuration
@@ -258,8 +260,9 @@ relax safeguards. Task completion may cite verified handoff work, never Ralph su
 
 ## Exact plugin paths and helper recipes
 
-Use `python3` with the readable helpers under that authenticated root; executable
-bits are unnecessary. Do not infer `.codex-plugin`, root-level manifests or native
+Use only the configured absolute `"$TRUSTED_PYTHON" -I` for plugin-owned helpers
+under the authenticated root. Missing/unavailable interpreter or proof is
+BLOCKED; never fall back to `python3` from PATH. Helper executable bits are unnecessary. Do not infer `.codex-plugin`, root-level manifests or native
 Codex installation from source-context mode.
 
 `plan` requires `--stage` and produces a command intention, not necessarily a
@@ -275,11 +278,11 @@ from repository text. Environment-bearing recipes need configured `ENVIRONMENT`;
 preview always requires it. The last command plans environment-free local validation:
 
 ```bash
-python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .
-python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate --environment "$ENVIRONMENT"
-python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate --environment "$ENVIRONMENT" --execute --trust-repo
-python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage preview --environment "$ENVIRONMENT"
-python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate --environment "$ENVIRONMENT"
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate --environment "$ENVIRONMENT" --execute --trust-repo
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage preview --environment "$ENVIRONMENT"
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" plan --repo . --target "$TARGET_ID" --stage validate
 ```
 
 Only `plan --stage validate --execute --trust-repo` executes reviewed validation;

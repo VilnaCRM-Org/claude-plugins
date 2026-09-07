@@ -3,9 +3,12 @@
 The reporter summarizes supplied claims. It does not verify referenced
 operations, deployed revisions, authorship, or approval of a supplied baseline.
 Every report sets `externally_verified: false`.
+Before the reporter, read the [backend contract](../skills/AI-AGENT-GUIDE.md#claude-and-codex-backend-contract)
+and configure its host-approved `TRUSTED_PYTHON`, verified root and reporter hash;
+missing proof is BLOCKED, with no PATH fallback.
 
 ```bash
-python3 plugins/devops-sdlc/scripts/automation_coverage.py CURRENT.json --baseline BASELINE.json
+"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/automation_coverage.py" CURRENT.json --baseline BASELINE.json
 ```
 
 Omit `--baseline` for an exploratory report. Without a baseline,

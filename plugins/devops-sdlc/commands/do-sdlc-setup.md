@@ -23,13 +23,14 @@ to its absolute path in the command environment and record it. Native Claude may
 Verify its manifest and helper scripts before use; do not infer it from the
 project working directory. Native Claude aliases below identify command files;
 in Codex, read and follow those files explicitly using this root. They are not
-native Codex slash commands. Follow the [backend guide](../skills/AI-AGENT-GUIDE.md)
+native Codex slash commands. Before helpers, read the [backend guide](../skills/AI-AGENT-GUIDE.md)
+and configure its host-approved `TRUSTED_PYTHON`; no PATH fallback. Follow it
 for authenticated selection and preserve the same stage state across handoffs.
 First resolve the task repository as the working directory for all `--repo .`
 commands and the profile destination. Static discovery does not need a profile.
 Only setup creates an absent `.claude/devops-sdlc.json`; every other stage routes
 an absent profile to setup and waits for its result. Then validate the profile
-using `python3 "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`
+using `"$TRUSTED_PYTHON" -I "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" validate-profile --repo .`
 before any repository-provided code, tests or operational command executes.
 Select target IDs and environments explicitly named by the user's task or its
 accepted run summary. Process multiple named targets separately with distinct
@@ -72,7 +73,7 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    repository), record its absolute path, and change working directory there.
    All `--repo .` calls and `.claude/devops-sdlc.json` creation refer to that root.
    If missing or ambiguous, BLOCKED before writing. Inspect guidance and run
-   `python3 "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" discover --repo .`.
+   `"$TRUSTED_PYTHON" -I "${DEVOPS_PLUGIN_ROOT}/scripts/devops.py" discover --repo .`.
    Discovery reads filenames and static metadata; never run Make, imports,
    project scripts, Docker or package installation merely to discover a repo.
 2. Use [the profile schema](../docs/profile-schema.md). Distinguish plain
@@ -86,7 +87,7 @@ Never infer approval from a label, timeout, profile flag, or passing tests.
    Record unknown account/backend/environment values as unresolved, not guesses.
    Missing capabilities are null, never invented commands or unconditional PASS.
 5. Validate the profile. Verify Python, Git, BMALPH and selected engine tooling.
-   Run `python3 "${DEVOPS_PLUGIN_ROOT}/scripts/agent_cli.py" detect --backend auto`
+   Run `"$TRUSTED_PYTHON" -I "${DEVOPS_PLUGIN_ROOT}/scripts/agent_cli.py" detect --backend auto`
    with the user's `--prefer claude` or `--prefer codex` choice when supplied.
    Detection verifies binary and authentication, preserving fallback reasons.
    Explicit `--backend claude` or `--backend codex` blocks when unavailable;

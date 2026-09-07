@@ -7,9 +7,11 @@ description: "Use when creating, editing or previewing Python Pulumi programs an
 
 ## Profile keys consumed
 
+Before helpers, read [the backend contract](../AI-AGENT-GUIDE.md#claude-and-codex-backend-contract)
+and configure its host-approved `TRUSTED_PYTHON` and root; no PATH fallback.
+
 `project.repo` and `targets` from `.claude/devops-sdlc.json`, validated with
-`python3 "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`.
-Resolve `DEVOPS_PLUGIN_ROOT` to the inspected plugin directory before invocation.
+`"$TRUSTED_PYTHON" -I "$DEVOPS_PLUGIN_ROOT/scripts/devops.py" validate-profile --repo .`.
 If profile validation fails, report BLOCKED; do not execute repository commands.
 
 - Use `project.repo` for requested GitHub queries after it matches the intended
@@ -65,7 +67,7 @@ skill receives a verdict; no silent skips.
    observed/supplied/proposed status. Include the native Claude manifest
    `$DEVOPS_PLUGIN_ROOT/.claude-plugin/plugin.json` and regular readable Python
    `$DEVOPS_PLUGIN_ROOT/scripts/devops.py` and
-   `$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py`. Use `python3`, no executable-bit check.
+   `$DEVOPS_PLUGIN_ROOT/scripts/agent_cli.py`. Use `"$TRUSTED_PYTHON" -I`; no executable-bit check.
    Supplied proof is a user/host-reviewed root/hash record; cite it, never invent
    execution. Neither `.codex-plugin` nor a root-level manifest substitutes.
    Read `Pulumi.yaml`/`Pulumi.yml`, Python version, pyproject/uv lock,
