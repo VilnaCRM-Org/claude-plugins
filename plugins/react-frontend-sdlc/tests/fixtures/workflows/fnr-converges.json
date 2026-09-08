@@ -1,0 +1,8 @@
+{"args":"alpha-login --base origin/main","replies":[
+ {"match":"^scope$","reply":{"profile_valid":true,"blocked":null,"base":"origin/main","files":["src/modules/alpha/features/login/login-form.tsx","tests/unit/modules/alpha/login-form.test.tsx"],"specs_present":true,"slug":"alpha-login","spec_files":["prd.md","architecture.md","epics-stories.md"],"summary":"login form with polite validation status"}},
+ {"match":"^fr-nfr-reviewer ","reply":[
+   {"status":"OK","verdict":"FAIL","new_findings":2,"gate_run":"plugin script","note":null,"findings":[{"requirement":"FR-2","file":"src/modules/alpha/features/login/login-form.tsx","line":41,"title":"validation error not announced","evidence":"no role=status region","fix":"render UILiveStatus with the localized error"},{"requirement":"NFR-3","file":"tests/unit/modules/alpha/login-form.test.tsx","line":null,"title":"negative case untested","evidence":"no test submits an invalid email","fix":"add the invalid-email case"}]},
+   {"status":"OK","verdict":"PASS","new_findings":0,"gate_run":"plugin script","note":null,"findings":[]}
+ ]},
+ {"match":"^fix:","reply":{"status":"COMPLETE","files_modified":2,"tests_status":"PASSING","recommendation":"re-run the gate"}}
+]}

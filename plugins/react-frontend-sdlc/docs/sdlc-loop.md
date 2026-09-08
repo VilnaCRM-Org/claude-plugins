@@ -163,8 +163,13 @@ benefit from fan-out and unattended repetition — see
   green. Its exit condition is stage 6's, made verifiable.
 - `/react-frontend-sdlc:fe-sdlc-review-panel` runs stage 4 with every
   lens in parallel and three refuters per finding.
+- `/react-frontend-sdlc:fe-sdlc-fr-nfr-review` runs the stage-4 BMAD
+  FR/NFR gate as its own bounded loop — one `fr-nfr-reviewer` gate run per
+  iteration, root-cause fixes by `react-implementer`, until zero new
+  findings with verdict PASS — and only when the feature has a
+  `specs/<slug>/` bundle; without one it reports the gate not applicable.
 - `/react-frontend-sdlc:fe-sdlc-feature` composes stages 0–6 for one
-  planned feature and nests the two workflows above.
+  planned feature and nests the three workflows above.
 
 Every workflow keeps the per-stage counters and the canonical escalation
 block; a degrade path ends in `SUCCESS-WITH-REPORT` exactly as it does in

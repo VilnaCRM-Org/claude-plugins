@@ -1,7 +1,7 @@
 export const meta = {
   name: 'fe-sdlc-feature',
   description:
-    'The full frontend SDLC for one planned feature: validate the profile, resolve the issue and specs bundle, implement the stories with parallel react-implementer agents, run the review panel, QA the running app, open or update the PR, then drive it to green with the AI reviewers — bounded at every stage, resumable from the artifacts that already exist',
+    'The full frontend SDLC for one planned feature: validate the profile, resolve the issue and specs bundle, implement the stories with parallel react-implementer agents, run the review panel, run the BMAD FR/NFR review gate against the specs bundle, QA the running app, open or update the PR, then drive it to green with the AI reviewers — bounded at every stage, resumable from the artifacts that already exist',
   whenToUse:
     'When a task already has a GitHub issue and a specs/<slug>/ planning chain (or you accept the plugin generating them) and you want the whole loop run unattended, ending in a PR that CI and the AI reviewers have approved.',
   phases: [
@@ -9,6 +9,7 @@ export const meta = {
     { title: 'Resolve plan', detail: 'issue, specs/<slug>/, stories' },
     { title: 'Implement', detail: 'react-implementer per independent story' },
     { title: 'Review', detail: 'fe-sdlc-review-panel' },
+    { title: 'FR/NFR gate', detail: 'fe-sdlc-fr-nfr-review against specs/<slug>/' },
     { title: 'QA', detail: 'qa-visual-tester against the running stack' },
     { title: 'Finish PR', detail: 'PR create/update, then fe-sdlc-pr-until-green' },
   ],
@@ -170,6 +171,20 @@ while (true) {
   if (!review || review.result === 'ESCALATED') return escalate('review', review?.iterations ?? '-', 'review panel escalated', 'read its escalation block above', { review })
   degradeNotes.push(...(review.degrade_notes || []))
   note(`review panel: ${review.result} confirmed_total=${review.confirmed_total ?? 0}`)
+
+  phase('FR/NFR gate')
+  let gate
+  try {
+    gate = await workflow('react-frontend-sdlc:fe-sdlc-fr-nfr-review', { slug: OPTS.slug })
+  } catch (e) {
+    return escalate('fr-nfr-gate', '-', `nested workflow unavailable: ${e?.message || e}`, `run /react-frontend-sdlc:fe-sdlc-fr-nfr-review ${OPTS.slug}, then /react-frontend-sdlc:fe-sdlc-pr-until-green by hand`)
+  }
+  if (!gate || gate.result === 'ESCALATED') return escalate('fr-nfr-gate', gate?.iterations ?? '-', 'FR/NFR gate escalated', 'read its escalation block above', { gate })
+  if (gate.skipped === true) {
+    return escalate('fr-nfr-gate', '-', `the plan stage resolved specs/${OPTS.slug}/ but the FR/NFR gate found no BMAD spec bundle there`, 'run /fe-sdlc-plan for this feature, then re-run')
+  }
+  degradeNotes.push(...(gate.degrade_notes || []))
+  note(`fr-nfr gate: ${gate.result} iterations=${gate.iterations ?? 0}`)
 
   phase('QA')
   const qa = await agent(

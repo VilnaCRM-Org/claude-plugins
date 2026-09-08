@@ -70,7 +70,7 @@ the [schema reference](docs/profile-schema.md) for every key.
 
 ## Workflows
 
-Three Workflow-tool scripts under `workflows/` run the parts of the loop that
+Four Workflow-tool scripts under `workflows/` run the parts of the loop that
 benefit from fan-out and unattended repetition (see
 [docs/workflows.md](docs/workflows.md)):
 
@@ -78,7 +78,8 @@ benefit from fan-out and unattended repetition (see
 | --- | --- |
 | `/react-frontend-sdlc:fe-sdlc-pr-until-green` | Request CodeRabbit / cubic with the right mentions, wait, fix CI and review threads, push, repeat until every reachable reviewer approves the head and CI is green |
 | `/react-frontend-sdlc:fe-sdlc-review-panel` | Stage-4 review as parallel lenses (quality, FR/NFR, a11y per family, technique skills) with three-refuter verification and fix rounds until zero new findings |
-| `/react-frontend-sdlc:fe-sdlc-feature` | The whole loop for one planned feature: setup check, plan resolution, parallel story implementation, review panel, QA, PR, then pr-until-green |
+| `/react-frontend-sdlc:fe-sdlc-fr-nfr-review` | The BMAD FR/NFR review gate as a bounded loop: locate the `specs/<slug>/` bundle, run fr-nfr-reviewer once per iteration, fix every new finding at its root cause, repeat until zero new findings with verdict PASS; not applicable (reported, never invented) without a spec bundle |
+| `/react-frontend-sdlc:fe-sdlc-feature` | The whole loop for one planned feature: setup check, plan resolution, parallel story implementation, review panel, FR/NFR gate, QA, PR, then pr-until-green |
 
 The finishing workflow reads the PR through `scripts/pr-state.sh`, a
 deterministic sensor that classifies every AI reviewer against the current
@@ -124,7 +125,7 @@ an enhancement, never a hard dependency — every gate runs without them.
 - [Degrade matrix](docs/degrade-matrix.md) — behavior when a capability
   is missing (no CI, no reviewer app, no Lighthouse/visual/mutation, missing
   Make targets, …)
-- [Workflows](docs/workflows.md) — the three Workflow-tool scripts
+- [Workflows](docs/workflows.md) — the four Workflow-tool scripts
   (pr-until-green, review-panel, feature), their arguments, counters, and
   the `pr-state.sh` verdict table
 - [Release process](docs/release-process.md) — versioning, tags,
