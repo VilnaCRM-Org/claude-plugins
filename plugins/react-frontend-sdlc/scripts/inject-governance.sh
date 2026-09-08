@@ -44,6 +44,7 @@ out_file=""
 trap 'rm -f "$block_file" "$new_file" "$snap_file" ${out_file:+"$out_file"}' EXIT
 cat >"$block_file" <<BLOCK
 $BEGIN_MARKER
+
 ## react-frontend-sdlc governance (managed block — do not edit between markers)
 
 This repository's SDLC is driven by the react-frontend-sdlc plugin through the
@@ -65,8 +66,8 @@ loaded solely on EXECUTE.
 Quality gates live in \`.claude/react-sdlc.yml\` under \`quality.*\` and are
 raise-only: score floors (coverage, mutation MSI, Lighthouse desktop/mobile)
 may be raised above the shipped defaults, and the eslint, tsc, jscpd,
-markdownlint, dependency-cruiser, and visual-diff violation ceilings stay at
-0. Never lower them — \`validate-profile.sh\` rejects lowered values.
+markdownlint, dependency-cruiser, and visual-diff violation ceilings stay
+at 0. Never lower them — \`validate-profile.sh\` rejects lowered values.
 
 ### Mandatory accessibility gate
 
@@ -84,6 +85,7 @@ mapped in \`.claude/react-sdlc.yml\` (\`make.*\` — \`make.ci\`, \`make.lint\`,
 bundler, or test runners directly on the host. A \`null\` mapping means the
 capability is absent: skip or degrade with a note, never improvise a raw
 host command.
+
 $END_MARKER
 BLOCK
 

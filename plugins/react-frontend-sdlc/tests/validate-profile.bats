@@ -160,3 +160,43 @@ PYEOF
   [[ "$output" == *"'quality.eslint_errors' value 5 relaxed above shipped default 0"* ]]
   [[ "$output" == *"3 violation(s)"* ]]
 }
+
+# --- Lighthouse: range, not raise-only -------------------------------------
+#
+# The Lighthouse budget that actually gates a repository lives in that repo's
+# own lighthouserc config; the profile only describes it. Anchoring the
+# raise-only rule to a constant borrowed from another project made repos with
+# genuinely lower budgets unrepresentable — the honest value failed validation
+# and a validating value described a gate that could never go green. These
+# cases pin the replacement contract: any 0-100 integer is legal, anything
+# outside that is not.
+
+@test "Lighthouse values below the old shipped constants are legal (range, not floor)" {
+  local f="$BATS_TEST_TMPDIR/low-lighthouse.yml"
+  sed -e 's/^\( *lighthouse_desktop:\).*/\1 85/' \
+      -e 's/^\( *lighthouse_mobile:\).*/\1 40/' \
+      "$PROFILES/valid.yml" >"$f"
+  grep -q 'lighthouse_desktop: 85' "$f"
+  grep -q 'lighthouse_mobile: 40' "$f"
+  run "$VALIDATOR" "$f"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *VIOLATION* ]]
+}
+
+@test "Lighthouse value above 100 is rejected and names the key" {
+  local f="$BATS_TEST_TMPDIR/high-lighthouse.yml"
+  sed -e 's/^\( *lighthouse_desktop:\).*/\1 101/' "$PROFILES/valid.yml" >"$f"
+  run "$VALIDATOR" "$f"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"quality.lighthouse_desktop"* ]]
+  [[ "$output" == *"outside the valid range 0-100"* ]]
+}
+
+@test "non-integer Lighthouse value is rejected, not silently coerced" {
+  local f="$BATS_TEST_TMPDIR/frac-lighthouse.yml"
+  sed -e 's/^\( *lighthouse_mobile:\).*/\1 0.4/' "$PROFILES/valid.yml" >"$f"
+  run "$VALIDATOR" "$f"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"quality.lighthouse_mobile"* ]]
+  [[ "$output" == *"is not an integer"* ]]
+}

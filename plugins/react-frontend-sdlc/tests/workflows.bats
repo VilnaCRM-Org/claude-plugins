@@ -150,13 +150,94 @@ run_wf() { # <workflow-file> <scenario-file>
   echo "$output" | jq -e '[.calls[] | select(.agentType == "react-frontend-sdlc:react-implementer")] | length == 6'
   echo "$output" | jq -e '[.calls[] | select(.label == "workflow:react-frontend-sdlc:fe-sdlc-review-panel")] | length == 2'
   echo "$output" | jq -e '[.calls[] | select(.label == "workflow:react-frontend-sdlc:fe-sdlc-pr-until-green")][0].args == {"pr":7,"reviewers":"coderabbit,cubic"}'
-  echo "$output" | jq -e '.phases == ["Setup check","Resolve plan","Implement","Implement","Review","QA","Implement","Implement","Review","QA","Finish PR"]'
+  echo "$output" | jq -e '[.calls[] | select(.label == "workflow:react-frontend-sdlc:fe-sdlc-fr-nfr-review")] | length == 2 and (.[0].args == {"slug":"currency-field"})'
+  echo "$output" | jq -e '.result.degrade_notes | any(contains("gate runner SKIPPED"))'
+  echo "$output" | jq -e '.phases == ["Setup check","Resolve plan","Implement","Implement","Review","FR/NFR gate","QA","Implement","Implement","Review","FR/NFR gate","QA","Finish PR"]'
+}
+
+@test "feature: the FR/NFR gate runs after the review panel and before QA, and a gate that found no spec bundle escalates instead of passing" {
+  run_wf fe-sdlc-feature.js feat-gate-skipped.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and .result.stage == "fr-nfr-gate" and (.result.escalation | contains("found no BMAD spec bundle") and contains("run /fe-sdlc-plan"))'
+  echo "$output" | jq -e '.phases == ["Setup check","Resolve plan","Implement","Implement","Review","FR/NFR gate"]'
+  echo "$output" | jq -e '[.calls[] | select(.label == "qa-visual-tester")] | length == 0'
 }
 
 @test "feature: when the nested workflow cannot be resolved it escalates with the manual commands" {
   run_wf fe-sdlc-feature.js feat-no-nested.json
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("/react-frontend-sdlc:fe-sdlc-review-panel"))'
+}
+
+# --- fe-sdlc-fr-nfr-review ------------------------------------------------------------
+
+@test "fr-nfr-review: an invalid profile escalates before the gate runs" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-scope-blocked.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and (.calls | length == 1) and (.result.escalation | contains("stage: fr-nfr-review") and contains("run /fe-sdlc-setup"))'
+}
+
+@test "fr-nfr-review: without a BMAD spec bundle the gate is reported not applicable, nothing is dispatched, and no finding is invented" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-no-specs.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "SUCCESS-WITH-REPORT" and .result.skipped == true and .result.iterations == 0 and (.calls | length == 1)'
+  echo "$output" | jq -e '.result.degrade_notes | any(contains("no BMAD spec bundle found") and contains("specs/ghost/") and contains("/fe-sdlc-plan"))'
+  echo "$output" | jq -e '.calls[0].prompt | contains("specs/ghost/")'
+}
+
+@test "fr-nfr-review: findings are fixed by react-implementer, the reviewer resumes from the ledger, and the loop exits on new_findings=0 PASS" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-converges.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "SUCCESS" and .result.skipped == false and .result.iterations == 2 and .result.specs == "specs/alpha-login/" and (.result.fixed | length == 2)'
+  echo "$output" | jq -r '.calls[].label' >"$BATS_TEST_TMPDIR/labels"
+  diff <(cat "$BATS_TEST_TMPDIR/labels") <(printf '%s\n' scope 'fr-nfr-reviewer 1/5' 'fix:src/modules/alpha' 'fix:tests/unit/modules' 'fr-nfr-reviewer 2/5')
+  echo "$output" | jq -e '.phases == ["Scope","Gate","Fix","Gate"]'
+  echo "$output" | jq -e '.calls[1].agentType == "react-frontend-sdlc:fr-nfr-reviewer" and .calls[2].agentType == "react-frontend-sdlc:react-implementer"'
+  echo "$output" | jq -e '.calls[0].prompt | contains("use \"origin/main\"") and contains("specs/alpha-login/")'
+  echo "$output" | jq -e '.calls[1].prompt | contains("No prior ledger") and contains("fr-nfr-gate.sh") and contains("run it exactly once") and contains("Edit nothing")'
+  echo "$output" | jq -e '.calls[2].prompt | contains("FR-2") and contains("Never suppress a finding") and contains("Run no git")'
+  echo "$output" | jq -e '.calls[4].prompt | contains("iteration 1: new_findings=2 verdict=FAIL findings=[FR-2: validation error not announced; NFR-3: negative case untested]")'
+  echo "$output" | jq -e '.result.ledger | length == 2 and .[1].new_findings == 0'
+}
+
+@test "fr-nfr-review: the gate loop is bounded at 5 iterations and escalates with the canonical block" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-exhausted.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and .result.iterations == 5 and (.result.escalation | contains("iteration: 5/5") and contains("5 gate iterations still report findings") and contains("FR-2"))'
+  echo "$output" | jq -e '[.calls[] | select(.agentType == "react-frontend-sdlc:fr-nfr-reviewer")] | length == 5'
+  echo "$output" | jq -e '[.calls[] | select(.agentType == "react-frontend-sdlc:react-implementer")] | length == 5'
+  echo "$output" | jq -e '.logs | any(contains("not converging"))'
+}
+
+@test "fr-nfr-review: a gate run without a findings count consumes one iteration and is re-run once, twice in a row escalates" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-transport.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "SUCCESS-WITH-REPORT" and .result.iterations == 2 and (.result.degrade_notes | any(contains("findings count unknown")))'
+  echo "$output" | jq -e '[.calls[] | select(.agentType == "react-frontend-sdlc:react-implementer")] | length == 0'
+  run_wf fe-sdlc-fr-nfr-review.js fnr-transport-twice.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and .result.iterations == 2 and (.result.escalation | contains("2 consecutive iterations"))'
+}
+
+@test "fr-nfr-review: a FAIL verdict without an actionable finding escalates instead of looping or passing" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-fail-no-findings.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and .result.iterations == 1 and (.result.escalation | contains("no actionable finding") and contains("manual evidence absent"))'
+}
+
+@test "fr-nfr-review: a manually built matrix (runner SKIPPED) passes only as SUCCESS-WITH-REPORT" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-skipped-runner.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "SUCCESS-WITH-REPORT" and (.result.degrade_notes | any(contains("SKIPPED (gh not on PATH)") and contains("no \"BMAD FR/NFR Review Gate\" commit status")))'
+}
+
+@test "fr-nfr-review: a BLOCKED react-implementer and a DEGRADED reviewer both escalate" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-fix-blocked.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("react-implementer BLOCKED") and contains("contradicts the design"))'
+  run_wf fe-sdlc-fr-nfr-review.js fnr-degraded.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("SPECS MISSING") and contains("run /fe-sdlc-plan"))'
 }
 
 # --- review-fix regressions ------------------------------------------------------------

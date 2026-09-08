@@ -110,9 +110,18 @@ null-substitution precedent across the review-machinery targets.
 Shipped defaults are the **minimum bar**. A profile may tighten the bar,
 never relax it:
 
-- Floors (`quality.coverage_*`, `quality.mutation_msi`,
-  `quality.lighthouse_desktop`, `quality.lighthouse_mobile`) may be
-  **raised** above the defaults, never lowered.
+- Floors (`quality.coverage_*`, `quality.mutation_msi`) may be **raised**
+  above the defaults, never lowered.
+- The Lighthouse values (`quality.lighthouse_desktop`,
+  `quality.lighthouse_mobile`) are validated as a **range**, `0`-`100`, not as
+  a raise-only floor. The budget that actually gates a repository lives in that
+  repository's own `lighthouserc*` config; the profile only describes it, so a
+  constant carried over from another project cannot be the raise-only anchor
+  without making some repositories unrepresentable. A statically exported,
+  client-rendered marketing site legitimately budgets mobile performance far
+  below an SPA dashboard. Record the repo's real floor here — the minimum
+  across the audited URLs — and tighten it in `lighthouserc*`, which is where
+  the ratchet belongs.
 - Ceilings (`quality.jscpd_clones`, `quality.eslint_errors`,
   `quality.eslint_warnings`, `quality.tsc_errors`,
   `quality.markdownlint_errors`, `quality.depcruise_violations`,
@@ -139,8 +148,8 @@ never relax it:
 | `quality.depcruise_violations` | yes      | ceiling (fixed)         | `0`                                        |
 | `quality.metrics_enforced`     | yes      | bool (must stay `true`) | `true`                                     |
 | `quality.visual_diffs`         | yes      | ceiling (fixed)         | `0`                                        |
-| `quality.lighthouse_desktop`   | yes      | floor (raise-only)      | `95`                                       |
-| `quality.lighthouse_mobile`    | yes      | floor (raise-only)      | `85`                                       |
+| `quality.lighthouse_desktop`   | yes      | range `0`-`100`         | `95`                                       |
+| `quality.lighthouse_mobile`    | yes      | range `0`-`100`         | `85`                                       |
 
 `quality.mutation_msi` is seeded from the target repo's
 `stryker.config.mjs` `break` threshold and is raise-only thereafter: the

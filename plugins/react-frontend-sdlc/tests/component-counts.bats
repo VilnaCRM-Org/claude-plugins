@@ -2,7 +2,7 @@
 # Component-count + load-integrity tests (NFR-1).
 #
 # Asserts the exact install-cache layout — 10 commands / 7 agents /
-# 86 skills + 2 loose meta-guides / 3 workflows — so the suite fails when any
+# 86 skills + 2 loose meta-guides / 4 workflows — so the suite fails when any
 # component file is removed or added. Also checks the load-integrity
 # invariants the CI frontmatter-check and manifest-validate jobs
 # enforce, so a broken component is caught locally before push.
@@ -10,7 +10,7 @@
 # `claude plugin` listing smoke (NFR-1): after
 # `claude plugin install react-frontend-sdlc@vilnacrm-plugins`, the
 # `/plugin` manager must list all 10 commands, 7 agents, 86 skills and
-# 3 workflows;
+# 4 workflows;
 # these counts are the canonical reference for that manual check.
 
 setup() {
@@ -68,10 +68,10 @@ assert_frontmatter_keys() {
   [ "$output" -eq 86 ]
 }
 
-@test "exactly 3 workflow scripts (workflows/*.js)" {
+@test "exactly 4 workflow scripts (workflows/*.js)" {
   run bash -c "ls '$PLUGIN_ROOT'/workflows/*.js | wc -l"
   [ "$status" -eq 0 ]
-  [ "$output" -eq 3 ]
+  [ "$output" -eq 4 ]
   for f in "$PLUGIN_ROOT"/workflows/*.js; do
     head -n1 "$f" | grep -q '^export const meta = {' \
       || { echo "workflow must open with an export const meta literal: $f"; return 1; }

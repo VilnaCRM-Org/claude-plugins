@@ -1,0 +1,3 @@
+{"args":"--slug ghost","replies":[
+ {"match":"^scope$","reply":{"profile_valid":true,"blocked":null,"base":"origin/main","files":["src/a.tsx"],"specs_present":false,"slug":null,"spec_files":[],"summary":"x"}}
+]}

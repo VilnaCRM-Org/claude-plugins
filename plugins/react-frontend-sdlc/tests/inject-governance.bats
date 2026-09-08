@@ -406,3 +406,63 @@ EOF
   # no temp litter left behind by the refused write
   [ -z "$(ls -A "$REPO" | grep sdlc-governance || true)" ]
 }
+
+# --- Downstream-formatter safety (markdownlint MD013 + Prettier markdown) ---
+#
+# The managed block lands in repositories that run Prettier and markdownlint
+# over their Markdown. Two emitted-text properties keep it gate-clean there,
+# and both are invisible until a downstream repo goes red:
+#
+#  1. No emitted line may exceed 100 characters. markdownlint's MD013 default
+#     line-length is 80 and the common tightened setting is 100; a longer line
+#     fails the consumer's `lint-md` on a block they are told not to edit.
+#  2. No emitted line may BEGIN with an ordered-list marker (`0.`, `1.`, …).
+#     Prettier's Markdown printer must not leave a numeric token at the start
+#     of a line, because re-parsing would read it as a list item — so it joins
+#     that line onto the previous one. That join is what silently manufactures
+#     an over-long line even when every authored line is short: the wrap
+#     `…ceilings stay at` / `0. Never lower them …` became one 144-char line.
+#
+# Assert on the rendered output rather than the heredoc so any future edit to
+# the block text is covered automatically.
+
+@test "no emitted governance line exceeds 100 characters (markdownlint MD013)" {
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  local long
+  long="$(awk 'length > 100 {printf "%d:%d:%s\n", NR, length, $0}' "$REPO/AGENTS.md")"
+  [ -z "$long" ] || {
+    echo "lines over 100 chars:"
+    echo "$long"
+    false
+  }
+}
+
+@test "no emitted governance line starts an ordered list (Prettier would join it)" {
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  local offenders
+  offenders="$(awk '/^[0-9]+\. / {printf "%d:%s\n", NR, $0}' "$REPO/AGENTS.md")"
+  [ -z "$offenders" ] || {
+    echo "lines beginning with an ordered-list marker:"
+    echo "$offenders"
+    false
+  }
+}
+
+@test "markers are blank-line separated from the block body (Prettier stability)" {
+  # Prettier's Markdown printer separates an HTML block from an adjacent
+  # heading or paragraph with a blank line. Emitting the markers flush against
+  # the body therefore makes the block un-idempotent in any repo that runs
+  # Prettier: `make format` inserts the blank lines, the next setup run renders
+  # them away again, and the two tools rewrite the file forever.
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  local begin_line after_begin end_line before_end
+  begin_line="$(grep -nxF "$BEGIN" "$REPO/AGENTS.md" | cut -d: -f1)"
+  end_line="$(grep -nxF "$END" "$REPO/AGENTS.md" | cut -d: -f1)"
+  after_begin="$(sed -n "$((begin_line + 1))p" "$REPO/AGENTS.md")"
+  before_end="$(sed -n "$((end_line - 1))p" "$REPO/AGENTS.md")"
+  [ -z "$after_begin" ] || { echo "expected blank after begin marker, got: $after_begin"; false; }
+  [ -z "$before_end" ] || { echo "expected blank before end marker, got: $before_end"; false; }
+}

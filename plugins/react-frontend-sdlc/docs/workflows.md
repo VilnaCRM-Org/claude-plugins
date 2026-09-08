@@ -1,6 +1,6 @@
 # Workflows
 
-The plugin ships three Claude Code workflow scripts under `workflows/`. A
+The plugin ships four Claude Code workflow scripts under `workflows/`. A
 workflow is a JavaScript orchestration script that Claude Code runs with the
 Workflow tool: deterministic control flow (loops, counters, fan-out) in the
 script, model judgement only inside the agents it dispatches. The commands
@@ -14,6 +14,7 @@ Invoke one by its namespaced name and pass its arguments in the prompt:
 /react-frontend-sdlc:fe-sdlc-pr-until-green 230
 /react-frontend-sdlc:fe-sdlc-pr-until-green https://github.com/acme/app/pull/230 --reviewers cubic
 /react-frontend-sdlc:fe-sdlc-review-panel currency-field --base origin/main
+/react-frontend-sdlc:fe-sdlc-fr-nfr-review currency-field --summary "UICurrencyField wired into sign-up"
 /react-frontend-sdlc:fe-sdlc-feature "Add a UICurrencyField component and wire it into sign-up"
 ```
 
@@ -101,26 +102,74 @@ Arguments: the specs slug and optionally `--base <ref>`; or
 `capabilities.dynamic_a11y_testing` is false) is a degrade note; a lens
 that reports `BLOCKED` escalates.
 
+## `fe-sdlc-fr-nfr-review` — the BMAD FR/NFR gate as a bounded loop
+
+The review panel runs `fr-nfr-reviewer` as one lens among several and
+verifies its findings like any other. This workflow is the gate itself, the
+loop the [bmad-fr-nfr-review-gate](../skills/bmad-fr-nfr-review-gate/SKILL.md)
+skill describes, and it runs **only when the implemented feature has a BMAD
+spec bundle**:
+
+1. **Scope** — one agent validates the profile, computes the changed-file
+   set against the diff base, and locates the spec bundle: the given
+   `specs/<slug>/`, or the newest one whose prd, epics-stories or brief
+   names the changed files. A bundle counts as present only when it holds
+   at least one of prd, architecture, epics-stories. Without one the run
+   ends `SUCCESS-WITH-REPORT` with `skipped: true` and a degrade note
+   pointing at `/fe-sdlc-plan` — the gate is not applicable, and nothing is
+   dispatched or invented.
+2. **Gate** — `fr-nfr-reviewer` runs the gate runner exactly once
+   (`make.fr_nfr_gate`, or `scripts/fr-nfr-gate.sh` when that key is
+   `null`), rebuilds the per-requirement matrix, and returns `verdict`,
+   `new_findings`, `gate_run` and the findings. The workflow passes the
+   prior iteration ledger back in, so "new" stays a delta and the counter
+   never resets.
+3. **Fix** — findings are grouped by directory and handed to parallel
+   `react-implementer` agents (at most four groups per iteration), TDD,
+   never a suppression or a spec edit.
+4. Repeat until an iteration reports `new_findings=0` with `verdict=PASS`
+   (`MAX_ITERATIONS=5`).
+
+Arguments: the specs slug, optionally `--base <ref>` and
+`--summary "<one line>"` (the gate's impact context); or
+`{ slug, base, summary, maxIterations }`.
+
+Escalates on an invalid profile, a `BLOCKED` reviewer or implementer, a
+`DEGRADED` reviewer (the bundle vanished between Scope and Gate — run
+`/fe-sdlc-plan`), a `FAIL` verdict that cites no actionable finding (a
+failing matrix row without a root-cause fix is a human decision), two
+consecutive gate runs without a findings count (transport failure or a
+malformed `FR_NFR_NEW_FINDINGS:` line — one such run only consumes an
+iteration and is re-run), or an exhausted counter. A gate runner the
+reviewer had to skip (`gate_run: SKIPPED (<reason>)`) means the matrix was
+built by hand and no `BMAD FR/NFR Review Gate` commit status exists, so the
+run can end only as `SUCCESS-WITH-REPORT`, never `SUCCESS`. A findings
+count that fails to decrease across three iterations is logged as
+non-converging so the ledger explains an eventual escalation.
+
 ## `fe-sdlc-feature` — the whole loop, unattended
 
-Composes the plugin's stages for one planned feature and nests the two
+Composes the plugin's stages for one planned feature and nests the three
 workflows above:
 
-| Stage        | Mechanism                                                                                                       | Bound                                     |
-| ------------ | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| Setup check  | `validate-profile.sh` + `setup-preflight.sh`                                                                    | halt → `/fe-sdlc-setup`                   |
-| Resolve plan | adopt the managed issue and `specs/<slug>/`; follow `/fe-sdlc-issue` / `/fe-sdlc-plan` once if missing          | one attempt, then escalate                |
-| Implement    | `react-implementer` per independent story in parallel, dependent stories one at a time                          | 5 rounds for the run; `BLOCKED` escalates |
-| Review       | `workflow('react-frontend-sdlc:fe-sdlc-review-panel')`                                                          | the panel's own guard                     |
-| QA           | `qa-visual-tester` against the running production-parity stack                                                  | `FAIL` loops back to Implement, max 2     |
-| Finish PR    | PR create/update per `/fe-sdlc-finish-pr` step 1, then `workflow('react-frontend-sdlc:fe-sdlc-pr-until-green')` | the finisher's own counters               |
+| Stage        | Mechanism                                                                                                       | Bound                                       |
+| ------------ | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Setup check  | `validate-profile.sh` + `setup-preflight.sh`                                                                    | halt → `/fe-sdlc-setup`                     |
+| Resolve plan | adopt the managed issue and `specs/<slug>/`; follow `/fe-sdlc-issue` / `/fe-sdlc-plan` once if missing          | one attempt, then escalate                  |
+| Implement    | `react-implementer` per independent story in parallel, dependent stories one at a time                          | 5 rounds for the run; `BLOCKED` escalates   |
+| Review       | `workflow('react-frontend-sdlc:fe-sdlc-review-panel')`                                                          | the panel's own guard                       |
+| FR/NFR gate  | `workflow('react-frontend-sdlc:fe-sdlc-fr-nfr-review')` against the resolved `specs/<slug>/`                    | the gate's own counter; `skipped` escalates |
+| QA           | `qa-visual-tester` against the running production-parity stack                                                  | `FAIL` loops back to Implement, max 2       |
+| Finish PR    | PR create/update per `/fe-sdlc-finish-pr` step 1, then `workflow('react-frontend-sdlc:fe-sdlc-pr-until-green')` | the finisher's own counters                 |
 
 Arguments: the task text or issue URL; or `{ task, slug, issue, reviewers }`.
 Resumability comes from the artifacts: a story already checked off, an
 existing issue, or a readiness `PASS` is adopted, never redone. If the
 runtime cannot resolve a nested workflow by name the run escalates with the
-two manual commands to continue by hand rather than duplicating their
-logic.
+manual commands to continue by hand rather than duplicating their logic.
+The plan stage guarantees the spec bundle, so a gate run that reports
+`skipped: true` there is a contradiction and escalates to `/fe-sdlc-plan`
+instead of passing.
 
 ## How the workflows find the plugin
 
