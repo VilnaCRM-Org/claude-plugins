@@ -44,6 +44,7 @@ out_file=""
 trap 'rm -f "$block_file" "$new_file" "$snap_file" ${out_file:+"$out_file"}' EXIT
 cat >"$block_file" <<BLOCK
 $BEGIN_MARKER
+
 ## react-frontend-sdlc governance (managed block — do not edit between markers)
 
 This repository's SDLC is driven by the react-frontend-sdlc plugin through the
@@ -84,6 +85,7 @@ mapped in \`.claude/react-sdlc.yml\` (\`make.*\` — \`make.ci\`, \`make.lint\`,
 bundler, or test runners directly on the host. A \`null\` mapping means the
 capability is absent: skip or degrade with a note, never improvise a raw
 host command.
+
 $END_MARKER
 BLOCK
 

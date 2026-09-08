@@ -449,3 +449,20 @@ EOF
     false
   }
 }
+
+@test "markers are blank-line separated from the block body (Prettier stability)" {
+  # Prettier's Markdown printer separates an HTML block from an adjacent
+  # heading or paragraph with a blank line. Emitting the markers flush against
+  # the body therefore makes the block un-idempotent in any repo that runs
+  # Prettier: `make format` inserts the blank lines, the next setup run renders
+  # them away again, and the two tools rewrite the file forever.
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  local begin_line after_begin end_line before_end
+  begin_line="$(grep -nxF "$BEGIN" "$REPO/AGENTS.md" | cut -d: -f1)"
+  end_line="$(grep -nxF "$END" "$REPO/AGENTS.md" | cut -d: -f1)"
+  after_begin="$(sed -n "$((begin_line + 1))p" "$REPO/AGENTS.md")"
+  before_end="$(sed -n "$((end_line - 1))p" "$REPO/AGENTS.md")"
+  [ -z "$after_begin" ] || { echo "expected blank after begin marker, got: $after_begin"; false; }
+  [ -z "$before_end" ] || { echo "expected blank before end marker, got: $before_end"; false; }
+}
