@@ -12,18 +12,17 @@ export const meta = {
 }
 
 const OPTS = { slug: null, base: null, summary: null, maxIterations: 5 }
-if (args != null) {
-  if (typeof args === 'object') Object.assign(OPTS, args)
-  else {
-    const tokens = String(args).trim().split(/\s+/).filter(Boolean)
-    for (let i = 0; i < tokens.length; i++) {
-      if (tokens[i] === '--base') OPTS.base = tokens[++i] ?? null
-      else if (tokens[i] === '--slug') OPTS.slug = tokens[++i] ?? null
-      else if (tokens[i] === '--summary') OPTS.summary = tokens[++i] ?? null
-      else if (!OPTS.slug && !tokens[i].startsWith('--')) OPTS.slug = tokens[i]
-    }
+const FLAGS = { '--base': 'base', '--slug': 'slug', '--summary': 'summary' }
+function parseTokens(text) {
+  const tokens = text.trim().split(/\s+/).filter(Boolean)
+  for (let i = 0; i < tokens.length; i++) {
+    const key = FLAGS[tokens[i]]
+    if (key) OPTS[key] = tokens[++i] ?? null
+    else if (!OPTS.slug && !tokens[i].startsWith('--')) OPTS.slug = tokens[i]
   }
 }
+if (args != null && typeof args === 'object') Object.assign(OPTS, args)
+else if (args != null) parseTokens(String(args))
 
 const PLUGIN_ROOT = [
   'Resolve the react-frontend-sdlc plugin root into P and echo it:',
@@ -160,6 +159,76 @@ function gatePrompt(iteration) {
 }
 
 const keyOf = (f) => `${f.requirement}:${f.title.toLowerCase().replace(/\s+/g, ' ').trim()}`
+const dedupe = (list) => list.filter((f, i, all) => all.findIndex((g) => keyOf(g) === keyOf(f)) === i)
+const isComplete = (r) => Boolean(r) && r.status === 'COMPLETE'
+
+function gateEscalation(gate, iteration) {
+  if (!gate) return escalate(iteration, 'fr-nfr-reviewer returned nothing', 're-run; if it repeats, check the agent definition')
+  if (gate.status === 'BLOCKED') return escalate(iteration, `fr-nfr-reviewer BLOCKED — ${gate.note || ''}`, 'fix the blocking cause (plugin root, profile, gate runner), then re-run')
+  if (gate.verdict === 'DEGRADED') {
+    return escalate(iteration, `fr-nfr-reviewer reported the spec bundle specs/${scope.slug}/ missing or empty although scope found it — ${gate.note || ''}`, 'run /fe-sdlc-plan for this feature, then re-run')
+  }
+  return null
+}
+
+function recordGate(gate, iteration, findings) {
+  if (/^SKIPPED/i.test(gate.gate_run || '')) {
+    degradeNotes.push(`iteration ${iteration}: gate runner ${gate.gate_run} — matrix built manually by fr-nfr-reviewer, no "BMAD FR/NFR Review Gate" commit status was posted`)
+  }
+  ledger.push({ iteration, new_findings: gate.new_findings, verdict: gate.verdict, findings: findings.map((f) => `${f.requirement}: ${f.title}`) })
+  journal.push(`iteration ${iteration}: gate=${gate.gate_run} new_findings=${gate.new_findings ?? 'unknown'} verdict=${gate.verdict}`)
+}
+
+function logConvergence(iteration, count) {
+  const previous = ledger.slice(-3, -1).map((l) => l.new_findings).filter(Number.isInteger)
+  if (previous.length === 2 && Math.min(...previous) <= count) {
+    log(`iteration ${iteration}: new findings did not decrease across the last three iterations (${previous.join(', ')}, ${count}) — the loop is not converging`)
+  }
+}
+
+function success(iteration) {
+  return {
+    result: degradeNotes.length ? 'SUCCESS-WITH-REPORT' : 'SUCCESS',
+    skipped: false,
+    iterations: iteration,
+    exit_condition: 'fr-nfr-reviewer reported new_findings=0 with verdict=PASS',
+    specs: `specs/${scope.slug}/`,
+    fixed: ledger.flatMap((l) => l.findings),
+    ledger,
+    degrade_notes: degradeNotes,
+    journal,
+  }
+}
+
+function fixPrompt(group, iteration) {
+  return [
+    `Fix these ${group.length} FR/NFR gate finding(s) from iteration ${iteration}/${OPTS.maxIterations} against specs/${scope.slug}/; touch only the files they cite plus their tests. TDD: reproduce with a failing test where the requirement is behavioral, then fix the root cause.`,
+    ...group.map((f) => `- ${f.requirement} — ${f.file}${f.line ? `:${f.line}` : ''} — ${f.title}\n  evidence: ${f.evidence}\n  fix: ${f.fix}`),
+    'Never suppress a finding, edit a threshold or a spec, or add data-testid. Run no git. Report status, files_modified, tests_status, recommendation.',
+  ].join('\n')
+}
+
+async function dispatchFixes(findings, iteration) {
+  const groups = new Map()
+  for (const f of findings) {
+    const dir = f.file.split('/').slice(0, 3).join('/')
+    groups.set(dir, [...(groups.get(dir) || []), f])
+  }
+  const groupKeys = [...groups.keys()].slice(0, 4)
+  if (groups.size > 4) log(`fix fan-out capped at 4 groups; ${groups.size - 4} group(s) are left for the next gate iteration to re-detect`)
+  const fixes = await parallel(
+    groupKeys.map((key) => () =>
+      agent(fixPrompt(groups.get(key), iteration), { label: `fix:${key}`, phase: 'Fix', agentType: 'react-frontend-sdlc:react-implementer', schema: FIX_SCHEMA }),
+    ),
+  )
+  const blockedFix = fixes.find((r) => r && r.status === 'BLOCKED')
+  if (blockedFix) return escalate(iteration, `react-implementer BLOCKED — ${blockedFix.recommendation || ''}`, 'resolve the blocker by hand, then re-run')
+  const completed = fixes.filter(isComplete)
+  if (completed.length < groupKeys.length) log(`${groupKeys.length - completed.length} fix group(s) did not complete; the next gate iteration re-detects what is still unmet`)
+  journal.push(`iteration ${iteration}: fixed groups=${completed.length}/${groups.size} files=${completed.reduce((n, r) => n + (r.files_modified || 0), 0)}`)
+  return null
+}
+
 let iteration = 0
 let unknownStreak = 0
 
@@ -167,20 +236,12 @@ while (iteration < OPTS.maxIterations) {
   iteration += 1
   phase('Gate')
   const gate = await agent(gatePrompt(iteration), { label: `fr-nfr-reviewer ${iteration}/${OPTS.maxIterations}`, phase: 'Gate', agentType: 'react-frontend-sdlc:fr-nfr-reviewer', schema: GATE_SCHEMA })
-  if (!gate) return escalate(iteration, 'fr-nfr-reviewer returned nothing', 're-run; if it repeats, check the agent definition')
-  if (gate.status === 'BLOCKED') return escalate(iteration, `fr-nfr-reviewer BLOCKED — ${gate.note || ''}`, 'fix the blocking cause (plugin root, profile, gate runner), then re-run')
-  if (gate.verdict === 'DEGRADED') {
-    return escalate(iteration, `fr-nfr-reviewer reported the spec bundle specs/${scope.slug}/ missing or empty although scope found it — ${gate.note || ''}`, 'run /fe-sdlc-plan for this feature, then re-run')
-  }
-  if (/^SKIPPED/i.test(gate.gate_run || '')) {
-    const skipNote = `iteration ${iteration}: gate runner ${gate.gate_run} — matrix built manually by fr-nfr-reviewer, no "BMAD FR/NFR Review Gate" commit status was posted`
-    if (!degradeNotes.includes(skipNote)) degradeNotes.push(skipNote)
-  }
-  const findings = (gate.findings || []).filter((f, i, all) => all.findIndex((g) => keyOf(g) === keyOf(f)) === i)
-  ledger.push({ iteration, new_findings: gate.new_findings, verdict: gate.verdict, findings: findings.map((f) => `${f.requirement}: ${f.title}`) })
-  journal.push(`iteration ${iteration}: gate=${gate.gate_run} new_findings=${gate.new_findings ?? 'unknown'} verdict=${gate.verdict}`)
+  const halted = gateEscalation(gate, iteration)
+  if (halted) return halted
+  const findings = dedupe(gate.findings || [])
+  recordGate(gate, iteration, findings)
 
-  if (gate.new_findings === null || gate.new_findings === undefined) {
+  if (!Number.isInteger(gate.new_findings)) {
     unknownStreak += 1
     log(`iteration ${iteration}: the gate run reported no findings count (${gate.note || 'transport failure or malformed contract line'}); consumed one iteration`)
     if (unknownStreak >= 2) return escalate(iteration, `the gate run could not report a findings count in ${unknownStreak} consecutive iterations — ${gate.note || ''}`, 'restore the claude/gh transport for the gate runner, then re-run')
@@ -188,55 +249,16 @@ while (iteration < OPTS.maxIterations) {
     continue
   }
   unknownStreak = 0
+  logConvergence(iteration, gate.new_findings)
 
-  const previous = ledger.length >= 3 ? ledger.slice(-3, -1).map((l) => l.new_findings) : []
-  if (previous.length === 2 && previous.every((n) => typeof n === 'number' && gate.new_findings >= n)) {
-    log(`iteration ${iteration}: new findings did not decrease across the last three iterations (${previous.join(', ')}, ${gate.new_findings}) — the loop is not converging`)
-  }
-
-  if (gate.new_findings === 0 && gate.verdict === 'PASS') {
-    return {
-      result: degradeNotes.length ? 'SUCCESS-WITH-REPORT' : 'SUCCESS',
-      skipped: false,
-      iterations: iteration,
-      exit_condition: 'fr-nfr-reviewer reported new_findings=0 with verdict=PASS',
-      specs: `specs/${scope.slug}/`,
-      fixed: ledger.flatMap((l) => l.findings),
-      ledger,
-      degrade_notes: degradeNotes,
-      journal,
-    }
-  }
+  if (gate.new_findings === 0 && gate.verdict === 'PASS') return success(iteration)
   if (!findings.length) {
     return escalate(iteration, `verdict ${gate.verdict} with new_findings=${gate.new_findings} but no actionable finding — ${gate.note || 'a matrix row fails without a cited fix'}`, 'read the fr-nfr-reviewer matrix; a failing row without a root-cause fix needs a human decision (spec and implementation may disagree)')
   }
 
   phase('Fix')
-  const groups = new Map()
-  for (const f of findings) {
-    const dir = f.file.split('/').slice(0, 3).join('/')
-    groups.set(dir, [...(groups.get(dir) || []), f])
-  }
-  const groupList = [...groups.values()]
-  const groupKeys = [...groups.keys()]
-  if (groups.size > 4) log(`fix fan-out capped at 4 groups; ${groups.size - 4} group(s) are left for the next gate iteration to re-detect`)
-  const fixes = await parallel(
-    groupList.slice(0, 4).map((group, i) => () =>
-      agent(
-        [
-          `Fix these ${group.length} FR/NFR gate finding(s) from iteration ${iteration}/${OPTS.maxIterations} against specs/${scope.slug}/; touch only the files they cite plus their tests. TDD: reproduce with a failing test where the requirement is behavioral, then fix the root cause.`,
-          ...group.map((f) => `- ${f.requirement} — ${f.file}${f.line ? `:${f.line}` : ''} — ${f.title}\n  evidence: ${f.evidence}\n  fix: ${f.fix}`),
-          'Never suppress a finding, edit a threshold or a spec, or add data-testid. Run no git. Report status, files_modified, tests_status, recommendation.',
-        ].join('\n'),
-        { label: `fix:${groupKeys[i]}`, phase: 'Fix', agentType: 'react-frontend-sdlc:react-implementer', schema: FIX_SCHEMA },
-      ),
-    ),
-  )
-  const blockedFix = fixes.filter(Boolean).find((r) => r.status === 'BLOCKED')
-  if (blockedFix) return escalate(iteration, `react-implementer BLOCKED — ${blockedFix.recommendation || ''}`, 'resolve the blocker by hand, then re-run')
-  const incomplete = groupList.slice(0, 4).filter((_, i) => !fixes[i] || fixes[i].status !== 'COMPLETE').length
-  if (incomplete) log(`${incomplete} fix group(s) did not complete; the next gate iteration re-detects what is still unmet`)
-  journal.push(`iteration ${iteration}: fixed groups=${fixes.filter((r) => r && r.status === 'COMPLETE').length}/${groupList.length} files=${fixes.filter(Boolean).reduce((n, r) => n + (r.files_modified || 0), 0)}`)
+  const blocked = await dispatchFixes(findings, iteration)
+  if (blocked) return blocked
 }
 
 return escalate(iteration, `${OPTS.maxIterations} gate iterations still report findings: ${ledger[ledger.length - 1]?.findings.slice(0, 3).join('; ') || 'see the ledger'}`, 'review the last fr-nfr-reviewer matrix by hand; the change set is not converging on the spec')
