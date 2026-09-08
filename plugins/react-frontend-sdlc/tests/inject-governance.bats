@@ -406,3 +406,46 @@ EOF
   # no temp litter left behind by the refused write
   [ -z "$(ls -A "$REPO" | grep sdlc-governance || true)" ]
 }
+
+# --- Downstream-formatter safety (markdownlint MD013 + Prettier markdown) ---
+#
+# The managed block lands in repositories that run Prettier and markdownlint
+# over their Markdown. Two emitted-text properties keep it gate-clean there,
+# and both are invisible until a downstream repo goes red:
+#
+#  1. No emitted line may exceed 100 characters. markdownlint's MD013 default
+#     line-length is 80 and the common tightened setting is 100; a longer line
+#     fails the consumer's `lint-md` on a block they are told not to edit.
+#  2. No emitted line may BEGIN with an ordered-list marker (`0.`, `1.`, …).
+#     Prettier's Markdown printer must not leave a numeric token at the start
+#     of a line, because re-parsing would read it as a list item — so it joins
+#     that line onto the previous one. That join is what silently manufactures
+#     an over-long line even when every authored line is short: the wrap
+#     `…ceilings stay at` / `0. Never lower them …` became one 144-char line.
+#
+# Assert on the rendered output rather than the heredoc so any future edit to
+# the block text is covered automatically.
+
+@test "no emitted governance line exceeds 100 characters (markdownlint MD013)" {
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  local long
+  long="$(awk 'length > 100 {printf "%d:%d:%s\n", NR, length, $0}' "$REPO/AGENTS.md")"
+  [ -z "$long" ] || {
+    echo "lines over 100 chars:"
+    echo "$long"
+    false
+  }
+}
+
+@test "no emitted governance line starts an ordered list (Prettier would join it)" {
+  run "$INJECT" "$REPO"
+  [ "$status" -eq 0 ]
+  local offenders
+  offenders="$(awk '/^[0-9]+\. / {printf "%d:%s\n", NR, $0}' "$REPO/AGENTS.md")"
+  [ -z "$offenders" ] || {
+    echo "lines beginning with an ordered-list marker:"
+    echo "$offenders"
+    false
+  }
+}
