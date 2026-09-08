@@ -95,6 +95,23 @@ check_floor() {
 }
 
 # Violation-count ceilings: shipped default 0 may not be relaxed (ADR-7).
+check_range() {
+  local key=$1 lo=$2 hi=$3
+  local val
+  val="$(yaml_get "$PROFILE" "$key")"
+  if [[ -z "$val" ]]; then
+    violation "required key '$key' missing or null"
+    return 0
+  fi
+  if ! is_int "$val"; then
+    violation "key '$key' value '$val' is not an integer"
+    return 0
+  fi
+  if num_lt "$val" "$lo" || num_lt "$hi" "$val"; then
+    violation "key '$key' value $val is outside the valid range ${lo}-${hi}"
+  fi
+}
+
 check_ceiling() {
   local key=$1 ceiling=$2
   local val
@@ -182,10 +199,17 @@ check_floor quality.coverage_lines 100
 # quality.mutation_msi is seeded from the target repo's stryker.config.mjs
 # `break` threshold (floored to an integer) and is raise-only thereafter.
 check_floor quality.mutation_msi 2
-# Lighthouse floors are integer percents (95 == minScore 0.95) so the same
-# wrap-safe integer check_floor applies; raise-only above the shipped bar.
-check_floor quality.lighthouse_desktop 95
-check_floor quality.lighthouse_mobile 85
+# Lighthouse values are integer percents (95 == minScore 0.95), validated as a
+# RANGE rather than a raise-only floor. The authoritative budget is the consumer
+# repo's own `lighthouserc*` config, which the profile only describes -- so a
+# constant carried over from another project cannot be the raise-only anchor
+# without making some repositories unrepresentable. A statically exported,
+# client-rendered marketing site legitimately budgets mobile performance far
+# below an SPA dashboard; hard-flooring at 95/85 left such a repo with no value
+# that is both true and valid: the honest number failed validation, and a
+# passing number described a gate that could never go green.
+check_range quality.lighthouse_desktop 0 100
+check_range quality.lighthouse_mobile 0 100
 check_ceiling quality.jscpd_clones 0
 check_ceiling quality.eslint_errors 0
 check_ceiling quality.eslint_warnings 0
