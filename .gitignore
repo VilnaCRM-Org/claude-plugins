@@ -16,3 +16,5 @@ bmalph/
 
 # BMAD planning scratch (workflow driver)
 specs/**/.bmad-plan.mjs
+# BMALPH doctor requires this explicit entry even with .ralph/ ignored.
+.ralph/logs/
