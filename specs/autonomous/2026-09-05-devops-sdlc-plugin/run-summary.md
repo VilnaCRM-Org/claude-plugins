@@ -163,7 +163,7 @@ bounded-workflow evidence without claiming the failed original run succeeded.
 
 <!-- final-local-verification:start -->
 
-Current local campaign: v53. This source-bound record supersedes earlier final labels; earlier reports remain historical evidence.
+Current local campaign: v57. This source-bound record supersedes earlier final labels; earlier reports remain historical evidence.
 
 - 303 deterministic tests passed; measured coverage of the three operational scripts is 100% of 1,335 statements and 554 branches, with 0 excluded lines. Every recorded deterministic quality gate passed.
 - 33 baseline local operator checks and 10 followup operator checks passed. 2 unrun cloud rows remain BLOCKED.
@@ -172,7 +172,7 @@ Current local campaign: v53. This source-bound record supersedes earlier final l
 - One full behavioral simulation passed 36 catalog scenarios and 5 positive/negative calibration controls. These are proposals, not executed cloud operations.
 - Separate BMALPH review repair passed at 2/5 persistent attempts, with 70 parent validation tests. Original Story 3.1's six-call/100-limit run remains BLOCKED; no historical breaker was reset or execution relabelled.
 
-Model provenance: codex codex-cli 0.153.4: requested model `gpt-5.5`, observed model `None`, model source `requested`; codex codex-cli 0.153.4: requested model `gpt-6-astra`, observed model `None`, model source `requested`. Packaging and synthetic CLI tests do not establish authenticated native Claude execution.
+Model provenance: codex codex-cli 0.155.0-alpha.9.2: requested model `gpt-5.5`, observed model `None`, model source `requested`; codex codex-cli 0.155.0-alpha.9.2: requested model `gpt-6-astra`, observed model `None`, model source `requested`. Packaging and synthetic CLI tests do not establish authenticated native Claude execution.
 
 Historical v12 coverage used six excluded entry-point lines under the old configuration; its 100% figure applied to that measured denominator. Final zero-exclusion coverage does not retroactively change that report. Incremental v7/v8 reuse claims remain superseded; v9 made no model calls after detecting the omitted input-label dependency. This current campaign uses fresh full assessments.
 
