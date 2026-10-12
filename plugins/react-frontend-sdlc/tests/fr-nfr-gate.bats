@@ -588,3 +588,25 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"fork checkout"* && "$output" == *"statuses:write THERE"* ]]
 }
+
+@test "the review session never holds the publishing credential; the script still publishes with it" {
+  local dir="$BATS_TEST_TMPDIR/iso-bin"
+  mkdir -p "$dir"
+  cat > "$dir/claude" <<'EOF'
+#!/usr/bin/env bash
+printf 'claude %s\n' "$*" >> "$STUB_CLAUDE_LOG"
+printf 'ENV GH_TOKEN=%s GITHUB_TOKEN=%s GH_CONFIG_DIR=%s\n' "${GH_TOKEN:-unset}" "${GITHUB_TOKEN:-unset}" "${GH_CONFIG_DIR:-unset}" >> "$STUB_CLAUDE_LOG"
+printf '%s\n' "$STUB_CLAUDE_OUTPUT"
+EOF
+  cat > "$dir/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "gh $* TOKEN=${GH_TOKEN:-unset}" >> "$STUB_GH_LOG"
+EOF
+  chmod +x "$dir/claude" "$dir/gh"
+  GH_TOKEN=secret GITHUB_TOKEN=secret2 PATH="$dir:$PATH" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 0 ]
+  grep -q 'ENV GH_TOKEN=unset GITHUB_TOKEN=unset GH_CONFIG_DIR=/' "$CLAUDE_LOG"
+  ! grep -q 'secret' "$CLAUDE_LOG"
+  grep -q -- "--disallowedTools Bash(gh:\*) Bash(git push:\*)" "$CLAUDE_LOG"
+  grep -q 'statuses/.*TOKEN=secret' "$GH_LOG"
+}

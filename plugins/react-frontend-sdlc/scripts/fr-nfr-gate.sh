@@ -21,6 +21,12 @@
 # gate fails closed (failure status, exit 1): it never passes a change it
 # could not trace to a requirement.
 #
+# The review session never holds the publishing credential: it runs through
+# claude_run_isolated (lib/common.sh) with the GitHub tokens unset, an empty
+# GH_CONFIG_DIR, and gh / git push denied as tools, because it reads
+# contributor-controlled text. This script posts the status and comment itself,
+# after the session has returned.
+#
 # Runs the FR/NFR verification prompt through the claude driver (ADR-8
 # conventions: --output-format json, .result extraction,
 # --permission-mode acceptEdits (the ADR-6 plugin-wide default),
@@ -328,9 +334,9 @@ post_comment() {
 }
 
 # --- run the gate (one retry on transport failure, architecture §8) -----------
-if ! result="$(claude_run_once "$GATE_PROMPT")"; then
+if ! result="$(claude_run_isolated "$GATE_PROMPT")"; then
   log_warn "retrying once"
-  if ! result="$(claude_run_once "$GATE_PROMPT")"; then
+  if ! result="$(claude_run_isolated "$GATE_PROMPT")"; then
     post_status failure "gate could not run: claude transport failure after retry"
     die "FR/NFR gate failed: claude transport failure after one retry"
   fi

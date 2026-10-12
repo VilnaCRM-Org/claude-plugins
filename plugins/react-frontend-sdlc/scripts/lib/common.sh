@@ -302,10 +302,23 @@ except Exception:
 # claude_run_once PROMPT -> prints .result on stdout; returns 1 on a
 # non-zero claude exit, an is_error=true response, OR malformed JSON
 # (all three are transport-level failures that earn one retry).
+# With CLAUDE_RUN_ISOLATED=1 (see claude_run_isolated) the session gets no
+# GitHub credential: the token variables are unset, GH_CONFIG_DIR points at an
+# empty directory (no stored gh login), and the gh CLI and git push are denied
+# as tools.
 claude_run_once() {
-  local prompt=$1 raw result
-  if ! raw="$(claude -p "$prompt" --output-format json \
-              --permission-mode acceptEdits --max-turns 30)"; then
+  local prompt=$1 raw result rc=0 gh_config=""
+  local -a cmd=(claude -p "$prompt" --output-format json
+                --permission-mode acceptEdits --max-turns 30)
+  if [[ "${CLAUDE_RUN_ISOLATED:-0}" == 1 ]]; then
+    gh_config="$(mktemp -d)"
+    cmd=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN
+         GH_CONFIG_DIR="$gh_config" "${cmd[@]}"
+         --disallowedTools 'Bash(gh:*)' 'Bash(git push:*)')
+  fi
+  raw="$("${cmd[@]}")" || rc=$?
+  [[ -z "$gh_config" ]] || rm -rf "$gh_config"
+  if (( rc != 0 )); then
     log_warn "claude exited non-zero"
     return 1
   fi
@@ -319,6 +332,14 @@ claude_run_once() {
     return 1
   fi
   printf '%s\n' "$result"
+}
+
+# claude_run_isolated PROMPT — claude_run_once for a session that reads
+# untrusted, contributor-controlled text (PR descriptions, issues, diffs). The
+# caller keeps its own GitHub credential and publishes the outcome itself
+# after the session returns; the session never holds it.
+claude_run_isolated() {
+  CLAUDE_RUN_ISOLATED=1 claude_run_once "$1"
 }
 
 # --- project profile helpers (architecture §4) ---------------------------

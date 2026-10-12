@@ -16,12 +16,23 @@ scripts use.
 
 `scripts/fr-nfr-gate.sh` posts the mandatory `BMAD FR/NFR Review Gate`
 commit status (and its PR comment) to the repository that owns the PR. In a
-fork checkout that is the **upstream** repository, so the `gh` credential
-must hold `statuses:write` (and permission to comment) there. Run the gate
-with a maintainer credential, or from a trusted upstream workflow that does
-not execute the PR's code with write access; a fork-only token cannot
-publish the gate, and the script then fails closed and names this
-requirement. `--advisory` runs publish nothing and need no write access.
+fork checkout that is the **upstream** repository, so the publishing `gh`
+credential must hold `statuses:write` (and permission to comment) there; a
+fork-only token cannot publish the gate, and the script then fails closed
+and names this requirement. `--advisory` runs publish nothing and need no
+write access.
+
+The review session never holds that credential. It reads
+contributor-controlled text (PR description, issues, diff), so the script
+runs it through `claude_run_isolated` (`scripts/lib/common.sh`): the
+`GH_TOKEN` / `GITHUB_TOKEN` / enterprise token variables are unset, an empty
+`GH_CONFIG_DIR` hides any stored `gh` login, and `Bash(gh:*)` and
+`Bash(git push:*)` are denied as tools. The script publishes the status and
+comment itself, with its own credential, only after the session has
+returned. For fork PRs, prefer a trusted upstream workflow (for example a
+`pull_request_target` job that never checks out or executes the PR's code
+with that token) as the least-privilege publisher, over a personal
+maintainer token on a workstation.
 
 ## The settings.json allowlist
 
