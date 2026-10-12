@@ -801,3 +801,20 @@ EOF
   grep -q -- '-f state=failure' "$GH_LOG"
   [ ! -f "$CLAUDE_LOG" ]
 }
+
+@test "untracked files are always read by the reviewer, even when the diff fits" {
+  echo "export const fresh = 1" > brand-new.ts
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 0 ]
+  grep -q 'untracked: brand-new.ts' "$CLAUDE_LOG"
+  grep -q "Read every path listed after 'untracked:' before concluding, whatever the diff size" "$CLAUDE_LOG"
+  ! grep -q 'The diff above was TRUNCATED' "$CLAUDE_LOG"
+}
+
+@test "without untracked files the reviewer gets no untracked-file instruction" {
+  git add specs
+  git -c user.email=t@t -c user.name=t commit -q -m specs
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 0 ]
+  ! grep -q 'Untracked files are NOT in the diff' "$CLAUDE_LOG"
+}
