@@ -125,11 +125,18 @@ runs no git).
    row (a WCAG 2.2 AA violation — missing accessible name, broken focus
    order, insufficient contrast, an unlabeled control) blocks the stage
    verdict exactly the same way and never defers to stage 5 QA.
-   `fr-nfr-reviewer` `verdict=DEGRADED` (spec bundle missing or empty)
+   `fr-nfr-reviewer` `verdict=DEGRADED` (the named requirement source —
+   spec bundle, or PR description and linked issues — missing or empty)
    is a blocking finding, not a loop state: nothing exists to remediate
    and re-invoking cannot change the outcome, so escalate immediately —
    do NOT re-invoke the agents — with `recommended_action` "re-run
-   /fe-sdlc-plan". An `accessibility-auditor` `verdict=DEGRADED` arises
+   /fe-sdlc-plan, or link the issue / write the acceptance criteria into
+   the PR description". The FR/NFR lens runs on EVERY change set: without
+   a `specs/<slug>/` bundle it verifies against the PR description and its
+   linked issues plus the baseline NFR catalog, and a gate runner that
+   could not run (`gate_run: SKIPPED`) is a blocking finding too — the
+   gate is mandatory and only a posted green `BMAD FR/NFR Review Gate`
+   status satisfies it. An `accessibility-auditor` `verdict=DEGRADED` arises
    ONLY when the change set touches no rendered UI surface (zero
    render-path files): it is a clean no-op (a11y lens satisfied for this
    change set), recorded with a note and not re-invoked for remediation;

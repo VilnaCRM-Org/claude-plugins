@@ -52,6 +52,11 @@ story is done — or a safety mechanism stops it.
    - Stories marked **dependent** run sequentially in the order the
      artifact declares; a dependent story starts only after every
      prerequisite story is done.
+   - **Component-first UI**: component stories (a missing UI-kit
+     component, built with its Storybook story) always finish before the
+     composition story that assembles a page or feature from them. If the
+     plan bundles both in one story, the implementer still builds and
+     stories the components first, then composes.
 4. **Container-only execution** — every `react-implementer` runs build,
    test, and quality commands exclusively through the profile `make`
    map (`make.build`, `make.lint`, `make.test_unit_client`, …); an

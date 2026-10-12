@@ -150,13 +150,17 @@ function lenses(iteration) {
     agentType: 'react-frontend-sdlc:code-quality-reviewer',
     prompt: [...common, '', 'Lens: code quality per your agent contract — run the read-only quality targets from the profile make map and map every FAIL row to a finding.'].join('\n'),
   })
-  if (scope.specs_present) {
-    out.push({
-      label: 'fr-nfr-reviewer',
-      agentType: 'react-frontend-sdlc:fr-nfr-reviewer',
-      prompt: [...common, '', `Lens: FR/NFR spec compliance against specs/${scope.slug}/ per your agent contract (run the gate script once). Each unmet requirement is one finding with requirement set to its id.`].join('\n'),
-    })
-  }
+  // The FR/NFR lens is mandatory for every change set: a BMAD bundle when one
+  // exists, otherwise the PR description and its linked issues, plus the
+  // baseline NFR catalog either way.
+  const requirementSource = scope.specs_present && scope.slug
+    ? `specs/${scope.slug}/`
+    : 'the PR description and its linked issues (no BMAD spec bundle — run the gate script with --pr instead of --spec-path)'
+  out.push({
+    label: 'fr-nfr-reviewer',
+    agentType: 'react-frontend-sdlc:fr-nfr-reviewer',
+    prompt: [...common, '', `Lens: FR/NFR compliance against ${requirementSource} plus the baseline NFR catalog, per your agent contract (run the gate script once). Each unmet requirement is one finding with requirement set to its id.`].join('\n'),
+  })
   if ((scope.ui_files || []).length) {
     for (const family of OPTS.a11yFamilies) {
       out.push({

@@ -50,7 +50,7 @@ issue, re-checks `readiness.md`, re-runs the review/a11y gate, re-runs
 | 3   | implement   | Ralph `EXIT_SIGNAL` success, all stories done                                    | 5 iterations + circuit breaker                                             |
 | 4   | review      | zero new findings in last gate iteration AND a11y gate clean AND quality PASS    | 5 iterations                                                               |
 | 5   | qa          | QA verdict PASS — visual + E2E + Lighthouse + a11y (FAIL routes back to stage 3) | 5 iterations                                                               |
-| 6   | finish-pr   | CI green (or skip-with-note) + 0 unresolved AI review comments                   | 5 iterations (two independent counters: CI fix, comment resolution)        |
+| 6   | finish-pr   | CI green (or skip-with-note) + FR/NFR gate green on head + 0 open AI comments    | 5 iterations (three counters: CI fix, comments, FR/NFR gate max 3)         |
 
 ## Loop-backs
 
@@ -159,15 +159,18 @@ benefit from fan-out and unattended repetition — see
   renders one verdict (`BLOCKED`, `FIX`, `REQUEST`, `WAIT`, `READY`); the
   workflow requests the AI reviewers with the exact mentions, waits for
   their reviews, dispatches `ci-fixer` and `pr-comment-resolver`, pushes,
-  and repeats until every reachable reviewer approves the head and CI is
-  green. Its exit condition is stage 6's, made verifiable.
+  runs the mandatory FR/NFR gate on any head without a green gate status,
+  and repeats until every reachable reviewer approves the head and CI and
+  the FR/NFR gate are green. Its exit condition is stage 6's, made verifiable.
 - `/react-frontend-sdlc:fe-sdlc-review-panel` runs stage 4 with every
   lens in parallel and three refuters per finding.
 - `/react-frontend-sdlc:fe-sdlc-fr-nfr-review` runs the stage-4 BMAD
   FR/NFR gate as its own bounded loop — one `fr-nfr-reviewer` gate run per
   iteration, root-cause fixes by `react-implementer`, until zero new
-  findings with verdict PASS — and only when the feature has a
-  `specs/<slug>/` bundle; without one it reports the gate not applicable.
+  findings with verdict PASS — on every PR: against the `specs/<slug>/`
+  bundle when there is one, else the PR description and linked issues;
+  `fe-sdlc-pr-until-green` runs it on any head whose
+  `BMAD FR/NFR Review Gate` status is missing or red.
 - `/react-frontend-sdlc:fe-sdlc-feature` composes stages 0–6 for one
   planned feature and nests the three workflows above.
 

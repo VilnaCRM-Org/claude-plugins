@@ -1,7 +1,7 @@
 export const meta = {
   name: 'fe-sdlc-pr-until-green',
   description:
-    'Finish a pull request with its AI reviewers: request CodeRabbit and cubic with the exact mentions, wait for their reviews, fix CI failures and review threads, push, and repeat until every reachable reviewer approves the head and CI is green',
+    'Finish a pull request with its AI reviewers and the mandatory BMAD FR/NFR gate: run the FR/NFR review gate on every PR head that lacks a green gate status, request CodeRabbit and cubic with the exact mentions, wait for their reviews, fix CI failures and review threads, push, and repeat until CI and the FR/NFR gate are green on the head and every reachable reviewer approves it',
   whenToUse:
     'After a feature is implemented and pushed to a PR branch. Give it the PR number or URL; it loops request → wait → fix → push with bounded counters and ends SUCCESS, SUCCESS-WITH-REPORT, or ESCALATED.',
   phases: [
@@ -9,13 +9,15 @@ export const meta = {
     { title: 'Request reviews', detail: 'request-ai-reviews.sh — cadence-aware mentions' },
     { title: 'Wait', detail: 'poll checks and in-flight reviews' },
     { title: 'Fix', detail: 'ci-fixer, then pr-comment-resolver' },
+    { title: 'FR/NFR gate', detail: 'fe-sdlc-fr-nfr-review on the PR head — mandatory for every PR' },
     { title: 'Publish', detail: 'commit and push the working tree' },
   ],
 }
 
 // ---------------------------------------------------------------------------
 // Arguments: a PR number, a PR URL, "<n> --reviewers cubic", or an object
-// { pr, reviewers, requiredChecks, maxFixRounds, maxWaitRounds, waitSeconds }.
+// { pr, reviewers, requiredChecks, maxFixRounds, maxWaitRounds, maxGateRounds,
+// waitSeconds }. The FR/NFR gate has no opt-out: it is required on every PR.
 // ---------------------------------------------------------------------------
 const OPTS = {
   pr: null,
@@ -24,6 +26,7 @@ const OPTS = {
   maxFixRounds: 5,
   maxWaitRounds: 6,
   maxRequestRounds: 3,
+  maxGateRounds: 3,
   waitSeconds: 540,
 }
 function readArgs(raw) {
@@ -65,12 +68,12 @@ const requiredFlag = () => (OPTS.requiredChecks ? `--required-checks "${OPTS.req
 
 const STATE_SCHEMA = {
   type: 'object',
-  required: ['verdict', 'next', 'pr', 'head', 'ci', 'unresolved', 'reviewers', 'notes'],
+  required: ['verdict', 'next', 'pr', 'head', 'ci', 'fr_nfr', 'unresolved', 'reviewers', 'notes'],
   properties: {
     pr: { type: 'integer' },
     url: { type: 'string' },
     head: { type: 'string' },
-    verdict: { type: 'string', enum: ['READY', 'FIX', 'REQUEST', 'WAIT', 'BLOCKED'] },
+    verdict: { type: 'string', enum: ['READY', 'FIX', 'GATE', 'REQUEST', 'WAIT', 'BLOCKED'] },
     next: { type: 'string' },
     ci: {
       type: 'object',
@@ -80,6 +83,11 @@ const STATE_SCHEMA = {
         failing: { type: 'array', items: { type: 'string' } },
         pending: { type: 'array', items: { type: 'string' } },
       },
+    },
+    fr_nfr: {
+      type: 'object',
+      required: ['status'],
+      properties: { status: { type: 'string', enum: ['success', 'failure', 'pending', 'missing'] } },
     },
     unresolved: { type: 'object', required: ['total'], properties: { total: { type: 'integer' } } },
     reviewers: {
@@ -114,7 +122,7 @@ function snapshotPrompt(waitSeconds, waitVerdicts) {
       ? `The script polls for up to ${waitSeconds} seconds; run it with a ${Math.min(waitSeconds + 60, 600)}-second tool timeout and do not poll yourself.`
       : 'Run it exactly once.',
     'Do not edit anything, post anything, or interpret the verdict — the workflow decides. If the script exits non-zero, return',
-    '{"verdict":"BLOCKED","next":"<the script\'s error line>","pr":0,"head":"","ci":{"status":"none","failing":[],"pending":[]},"unresolved":{"total":0},"reviewers":[],"notes":[]}.',
+    '{"verdict":"BLOCKED","next":"<the script\'s error line>","pr":0,"head":"","ci":{"status":"none","failing":[],"pending":[]},"fr_nfr":{"status":"missing"},"unresolved":{"total":0},"reviewers":[],"notes":[]}.',
   ].join('\n')
 }
 
@@ -215,7 +223,7 @@ function publishPrompt(state, iteration, changes) {
 // ---------------------------------------------------------------------------
 // The loop.
 // ---------------------------------------------------------------------------
-const counters = { fix: 0, wait: 0, request: 0 }
+const counters = { fix: 0, wait: 0, request: 0, gate: 0 }
 const journal = []
 const degradeNotes = new Set()
 let unreachable = new Set()
@@ -226,8 +234,8 @@ function note(line) { journal.push(line); log(line) }
 function escalation(finding, action) {
   return [
     '=== SDLC ESCALATION ===',
-    `stage: pr-until-green   iteration: fix ${counters.fix}/${OPTS.maxFixRounds}, wait ${counters.wait}/${OPTS.maxWaitRounds}, request ${counters.request}/${OPTS.maxRequestRounds}`,
-    'exit_condition: CI green + 0 unresolved review threads + every reachable AI reviewer approves the head',
+    `stage: pr-until-green   iteration: fix ${counters.fix}/${OPTS.maxFixRounds}, gate ${counters.gate}/${OPTS.maxGateRounds}, wait ${counters.wait}/${OPTS.maxWaitRounds}, request ${counters.request}/${OPTS.maxRequestRounds}`,
+    'exit_condition: CI green + BMAD FR/NFR Review Gate green on the head + 0 unresolved review threads + every reachable AI reviewer approves the head',
     'status: NOT MET',
     `blocking_finding: ${finding}`,
     `iteration_log: ${journal.join(' | ')}`,
@@ -264,6 +272,7 @@ const SENSOR_FIELDS = {
   head: (s) => typeof s.head === 'string',
   'ci.failing': (s) => Array.isArray(s.ci?.failing),
   'ci.pending': (s) => Array.isArray(s.ci?.pending),
+  'fr_nfr.status': (s) => typeof s.fr_nfr?.status === 'string',
   'unresolved.total': (s) => Number.isInteger(s.unresolved?.total),
   reviewers: (s) => Array.isArray(s.reviewers),
 }
@@ -280,11 +289,61 @@ async function snapshot(waitSeconds, waitVerdicts) {
   if (!s) throw new Error('snapshot agent returned nothing')
   const missing = missingSensorFields(s)
   if (missing.length && s.verdict !== 'BLOCKED') {
-    return { verdict: 'BLOCKED', next: `malformed sensor payload — missing ${missing.join(',')}`, pr: s.pr || 0, head: '', ci: { status: 'none', failing: [], pending: [] }, unresolved: { total: 0 }, reviewers: [], notes: [] }
+    return { verdict: 'BLOCKED', next: `malformed sensor payload — missing ${missing.join(',')}`, pr: s.pr || 0, head: '', ci: { status: 'none', failing: [], pending: [] }, fr_nfr: { status: 'missing' }, unresolved: { total: 0 }, reviewers: [], notes: [] }
   }
   if (!OPTS.pr && s.pr) OPTS.pr = String(s.pr)
   for (const n of s.notes || []) degradeNotes.add(n)
   return s
+}
+
+// Commit and push the working tree; returns an ESCALATED report when the push
+// fails, null when it landed.
+async function publish(changes, round) {
+  phase('Publish')
+  const pub = await agent(publishPrompt(state, round, changes), {
+    label: `publish ${round}`,
+    phase: 'Publish',
+    schema: PUBLISH_SCHEMA,
+  })
+  if (!pub?.pushed) {
+    return report('ESCALATED', { escalation: escalation(`push failed — ${pub?.reason || 'no result'}`, 'commit and push the working tree by hand, then re-run') })
+  }
+  note(`pushed ${String(pub.head || '').slice(0, 7)} "${pub.message || ''}"`)
+  return null
+}
+
+// The BMAD FR/NFR gate is mandatory for every PR: the nested workflow runs the
+// gate on exactly the PR head (it refuses a mismatched or dirty checkout), fixes
+// every finding at its root cause, and posts the commit status. Fixes become a
+// new head, which the sensor then reports as GATE again so the gate re-runs on
+// the published code — only a gate run on a clean head can turn it green.
+async function runGate() {
+  if (counters.gate >= OPTS.maxGateRounds) {
+    return report('ESCALATED', {
+      escalation: escalation(`the BMAD FR/NFR Review Gate is still ${state.fr_nfr?.status || 'not green'} on head ${String(state.head).slice(0, 7)} after ${OPTS.maxGateRounds} gate rounds`, 'read the last fr-nfr-reviewer matrix and the gate PR comment; fix the unmet requirement by hand, then re-run'),
+    })
+  }
+  counters.gate += 1
+  phase('FR/NFR gate')
+  let gate
+  try {
+    gate = await workflow('react-frontend-sdlc:fe-sdlc-fr-nfr-review', { pr: state.pr, head: state.head })
+  } catch (e) {
+    return report('ESCALATED', {
+      escalation: escalation(`nested FR/NFR gate workflow unavailable: ${e?.message || e}`, `run /react-frontend-sdlc:fe-sdlc-fr-nfr-review --pr ${state.pr} --head ${state.head} by hand, then re-run`),
+    })
+  }
+  if (!gate || gate.result === 'ESCALATED') {
+    return report('ESCALATED', {
+      escalation: escalation(`FR/NFR gate escalated on head ${String(state.head).slice(0, 7)} — ${gate?.escalation ? 'see the gate escalation block' : 'no result'}`, 'read the gate escalation block (the gate field), resolve it, then re-run; the gate is mandatory and cannot be skipped'),
+      gate,
+    })
+  }
+  for (const n of gate.degrade_notes || []) degradeNotes.add(n)
+  const fixed = gate.fixed || []
+  note(`fr-nfr gate ${counters.gate}/${OPTS.maxGateRounds} → ${gate.result} iterations=${gate.iterations ?? 0} fixed=${fixed.length}`)
+  if (fixed.length) return publish(['FR/NFR gate fixes'], `gate ${counters.gate}`)
+  return null
 }
 
 let requestsForHead = 0
@@ -300,7 +359,7 @@ while (true) {
   note(`head=${(state.head || '').slice(0, 7)} verdict=${state.verdict} next=${state.next}`)
 
   if (state.verdict === 'READY') {
-    if (!['green', 'none'].includes(state.ci.status) || state.unresolved.total > 0 || state.reviewers.some((r) => !['APPROVED', 'SKIPPED'].includes(r.status))) {
+    if (!['green', 'none'].includes(state.ci.status) || state.fr_nfr?.status !== 'success' || state.unresolved.total > 0 || state.reviewers.some((r) => !['APPROVED', 'SKIPPED'].includes(r.status))) {
       return report('ESCALATED', { escalation: escalation('sensor reported READY with contradicting facts', 'upgrade the plugin; the sensor and the workflow disagree') })
     }
     const skipped = (state.reviewers || []).filter((r) => r.status === 'SKIPPED')
@@ -349,19 +408,18 @@ while (true) {
       note(`resolver → remaining=${cr.remaining_unresolved} push=${cr.push_required} blocked=${cr.blocked_threads ?? 0}`)
     }
     if (changes.length) {
-      phase('Publish')
-      const pub = await agent(publishPrompt(state, counters.fix, changes), {
-        label: `publish ${counters.fix}`,
-        phase: 'Publish',
-        schema: PUBLISH_SCHEMA,
-      })
-      if (!pub?.pushed) {
-        return report('ESCALATED', { escalation: escalation(`push failed — ${pub?.reason || 'no result'}`, 'commit and push the working tree by hand, then re-run') })
-      }
-      note(`pushed ${String(pub.head || '').slice(0, 7)} "${pub.message || ''}"`)
+      const failed = await publish(changes, counters.fix)
+      if (failed) return failed
     } else {
       note('nothing to publish; re-reading state')
     }
+    state = await snapshot(0)
+    continue
+  }
+
+  if (state.verdict === 'GATE') {
+    const halted = await runGate()
+    if (halted) return halted
     state = await snapshot(0)
     continue
   }

@@ -76,9 +76,9 @@ benefit from fan-out and unattended repetition (see
 
 | Workflow | Purpose |
 | --- | --- |
-| `/react-frontend-sdlc:fe-sdlc-pr-until-green` | Request CodeRabbit / cubic with the right mentions, wait, fix CI and review threads, push, repeat until every reachable reviewer approves the head and CI is green |
+| `/react-frontend-sdlc:fe-sdlc-pr-until-green` | Run the mandatory BMAD FR/NFR gate on the PR head, request CodeRabbit / cubic with the right mentions, wait, fix CI and review threads, push, repeat until every reachable reviewer approves the head and CI and the FR/NFR gate are green |
 | `/react-frontend-sdlc:fe-sdlc-review-panel` | Stage-4 review as parallel lenses (quality, FR/NFR, a11y per family, technique skills) with three-refuter verification and fix rounds until zero new findings |
-| `/react-frontend-sdlc:fe-sdlc-fr-nfr-review` | The BMAD FR/NFR review gate as a bounded loop: locate the `specs/<slug>/` bundle, run fr-nfr-reviewer once per iteration, fix every new finding at its root cause, repeat until zero new findings with verdict PASS; not applicable (reported, never invented) without a spec bundle |
+| `/react-frontend-sdlc:fe-sdlc-fr-nfr-review` | The BMAD FR/NFR review gate as a bounded loop, mandatory for every PR: verify against the `specs/<slug>/` bundle, or the PR description and linked issues when there is none (plus the baseline NFR catalog), run fr-nfr-reviewer once per iteration, fix every new finding at its root cause, repeat until zero new findings with verdict PASS; an untraceable change or a gate that could not run escalates, never skips |
 | `/react-frontend-sdlc:fe-sdlc-feature` | The whole loop for one planned feature: setup check, plan resolution, parallel story implementation, review panel, FR/NFR gate, QA, PR, then pr-until-green |
 
 The finishing workflow reads the PR through `scripts/pr-state.sh`, a

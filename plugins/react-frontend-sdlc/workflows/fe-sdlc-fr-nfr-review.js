@@ -1,18 +1,18 @@
 export const meta = {
   name: 'fe-sdlc-fr-nfr-review',
   description:
-    'The BMAD FR/NFR review gate as a bounded loop: locate the specs/<slug>/ bundle the implemented feature was planned against, run fr-nfr-reviewer (exactly one gate run per iteration) to build the per-requirement matrix, hand every new finding to react-implementer as a root-cause fix, and repeat until the gate reports zero new findings with verdict PASS — when no BMAD spec bundle exists the gate is not applicable and the run ends with a report, never with invented findings',
+    'The BMAD FR/NFR review gate as a bounded loop, mandatory for every pull request: resolve the requirement sources (the specs/<slug>/ bundle when the feature was BMAD-planned, else the PR description and its linked issues, plus the baseline NFR catalog), run fr-nfr-reviewer (exactly one real gate run per iteration, which posts the BMAD FR/NFR Review Gate commit status) to build the per-requirement matrix, hand every new finding to react-implementer as a root-cause fix, and repeat until the gate reports zero new findings with verdict PASS — a change with no traceable requirement source, or a gate that could not run, escalates; it is never skipped or passed with a report',
   whenToUse:
-    'After implementation and the review panel, when the feature was planned with BMAD specs under specs/<slug>/. Give it the slug (or let it locate the bundle whose stories name the changed files) and optionally --base <ref> and --summary "<one line>". Without a spec bundle it reports SUCCESS-WITH-REPORT and changes nothing.',
+    'After implementation and the review panel, and on every PR head before it may be called finished (fe-sdlc-pr-until-green runs it on its GATE verdict). Give it the slug when a BMAD bundle exists (or let it locate the bundle whose stories name the changed files), and optionally --pr <n>, --head <sha> (the PR head the local checkout must match), --base <ref> and --summary "<one line>". Without a spec bundle the PR description and linked issues are the requirement source; without either it escalates.',
   phases: [
-    { title: 'Scope', detail: 'profile, diff base, changed files, spec bundle presence' },
+    { title: 'Scope', detail: 'profile, diff base, changed files, requirement sources (spec bundle, PR, linked issues)' },
     { title: 'Gate', detail: 'fr-nfr-reviewer: one gate run + requirement matrix' },
     { title: 'Fix', detail: 'react-implementer per disjoint file group' },
   ],
 }
 
-const OPTS = { slug: null, base: null, summary: null, maxIterations: 5 }
-const FLAGS = { '--base': 'base', '--slug': 'slug', '--summary': 'summary' }
+const OPTS = { slug: null, base: null, summary: null, pr: null, head: null, maxIterations: 5 }
+const FLAGS = { '--base': 'base', '--slug': 'slug', '--summary': 'summary', '--pr': 'pr', '--head': 'head' }
 function parseTokens(text) {
   const tokens = text.trim().split(/\s+/).filter(Boolean)
   for (let i = 0; i < tokens.length; i++) {
@@ -23,6 +23,7 @@ function parseTokens(text) {
 }
 if (args != null && typeof args === 'object') Object.assign(OPTS, args)
 else if (args != null) parseTokens(String(args))
+if (OPTS.pr != null) OPTS.pr = String(OPTS.pr).match(/(\d+)\s*$/)?.[1] ?? null
 
 const PLUGIN_ROOT = [
   'Resolve the react-frontend-sdlc plugin root into P and echo it:',
@@ -34,7 +35,7 @@ const PLUGIN_ROOT = [
 
 const SCOPE_SCHEMA = {
   type: 'object',
-  required: ['profile_valid', 'base', 'files', 'specs_present', 'summary'],
+  required: ['profile_valid', 'base', 'files', 'specs_present', 'summary', 'pr', 'pr_requirements'],
   properties: {
     profile_valid: { type: 'boolean' },
     blocked: { type: ['string', 'null'] },
@@ -43,6 +44,9 @@ const SCOPE_SCHEMA = {
     specs_present: { type: 'boolean' },
     slug: { type: ['string', 'null'] },
     spec_files: { type: 'array', items: { type: 'string' } },
+    pr: { type: ['integer', 'null'] },
+    pr_requirements: { type: 'boolean' },
+    linked_issues: { type: 'array', items: { type: 'integer' } },
     summary: { type: 'string' },
   },
 }
@@ -123,23 +127,35 @@ const scope = await agent(
     '   files = `git diff --name-only <base>...HEAD` plus uncommitted changes (`git status --porcelain` paths).',
     `3. Spec bundle: ${OPTS.slug ? `specs/${OPTS.slug}/` : 'the newest specs/<slug>/ directory whose prd, epics-stories or brief names the changed files or their feature; none when no directory qualifies'}.`,
     '   specs_present is true only when that directory exists and holds at least one of prd, architecture, epics-stories (list what exists in spec_files); set slug to the directory name or null. Never create or edit a spec.',
-    `4. summary: ${OPTS.summary ? `use "${OPTS.summary}"` : 'one line describing the change set (what the changed files implement), for the gate impact context'}.`,
+    `4. Pull request: ${OPTS.pr ? `PR #${OPTS.pr}` : 'the current branch\'s PR (`gh pr view --json number --jq .number`), or null when the branch has none'}. Read \`gh pr view <n> --json body,closingIssuesReferences\`: pr_requirements is true when the body is non-blank or at least one issue is linked; list the linked issue numbers in linked_issues.`,
+    OPTS.head
+      ? `5. Head check: \`git rev-parse HEAD\` must equal ${OPTS.head} and \`git status --porcelain\` must print nothing — the gate posts its commit status for the local HEAD, so it must run on exactly that PR head. Otherwise set blocked to "local checkout is not at PR head ${OPTS.head.slice(0, 7)} with a clean tree — check out and pull the PR branch".`
+      : '5. Head check: none requested.',
+    `6. summary: ${OPTS.summary ? `use "${OPTS.summary}"` : 'one line describing the change set (what the changed files implement), for the gate impact context'}.`,
     'Return the structured output only; edit nothing.',
   ].join('\n'),
   { label: 'scope', phase: 'Scope', schema: SCOPE_SCHEMA },
 )
 if (!scope || scope.blocked || scope.profile_valid !== true) {
-  return escalate(0, scope?.blocked || 'scope agent returned nothing', 'run /fe-sdlc-setup, then re-run')
+  const action = scope?.profile_valid === true ? 'resolve the blocking cause above, then re-run' : 'run /fe-sdlc-setup, then re-run'
+  return escalate(0, scope?.blocked || 'scope agent returned nothing', action)
 }
 if (!scope.files.length) return { result: 'SUCCESS', note: 'empty change set — nothing to gate', iterations: 0, skipped: false, scope }
-if (!scope.specs_present || !scope.slug) {
-  const where = OPTS.slug ? `specs/${OPTS.slug}/` : 'specs/'
-  const noteText = `no BMAD spec bundle found for this change set under ${where} — the FR/NFR gate is not applicable and was not run; run /fe-sdlc-plan first when the feature should be spec-gated`
-  degradeNotes.push(noteText)
-  log(noteText)
-  return { result: 'SUCCESS-WITH-REPORT', skipped: true, iterations: 0, degrade_notes: degradeNotes, scope }
+const hasSpecs = Boolean(scope.specs_present && scope.slug)
+if (OPTS.slug && !hasSpecs) {
+  return escalate(0, `the caller named specs/${OPTS.slug}/ but no BMAD spec bundle exists there`, 'run /fe-sdlc-plan for this feature, then re-run')
 }
-log(`scope: ${scope.files.length} files against ${scope.base}; spec bundle specs/${scope.slug}/ (${(scope.spec_files || []).join(', ') || 'files unlisted'})`)
+if (!hasSpecs && !(scope.pr && scope.pr_requirements)) {
+  return escalate(
+    0,
+    `no requirement source for this change set — no specs/<slug>/ bundle, and ${scope.pr ? `PR #${scope.pr} has an empty description and no linked issue` : 'the branch has no PR'}; the FR/NFR gate is mandatory for every PR and cannot pass an untraceable change`,
+    'link the issue the PR implements (Closes #N) or write its acceptance criteria into the PR description (or run /fe-sdlc-plan), then re-run',
+    { requirement_source: 'none' },
+  )
+}
+const requirementSource = hasSpecs ? `specs/${scope.slug}/` : `PR #${scope.pr} description${(scope.linked_issues || []).length ? ` + issue(s) ${scope.linked_issues.map((n) => `#${n}`).join(', ')}` : ''}`
+const runnerArgs = [hasSpecs ? `--spec-path specs/${scope.slug}` : null, scope.pr ? `--pr ${scope.pr}` : null, '--impact-context "<summary>"'].filter(Boolean).join(' ')
+log(`scope: ${scope.files.length} files against ${scope.base}; requirement source ${requirementSource}${hasSpecs ? ` (${(scope.spec_files || []).join(', ') || 'files unlisted'})` : ''}`)
 
 function gatePrompt(iteration) {
   const prior = ledger.length
@@ -148,12 +164,12 @@ function gatePrompt(iteration) {
   return [
     PLUGIN_ROOT,
     '',
-    `Review iteration ${iteration}/${OPTS.maxIterations}. Spec bundle: specs/${scope.slug}/. Diff base: ${scope.base}. Change summary: "${scope.summary}".`,
+    `Review iteration ${iteration}/${OPTS.maxIterations}. Requirement source: ${requirementSource}${hasSpecs ? '' : ' (no BMAD spec bundle — derive the FRs from the PR description and linked issues)'}; the baseline NFR catalog applies on top. Diff base: ${scope.base}. Change summary: "${scope.summary}".`,
     'Changed files:',
     ...scope.files.map((f) => `  - ${f}`),
     ...prior,
     '',
-    'Per your agent contract: resolve the gate runner from make.fr_nfr_gate in .claude/react-sdlc.yml (the plugin script "$P/scripts/fr-nfr-gate.sh" --spec-path specs/<slug> --impact-context "<summary>" when null), run it exactly once, build the full per-requirement matrix, and mirror the FR_NFR_REVIEWER last line into the structured output: verdict, new_findings (null only when the gate run failed for transport or a malformed contract line), gate_run (the runner used, or SKIPPED (<reason>)).',
+    `Per your agent contract: resolve the gate runner from make.fr_nfr_gate in .claude/react-sdlc.yml (the plugin script "$P/scripts/fr-nfr-gate.sh" ${runnerArgs} when null), run it exactly once — it must really run and post the "BMAD FR/NFR Review Gate" commit status, a manually built matrix does not satisfy the mandatory gate — build the full per-requirement matrix, and mirror the FR_NFR_REVIEWER last line into the structured output: verdict, new_findings (null only when the gate run failed for transport or a malformed contract line), gate_run (the runner used, or SKIPPED (<reason>)).`,
     'Every NEW finding is one findings[] entry with the requirement id, the file it points at, evidence, and a root-cause fix — never a suppression, a threshold change, or a skipped test. Edit nothing.',
   ].join('\n')
 }
@@ -166,15 +182,15 @@ function gateEscalation(gate, iteration) {
   if (!gate) return escalate(iteration, 'fr-nfr-reviewer returned nothing', 're-run; if it repeats, check the agent definition')
   if (gate.status === 'BLOCKED') return escalate(iteration, `fr-nfr-reviewer BLOCKED — ${gate.note || ''}`, 'fix the blocking cause (plugin root, profile, gate runner), then re-run')
   if (gate.verdict === 'DEGRADED') {
-    return escalate(iteration, `fr-nfr-reviewer reported the spec bundle specs/${scope.slug}/ missing or empty although scope found it — ${gate.note || ''}`, 'run /fe-sdlc-plan for this feature, then re-run')
+    return escalate(iteration, `fr-nfr-reviewer reported the requirement source ${requirementSource} missing or empty although scope found it — ${gate.note || ''}`, hasSpecs ? 'run /fe-sdlc-plan for this feature, then re-run' : 'restore the PR description or linked issue, then re-run')
+  }
+  if (/^SKIPPED/i.test(gate.gate_run || '')) {
+    return escalate(iteration, `gate runner ${gate.gate_run} — no "BMAD FR/NFR Review Gate" commit status was posted, and the gate is mandatory and must be green on every PR`, 'restore the gate runner (claude and gh on PATH, an origin remote, gh auth), then re-run; a manually built matrix never satisfies the gate')
   }
   return null
 }
 
 function recordGate(gate, iteration, findings) {
-  if (/^SKIPPED/i.test(gate.gate_run || '')) {
-    degradeNotes.push(`iteration ${iteration}: gate runner ${gate.gate_run} — matrix built manually by fr-nfr-reviewer, no "BMAD FR/NFR Review Gate" commit status was posted`)
-  }
   ledger.push({ iteration, new_findings: gate.new_findings, verdict: gate.verdict, findings: findings.map((f) => `${f.requirement}: ${f.title}`) })
   journal.push(`iteration ${iteration}: gate=${gate.gate_run} new_findings=${gate.new_findings ?? 'unknown'} verdict=${gate.verdict}`)
 }
@@ -192,7 +208,9 @@ function success(iteration) {
     skipped: false,
     iterations: iteration,
     exit_condition: 'fr-nfr-reviewer reported new_findings=0 with verdict=PASS',
-    specs: `specs/${scope.slug}/`,
+    requirement_source: requirementSource,
+    specs: hasSpecs ? `specs/${scope.slug}/` : null,
+    pr: scope.pr ?? null,
     fixed: ledger.flatMap((l) => l.findings),
     ledger,
     degrade_notes: degradeNotes,
@@ -202,7 +220,7 @@ function success(iteration) {
 
 function fixPrompt(group, iteration) {
   return [
-    `Fix these ${group.length} FR/NFR gate finding(s) from iteration ${iteration}/${OPTS.maxIterations} against specs/${scope.slug}/; touch only the files they cite plus their tests. TDD: reproduce with a failing test where the requirement is behavioral, then fix the root cause.`,
+    `Fix these ${group.length} FR/NFR gate finding(s) from iteration ${iteration}/${OPTS.maxIterations} against ${requirementSource}; touch only the files they cite plus their tests. TDD: reproduce with a failing test where the requirement is behavioral, then fix the root cause.`,
     ...group.map((f) => `- ${f.requirement} — ${f.file}${f.line ? `:${f.line}` : ''} — ${f.title}\n  evidence: ${f.evidence}\n  fix: ${f.fix}`),
     'Never suppress a finding, edit a threshold or a spec, or add data-testid. Run no git. Report status, files_modified, tests_status, recommendation.',
   ].join('\n')

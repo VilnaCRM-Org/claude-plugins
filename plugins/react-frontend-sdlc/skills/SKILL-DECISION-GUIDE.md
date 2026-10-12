@@ -76,10 +76,12 @@ during the work. It does **not** replace this gate.
 
 **Conditional BMAD skills:**
 
-- `bmad-fr-nfr-review-gate` when BMAD specs exist for the implemented work. Run it through the
-  target mapped by `make.fr_nfr_gate` (the plugin substitutes its own gate script when the
-  mapping is `null`); if no BMAD specs exist, record **"Not applicable"** with the concrete
-  reason.
+- `bmad-fr-nfr-review-gate` for EVERY pull request — it is mandatory and never "Not
+  applicable". Run it through the target mapped by `make.fr_nfr_gate` (the plugin substitutes
+  its own gate script when the mapping is `null`). With BMAD specs, verify against
+  `specs/<slug>/`; without them, the PR description and its linked issues are the requirement
+  source, plus the baseline NFR catalog. A PR with no requirement source at all fails the gate
+  — link the issue or write the acceptance criteria into the PR description.
 - `bmad-autonomous-planning` is a planning-time skill only; during the gate record
   **"Not applicable — planning skill"** unless the task itself was to produce specs.
 
@@ -155,6 +157,11 @@ capability, so a NOT-APPLICABLE verdict for a technique skill always cites the a
 - [stryker-mutation-timeout-regression-alarm](stryker-mutation-timeout-regression-alarm/SKILL.md) — Use when a Stryker mutation workflow carries no `timeout-minutes` on its shard or merge job, when a mutation run's cost jumps an order of magnitude with no change to the mutate scope, when mutants co…
 
 ### Storybook, visual and Playwright
+
+Any UI change that introduces a component the UI kit lacks, or a new variant
+of a kit component, EXECUTEs `frontend-component-development` (its
+component-first section) and `storybook-story-authoring`: the component and
+its story come before the page or feature that composes it.
 
 - [playwright-mobile-device-lane](playwright-mobile-device-lane/SKILL.md) — Use when adding or extending real mobile-device coverage to a Playwright suite — touch/tap specs, Pixel or iPhone device descriptors, `isMobile`/`hasTouch` contexts, device-pixel-ratio visual baselin…
 - [playwright-visual-baseline-grep-title](playwright-visual-baseline-grep-title/SKILL.md) — Use when a Playwright run filtered with -g / --grep exits 0 but an expected visual baseline PNG was never written, when a snapshot filter has to match a title containing spaces or a separator, or whe…

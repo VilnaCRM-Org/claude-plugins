@@ -47,11 +47,32 @@ EOF
   PATH="$dir:$PATH"
 }
 
+# PR-sourced gh: routes the requirement-source reads to env-configured text
+# (PR_BODY; PR_ISSUES = newline-separated issue numbers); every other call
+# logs and succeeds.
+pr_gh() {
+  local dir="$BATS_TEST_TMPDIR/pr-bin"
+  mkdir -p "$dir"
+  cat > "$dir/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "gh $*" >> "$STUB_GH_LOG"
+case "$*" in
+  "pr view --json number --jq .number") echo 7 ;;
+  "pr view 7 --repo acme/sample-web --json body"*) printf '%s\n' "${PR_BODY:-}" ;;
+  "pr view 7 --repo acme/sample-web --json title"*) echo "Add the currency field" ;;
+  "pr view 7 --repo acme/sample-web --json closingIssuesReferences"*) printf '%s\n' "${PR_ISSUES:-}" ;;
+  "issue view 12 "*) printf 'Issue #12 — Currency field\nAC1: the field rejects letters\n' ;;
+esac
+EOF
+  chmod +x "$dir/gh"
+  PATH="$dir:$PATH"
+}
+
 ZERO_JSON='{"result":"All requirements covered.\nFR_NFR_NEW_FINDINGS: 0"}'
 FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the change set\n- NFR-6 missing WCAG focus-order guard\nFR_NFR_NEW_FINDINGS: 2"}'
 
 @test "zero findings: exit 0, success status with exact context name, no PR comment" {
-  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
   [ "$status" -eq 0 ]
   [[ "$output" == *"PASS — zero new findings"* ]]
   grep -q "api repos/acme/sample-web/statuses/$SHA" "$GH_LOG"
@@ -64,7 +85,7 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
   # The commit status is the gate's durable verdict: a clean claude run
   # whose success status cannot be recorded must fail, not exit 0 with
   # only a warning in the log.
-  STUB_GH_EXIT=1 STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  STUB_GH_EXIT=1 STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
   [ "$status" -eq 1 ]
   [[ "$output" == *"failed to post commit status"* ]]
   [[ "$output" != *"PASS — zero new findings"* ]]
@@ -73,7 +94,7 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
 
 @test "findings run: exit 1, failure status, comment body contains the findings" {
   route_gh
-  STUB_CLAUDE_OUTPUT="$FINDINGS_JSON" run "$GATE"
+  STUB_CLAUDE_OUTPUT="$FINDINGS_JSON" run "$GATE" --spec-path specs
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL — 2 new finding(s)"* ]]
   grep -q -- '-f state=failure' "$GH_LOG"
@@ -84,7 +105,7 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
 }
 
 @test "claude invoked with the full ADR-8 flag set (ADR-6 acceptEdits default)" {
-  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
   [ "$status" -eq 0 ]
   grep -q -- '--output-format json' "$CLAUDE_LOG"
   grep -q -- '--permission-mode acceptEdits' "$CLAUDE_LOG"
@@ -96,7 +117,7 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
   # reviewer covers component contracts and frontend NFRs (WCAG, Lighthouse,
   # visual/responsive) — this is the one substantive divergence from the
   # backend gate.
-  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
   [ "$status" -eq 0 ]
   grep -q 'React frontend change set' "$CLAUDE_LOG"
   grep -q 'Lighthouse' "$CLAUDE_LOG"
@@ -118,7 +139,7 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
   git remote remove origin
   # the stub prints STUB_GH_OUTPUT for every non-version call; for
   # `repo view --jq .nameWithOwner` that is the slug itself
-  STUB_GH_OUTPUT="acme/fallback-web" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  STUB_GH_OUTPUT="acme/fallback-web" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
   [ "$status" -eq 0 ]
   grep -q 'repo view --json nameWithOwner' "$GH_LOG"
   grep -q "api repos/acme/fallback-web/statuses/$SHA" "$GH_LOG"
@@ -126,7 +147,7 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
 
 @test "no origin remote and empty gh fallback: dies before running claude" {
   git remote remove origin
-  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot resolve repository"* ]]
   [ ! -f "$CLAUDE_LOG" ]
@@ -182,7 +203,7 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
 }
 
 @test "malformed gate output: exit 1, failure status names the contract" {
-  STUB_CLAUDE_OUTPUT='{"result":"prose without the mandatory line"}' run "$GATE"
+  STUB_CLAUDE_OUTPUT='{"result":"prose without the mandatory line"}' run "$GATE" --spec-path specs
   [ "$status" -eq 1 ]
   [[ "$output" == *"contract violation"* ]]
   [[ "$output" == *"FR_NFR_NEW_FINDINGS"* ]]
@@ -191,7 +212,7 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
 }
 
 @test "claude transport failure: one retry, then failure status and exit 1" {
-  STUB_CLAUDE_OUTPUT="$ZERO_JSON" STUB_CLAUDE_EXIT=2 run "$GATE"
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" STUB_CLAUDE_EXIT=2 run "$GATE" --spec-path specs
   [ "$status" -eq 1 ]
   [[ "$output" == *"retrying once"* ]]
   [[ "$output" == *"transport failure after"* ]]
@@ -205,7 +226,7 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
   # (one retry, then 'transport failure' status) — NOT the misleading
   # 'gate output malformed' commit status that the FR_NFR regex would
   # otherwise trigger on the error text.
-  STUB_CLAUDE_OUTPUT='{"is_error":true,"result":"API Error: 529 Overloaded"}' run "$GATE"
+  STUB_CLAUDE_OUTPUT='{"is_error":true,"result":"API Error: 529 Overloaded"}' run "$GATE" --spec-path specs
   [ "$status" -eq 1 ]
   [[ "$output" == *"is_error"* ]]
   [[ "$output" == *"retrying once"* ]]
@@ -231,7 +252,7 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
   # count. The digit-string zero-test must drive the failure path instead.
   route_gh
   STUB_CLAUDE_OUTPUT='{"result":"- huge\nFR_NFR_NEW_FINDINGS: 18446744073709551616"}' \
-    run "$GATE"
+    run "$GATE" --spec-path specs
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL — 18446744073709551616 new finding"* ]]
   grep -q -- '-f state=failure' "$GH_LOG"
@@ -241,15 +262,88 @@ FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the chan
 @test "R2 Bug 8: a multiple of 2^64 (2*2^64) also fails the gate" {
   route_gh
   STUB_CLAUDE_OUTPUT='{"result":"- huge\nFR_NFR_NEW_FINDINGS: 36893488147419103232"}' \
-    run "$GATE"
+    run "$GATE" --spec-path specs
   [ "$status" -eq 1 ]
   grep -q -- '-f state=failure' "$GH_LOG"
   ! grep -q -- '-f state=success' "$GH_LOG"
 }
 
 @test "R2 Bug 8 control: zero-padded zero still passes the gate" {
-  STUB_CLAUDE_OUTPUT='{"result":"clean\nFR_NFR_NEW_FINDINGS: 0000"}' run "$GATE"
+  STUB_CLAUDE_OUTPUT='{"result":"clean\nFR_NFR_NEW_FINDINGS: 0000"}' run "$GATE" --spec-path specs
   [ "$status" -eq 0 ]
   [[ "$output" == *"PASS — zero new findings"* ]]
   grep -q -- '-f state=success' "$GH_LOG"
+}
+
+# --- mandatory for every PR: requirement sources beyond a spec bundle -------
+
+@test "no spec bundle: the PR description is the requirement source and reaches the prompt" {
+  rm -rf specs
+  pr_gh
+  PR_BODY="AC: the currency field accepts two decimals" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 0 ]
+  grep -q 'the pull request description' "$CLAUDE_LOG"
+  grep -q 'the currency field accepts two decimals' "$CLAUDE_LOG"
+  grep -q 'FR-PR-<n>' "$CLAUDE_LOG"
+  grep -q -- '-f state=success' "$GH_LOG"
+}
+
+@test "no spec bundle and an empty PR description: the linked issue is the requirement source" {
+  rm -rf specs
+  pr_gh
+  PR_BODY="" PR_ISSUES="12" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 0 ]
+  grep -q 'issue view 12 --repo acme/sample-web' "$GH_LOG"
+  grep -qF 'the linked issue(s)' "$CLAUDE_LOG"
+  grep -q 'AC1: the field rejects letters' "$CLAUDE_LOG"
+  ! grep -q 'the pull request description' "$CLAUDE_LOG"
+}
+
+@test "no spec bundle, no PR description, no linked issue: fails closed before claude, with a failure status" {
+  rm -rf specs
+  pr_gh
+  PR_BODY="" PR_ISSUES="" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot trace this change to any requirement"* ]]
+  [[ "$output" == *"mandatory for every PR"* ]]
+  grep -q -- '-f state=failure' "$GH_LOG"
+  grep -q 'no requirement source' "$GH_LOG"
+  ! grep -q -- '-f state=success' "$GH_LOG"
+  [ ! -f "$CLAUDE_LOG" ]
+}
+
+@test "no spec bundle and no PR for the branch: fails closed, never a silent pass" {
+  rm -rf specs
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot trace this change to any requirement"* ]]
+  grep -q -- '-f state=failure' "$GH_LOG"
+  [ ! -f "$CLAUDE_LOG" ]
+}
+
+@test "the baseline NFR catalog, including the UI-kit/Storybook rule, is verified on every run" {
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 0 ]
+  grep -q 'NFR-BASE-A11Y' "$CLAUDE_LOG"
+  grep -q 'NFR-BASE-TEST' "$CLAUDE_LOG"
+  grep -q 'NFR-BASE-UIKIT' "$CLAUDE_LOG"
+  grep -q 'Storybook story' "$CLAUDE_LOG"
+}
+
+@test "--pr selects the PR whose description is read, and the findings comment goes to it" {
+  rm -rf specs
+  pr_gh
+  PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$FINDINGS_JSON" run "$GATE" --pr 7
+  [ "$status" -eq 1 ]
+  ! grep -q 'pr view --json number' "$GH_LOG"
+  grep -q 'pr comment 7 --body' "$GH_LOG"
+  grep -q 'against the pull request description' "$GH_LOG"
+}
+
+@test "--pr must be a positive number" {
+  run "$GATE" --pr abc
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--pr must be a PR number"* ]]
+  run "$GATE" --pr 07
+  [ "$status" -eq 1 ]
 }

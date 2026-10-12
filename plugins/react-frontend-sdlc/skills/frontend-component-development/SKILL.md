@@ -45,6 +45,10 @@ explicit note rather than improvising a substitute.
 
 ## Workflow
 
+0. **Component-first for any UI.** Before writing a page, view, or feature screen, inventory
+   the UI kit and build every missing component in Storybook first — see
+   [Component-first UI](#component-first-ui-ui-kit--storybook--composition). The page or
+   feature is composed only from kit components once they exist.
 1. **Locate the boundary.** Find the owning module or shared-component boundary from
    `architecture.modules` and `architecture.source_root`. Reusable, module-agnostic UI is shared;
    feature-specific UI stays in its owning feature. See
@@ -140,6 +144,33 @@ Route deeper audits and any flagged finding to
 is false, run the manual a11y checks above and record `SKIPPED: accessibility-audit
 (capabilities.accessibility_audit=false)` rather than assuming the gate passed.
 
+## Component-first UI (UI kit → Storybook → composition)
+
+Every UI change follows the same order — components first, composition last:
+
+1. **Inventory the UI kit.** List each visual element the page or feature needs and map it to an
+   existing kit component: the shared components root under `architecture.source_root` whose
+   components carry `architecture.component_prefix` (e.g. `UIButton`), plus any external UI-kit
+   package the repository depends on. Reuse wins — never re-create what the kit provides.
+2. **Build what the kit lacks, in Storybook first.** Each element without a kit match becomes a
+   component built in isolation before any page uses it: reusable UI goes into the kit (shared
+   root, configured prefix); only genuinely feature-bound pieces stay in their feature's
+   `components/` folder. For each new component — and each new variant or state added to an
+   existing kit component — write the CSF3 story first (default, every variant, and every state:
+   loading, empty, error, disabled, focus/hover; see
+   [storybook-story-authoring](../storybook-story-authoring/SKILL.md)), the Testing Library test
+   (TDD), the i18n copy and the accessibility semantics, and keep the target mapped by
+   `make.storybook_build` green.
+3. **Compose the page or feature.** Only after its components exist and their stories are green,
+   assemble the page/feature from them: the composition layer wires data, state, routing, DI and
+   i18n, and lays components out — it does not inline one-off styled markup that duplicates a kit
+   component or should have been one.
+
+When `capabilities.storybook` is false or `make.storybook_build` is `null`, keep the order (build
+and unit-test the component in isolation before composing it) and record
+`SKIPPED: storybook — component-first order kept without stories`. The FR/NFR gate verifies this
+rule on every PR as `NFR-BASE-UIKIT`.
+
 ## Design-handoff gate (Figma)
 
 When `capabilities.figma` is true and the story references a Figma node, reconcile the
@@ -152,8 +183,10 @@ capability.
 
 ## Storybook
 
-When `capabilities.storybook` is true, add or update a story (CSF3) for new shared UI and keep
-the target mapped by `make.storybook_build` green. `SKIPPED: storybook` when
+When `capabilities.storybook` is true, every new UI-kit component (and every new variant or
+state of an existing one) gets its CSF3 story BEFORE any page or feature uses it — the
+[component-first order](#component-first-ui-ui-kit--storybook--composition) — and the target
+mapped by `make.storybook_build` stays green. `SKIPPED: storybook` when
 `capabilities.storybook` is false or `make.storybook_build` is `null`.
 
 ## Verification
@@ -222,6 +255,9 @@ language; no suppression added and no threshold changed.
 
 ## Verification Checklist
 
+- [ ] Component-first: the UI kit was inventoried, every missing component was built with its
+      Storybook story (states and variants) before the page/feature composed it, and the
+      composition layer inlines no one-off markup that duplicates a kit component
 - [ ] Component/hook/form landed in the correct module under `architecture.source_root`
 - [ ] Shared UI carries `architecture.component_prefix`; cross-feature imports use the aliases
 - [ ] Styled through `framework.ui` + theme tokens; Emotion styles stable and scoped

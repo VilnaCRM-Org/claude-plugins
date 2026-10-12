@@ -52,6 +52,11 @@ relax them.
 - Accessibility is a planning concern, not a late add: every user-facing
   story must carry its a11y acceptance criteria (semantic roles, keyboard
   operability, contrast, focus management) from the PRD onward.
+- UI is planned component-first: the architecture inventories the UI kit
+  (shared components carrying `architecture.component_prefix`) against what
+  the feature needs, and every component the kit lacks gets its own story —
+  built in Storybook before any page uses it — ahead of the story that
+  composes the page or feature.
 
 ## Inputs
 
@@ -316,7 +321,18 @@ The subagent should produce forward-safe epics and actionable stories in
 `epics-stories.md`, each story marked independent or dependent (the
 parallel-dispatch input for the implementation stage). Each story carries
 its own acceptance criteria, including the accessibility and visual checks
-the UI change must pass. The main agent separately reviews story quality,
+the UI change must pass. UI work is decomposed component-first:
+
+- one **component story** per component the UI kit lacks (or per new
+  variant of an existing kit component), marked **independent**, whose
+  acceptance criteria include its Storybook story covering default, every
+  variant and every state, its unit test, its i18n copy and its a11y
+  semantics, with the target mapped by `make.storybook_build` green;
+- then one **composition story** per page or feature, marked **dependent**
+  on every component story it uses, whose acceptance criteria require that
+  the page/feature is assembled from kit components (no one-off inline
+  markup duplicating a kit component) plus the user-journey, routing, state
+  and E2E checks. The main agent separately reviews story quality,
 dependency order, and acceptance-criteria coverage.
 
 ### 7. Cross-Artifact Readiness Stage

@@ -37,26 +37,41 @@ turns it into a sensor-driven state machine.
 | Request reviews | low-effort agent                       | runs `scripts/request-ai-reviews.sh` with the reviewers the sensor named (`--full` when CodeRabbit must re-read the same head) |
 | Wait            | low-effort agent                       | runs `pr-state.sh --wait-seconds 540 --wait-verdicts WAIT` (or `WAIT,REQUEST` inside CodeRabbit's interval)                    |
 | Fix             | `ci-fixer`, then `pr-comment-resolver` | root-cause fixes for failing checks and unresolved threads, in the working tree, no git                                        |
+| FR/NFR gate     | nested `fe-sdlc-fr-nfr-review`         | runs the mandatory BMAD FR/NFR gate pinned to the PR head (`{ pr, head }`), fixes its findings, posts the commit status        |
 | Publish         | general agent                          | format target when mapped, conventional commit with the task number, hooks on, `git push origin HEAD`                          |
 
 The sensor's verdicts and their priority are documented in
 [`scripts/pr-state.sh`](../scripts/pr-state.sh): `BLOCKED` > `FIX` >
-`REQUEST` > `WAIT` > `READY`. `READY` means every required check passes,
-zero review threads are unresolved, and every reachable reviewer's latest
+`GATE` > `REQUEST` > `WAIT` > `READY`. `READY` means every required check
+passes, the `BMAD FR/NFR Review Gate` status is `success` on the current
+head, zero review threads are unresolved, and every reachable reviewer's latest
 live review sits on the current head with state `APPROVED` — the state
 CodeRabbit and cubic both post once their findings are addressed. A
 reviewer no mention can reach (paused subscription, diff above CodeRabbit's
 changed-file limit, status-check bot) is `SKIPPED`: reported in the
 degrade notes, never counted as an approval (NFR-4).
 
+The FR/NFR gate is **mandatory for every PR** and has no degrade path. The
+sensor takes the `BMAD FR/NFR Review Gate` status out of the generic CI set
+(so `ci-fixer` is never handed it, and `--required-checks` cannot waive it)
+and reports it as `fr_nfr`. A head whose gate status is `missing` or
+`failure` yields `GATE`: the workflow runs `fe-sdlc-fr-nfr-review` with
+`{ pr, head }` (the nested run refuses a checkout that is not at that head
+with a clean tree), publishes the fixes it made, and re-reads the state — a
+pushed fix is a new head, so the gate runs again on the published code, and
+only a gate run on a clean head turns the status green. A gate posted as
+`pending` (a repository CI job running it) waits like any other check.
+
 Arguments: a PR number or URL, optionally `--reviewers <list>` and
 `--required-checks <list>`; or an object
-`{ pr, reviewers, requiredChecks, maxFixRounds, maxWaitRounds, waitSeconds }`.
+`{ pr, reviewers, requiredChecks, maxFixRounds, maxWaitRounds, maxGateRounds, waitSeconds }`.
 Without a PR the sensor resolves the current branch's PR.
 
 Counters:
 
 - `fix` — one per ci-fixer/resolver/publish round, max 5 for the run.
+- `gate` — one per nested FR/NFR gate run, max 3 for the run; a gate that
+  is still not green after three rounds escalates.
 - `wait` — one per 9-minute poll, max 6 per head; resets when a push
   changes the head. A reviewer that acknowledged but never reviewed the
   head within the budget is dropped with a degrade note.
@@ -69,7 +84,8 @@ Counters:
   re-mentioning.
 
 Escalates on `BLOCKED` (merged, closed, or conflicting PR), a `ci-fixer`
-`BLOCKED` return, a failed push, or an exhausted counter.
+`BLOCKED` return, an escalated FR/NFR gate run, a failed push, or an
+exhausted counter.
 
 ## `fe-sdlc-review-panel` — stage 4 as a verified fan-out
 
@@ -107,17 +123,22 @@ that reports `BLOCKED` escalates.
 The review panel runs `fr-nfr-reviewer` as one lens among several and
 verifies its findings like any other. This workflow is the gate itself, the
 loop the [bmad-fr-nfr-review-gate](../skills/bmad-fr-nfr-review-gate/SKILL.md)
-skill describes, and it runs **only when the implemented feature has a BMAD
-spec bundle**:
+skill describes, and it is **mandatory for every pull request** — never
+skipped, never passed with a report:
 
 1. **Scope** — one agent validates the profile, computes the changed-file
-   set against the diff base, and locates the spec bundle: the given
-   `specs/<slug>/`, or the newest one whose prd, epics-stories or brief
-   names the changed files. A bundle counts as present only when it holds
-   at least one of prd, architecture, epics-stories. Without one the run
-   ends `SUCCESS-WITH-REPORT` with `skipped: true` and a degrade note
-   pointing at `/fe-sdlc-plan` — the gate is not applicable, and nothing is
-   dispatched or invented.
+   set against the diff base, and resolves the requirement sources: the
+   given `specs/<slug>/`, or the newest one whose prd, epics-stories or
+   brief names the changed files (a bundle counts as present only when it
+   holds at least one of prd, architecture, epics-stories); and the PR
+   (`--pr`, or the branch's PR) with its description and linked issues.
+   Without a bundle the PR description and linked issues are the
+   requirement source; the baseline NFR catalog applies either way. A
+   named bundle that does not exist, or a change with neither a bundle nor
+   a PR description / linked issue, escalates — an untraceable change
+   cannot pass. With `--head <sha>` the agent also verifies the checkout
+   sits at that PR head with a clean tree, because the gate posts its
+   commit status for the local `HEAD`.
 2. **Gate** — `fr-nfr-reviewer` runs the gate runner exactly once
    (`make.fr_nfr_gate`, or `scripts/fr-nfr-gate.sh` when that key is
    `null`), rebuilds the per-requirement matrix, and returns `verdict`,
@@ -130,20 +151,19 @@ spec bundle**:
 4. Repeat until an iteration reports `new_findings=0` with `verdict=PASS`
    (`MAX_ITERATIONS=5`).
 
-Arguments: the specs slug, optionally `--base <ref>` and
-`--summary "<one line>"` (the gate's impact context); or
-`{ slug, base, summary, maxIterations }`.
+Arguments: the specs slug (when a bundle exists), optionally `--pr <n>`,
+`--head <sha>`, `--base <ref>` and `--summary "<one line>"` (the gate's
+impact context); or `{ slug, pr, head, base, summary, maxIterations }`.
 
 Escalates on an invalid profile, a `BLOCKED` reviewer or implementer, a
-`DEGRADED` reviewer (the bundle vanished between Scope and Gate — run
-`/fe-sdlc-plan`), a `FAIL` verdict that cites no actionable finding (a
+`DEGRADED` reviewer (the requirement source vanished between Scope and
+Gate), a gate runner the reviewer could not execute (`gate_run:
+SKIPPED (<reason>)` — no `BMAD FR/NFR Review Gate` status was posted, and a
+hand-built matrix never satisfies the mandatory gate), a `FAIL` verdict that cites no actionable finding (a
 failing matrix row without a root-cause fix is a human decision), two
 consecutive gate runs without a findings count (transport failure or a
 malformed `FR_NFR_NEW_FINDINGS:` line — one such run only consumes an
-iteration and is re-run), or an exhausted counter. A gate runner the
-reviewer had to skip (`gate_run: SKIPPED (<reason>)`) means the matrix was
-built by hand and no `BMAD FR/NFR Review Gate` commit status exists, so the
-run can end only as `SUCCESS-WITH-REPORT`, never `SUCCESS`. A findings
+iteration and is re-run), or an exhausted counter. A findings
 count that fails to decrease across three iterations is logged as
 non-converging so the ledger explains an eventual escalation.
 
@@ -158,7 +178,7 @@ workflows above:
 | Resolve plan | adopt the managed issue and `specs/<slug>/`; follow `/fe-sdlc-issue` / `/fe-sdlc-plan` once if missing          | one attempt, then escalate                  |
 | Implement    | `react-implementer` per independent story in parallel, dependent stories one at a time                          | 5 rounds for the run; `BLOCKED` escalates   |
 | Review       | `workflow('react-frontend-sdlc:fe-sdlc-review-panel')`                                                          | the panel's own guard                       |
-| FR/NFR gate  | `workflow('react-frontend-sdlc:fe-sdlc-fr-nfr-review')` against the resolved `specs/<slug>/`                    | the gate's own counter; `skipped` escalates |
+| FR/NFR gate  | `workflow('react-frontend-sdlc:fe-sdlc-fr-nfr-review')` against the resolved `specs/<slug>/`                    | the gate's own counter; escalation halts    |
 | QA           | `qa-visual-tester` against the running production-parity stack                                                  | `FAIL` loops back to Implement, max 2       |
 | Finish PR    | PR create/update per `/fe-sdlc-finish-pr` step 1, then `workflow('react-frontend-sdlc:fe-sdlc-pr-until-green')` | the finisher's own counters                 |
 
@@ -167,9 +187,11 @@ Resumability comes from the artifacts: a story already checked off, an
 existing issue, or a readiness `PASS` is adopted, never redone. If the
 runtime cannot resolve a nested workflow by name the run escalates with the
 manual commands to continue by hand rather than duplicating their logic.
-The plan stage guarantees the spec bundle, so a gate run that reports
-`skipped: true` there is a contradiction and escalates to `/fe-sdlc-plan`
-instead of passing.
+The plan stage guarantees the spec bundle and the gate never skips, so any
+gate escalation halts the feature before QA. The gate runs again in Finish
+PR: `fe-sdlc-pr-until-green` requires a green `BMAD FR/NFR Review Gate`
+status on the final PR head, which the pre-QA run (on uncommitted code)
+cannot provide.
 
 ## How the workflows find the plugin
 

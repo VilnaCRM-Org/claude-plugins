@@ -3,7 +3,7 @@ export const meta = {
   description:
     'The full frontend SDLC for one planned feature: validate the profile, resolve the issue and specs bundle, implement the stories with parallel react-implementer agents, run the review panel, run the BMAD FR/NFR review gate against the specs bundle, QA the running app, open or update the PR, then drive it to green with the AI reviewers — bounded at every stage, resumable from the artifacts that already exist',
   whenToUse:
-    'When a task already has a GitHub issue and a specs/<slug>/ planning chain (or you accept the plugin generating them) and you want the whole loop run unattended, ending in a PR that CI and the AI reviewers have approved.',
+    'When a task already has a GitHub issue and a specs/<slug>/ planning chain (or you accept the plugin generating them) and you want the whole loop run unattended, ending in a PR that CI, the mandatory BMAD FR/NFR gate (green on the final head) and the AI reviewers have approved.',
   phases: [
     { title: 'Setup check', detail: 'validate-profile.sh + setup-preflight.sh' },
     { title: 'Resolve plan', detail: 'issue, specs/<slug>/, stories' },
@@ -122,6 +122,7 @@ function storyPrompt(story, round, feedback) {
     `Implement story ${story.id} — ${story.title} (implement round ${round}/${OPTS.maxImplementRounds}) from specs/${OPTS.slug}/epics-stories.md for issue ${OPTS.issue}.`,
     story.files_hint?.length ? `Files the story names: ${story.files_hint.join(', ')}.` : '',
     feedback ? `Loop-back feedback to satisfy first:\n${feedback}` : '',
+    'If the story builds UI, work component-first: reuse UI-kit components; build every missing component (and new variant) in isolation with its Storybook story covering its states and variants before any page or feature uses it; then compose the page/feature from kit components only.',
     'Follow your agent contract end to end (TDD, container-only execution through the profile make map, bulletproof-react layering, no suppression, semantic selectors), toggle the story checkbox only when its acceptance criteria are met, run no git, and end with the ---RALPH_STATUS--- block. Mirror that block into the structured output.',
   ].filter(Boolean).join('\n')
 }
@@ -180,9 +181,6 @@ while (true) {
     return escalate('fr-nfr-gate', '-', `nested workflow unavailable: ${e?.message || e}`, `run /react-frontend-sdlc:fe-sdlc-fr-nfr-review ${OPTS.slug}, then /react-frontend-sdlc:fe-sdlc-pr-until-green by hand`)
   }
   if (!gate || gate.result === 'ESCALATED') return escalate('fr-nfr-gate', gate?.iterations ?? '-', 'FR/NFR gate escalated', 'read its escalation block above', { gate })
-  if (gate.skipped === true) {
-    return escalate('fr-nfr-gate', '-', `the plan stage resolved specs/${OPTS.slug}/ but the FR/NFR gate found no BMAD spec bundle there`, 'run /fe-sdlc-plan for this feature, then re-run')
-  }
   degradeNotes.push(...(gate.degrade_notes || []))
   note(`fr-nfr gate: ${gate.result} iterations=${gate.iterations ?? 0}`)
 
