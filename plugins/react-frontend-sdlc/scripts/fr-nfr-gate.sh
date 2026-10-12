@@ -340,35 +340,40 @@ done
 # missing — a stale base would put upstream commits into the review, a missing
 # one the whole tree. The commit is used when present locally, otherwise
 # fetched from the PR's own repository; origin/<base> and a local <base> are
-# the fallbacks for a run without a PR.
+# the base only for a run without a PR.
 diff_base=""
 diff_label=""
 if [[ -n "$PR" ]]; then
-  base_oid="$(gh pr view "$PR" --repo "$pr_repo" --json baseRefOid --jq '.baseRefOid // ""' 2>/dev/null)" || base_oid=""
-  if [[ "$base_oid" =~ ^[0-9a-f]{40}$ ]]; then
-    if ! git cat-file -e "${base_oid}^{commit}" 2>/dev/null; then
-      # The clone URL comes from gh, so a GitHub Enterprise host works too;
-      # github.com is only the fallback when gh cannot answer.
-      pr_repo_url="$(gh repo view "$pr_repo" --json url --jq '.url // ""' 2>/dev/null)" || pr_repo_url=""
-      [[ "$pr_repo_url" =~ ^https://[^[:space:]]+$ ]] || pr_repo_url="https://github.com/${pr_repo}"
-      git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
-        fetch --quiet --no-tags "${pr_repo_url}.git" "$base_oid" 2>/dev/null \
-        || log_warn "could not fetch the PR base commit ${base_oid:0:7} from ${pr_repo_url}"
-    fi
-    if git cat-file -e "${base_oid}^{commit}" 2>/dev/null \
-        && diff_base="$(git merge-base HEAD "$base_oid" 2>/dev/null)"; then
-      diff_label="the merge-base with the PR base commit ${base_oid:0:7} ($pr_repo)"
-    fi
+  # A PR is reviewed against its exact base commit or not at all: a failed
+  # read, an unusable value or an unfetchable commit fails closed, because any
+  # guessed fallback (origin/<base>, a local branch) can be stale in a fork
+  # and put commits this PR did not change into the review.
+  base_oid="$(gh pr view "$PR" --repo "$pr_repo" --json baseRefOid --jq '.baseRefOid // ""')" \
+    || source_fail "cannot read the base commit of PR #$PR" \
+         "cannot read the base commit (baseRefOid) of PR #$PR in $pr_repo — restore gh access, then re-run"
+  [[ "$base_oid" =~ ^[0-9a-f]{40}$ ]] \
+    || source_fail "PR #$PR reports no usable base commit" \
+         "PR #$PR in $pr_repo reports no usable base commit (baseRefOid: '${base_oid}')"
+  if ! git cat-file -e "${base_oid}^{commit}" 2>/dev/null; then
+    # The clone URL comes from gh, so a GitHub Enterprise host works too;
+    # github.com is only the fallback when gh cannot answer.
+    pr_repo_url="$(gh repo view "$pr_repo" --json url --jq '.url // ""' 2>/dev/null)" || pr_repo_url=""
+    [[ "$pr_repo_url" =~ ^https://[^[:space:]]+$ ]] || pr_repo_url="https://github.com/${pr_repo}"
+    git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
+      fetch --quiet --no-tags "${pr_repo_url}.git" "$base_oid" 2>/dev/null \
+      || log_warn "could not fetch the PR base commit ${base_oid:0:7} from ${pr_repo_url}"
   fi
-  if [[ -z "$diff_label" ]]; then
-    base_branch="$(gh pr view "$PR" --repo "$pr_repo" --json baseRefName --jq '.baseRefName // ""' 2>/dev/null)" || base_branch=""
+  if git cat-file -e "${base_oid}^{commit}" 2>/dev/null \
+      && diff_base="$(git merge-base HEAD "$base_oid" 2>/dev/null)"; then
+    diff_label="the merge-base with the PR base commit ${base_oid:0:7} ($pr_repo)"
+  else
+    source_fail "cannot resolve the base commit of PR #$PR" \
+      "cannot resolve the base commit ${base_oid:0:7} of PR #$PR locally or from $pr_repo — fetch the PR's base branch, then re-run"
   fi
-fi
-if [[ -z "$diff_label" ]]; then
-  if [[ ! "${base_branch:-}" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-    base_branch="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" || base_branch=""
-    base_branch="${base_branch#origin/}"
-  fi
+else
+  # No PR: the default branch, from origin first, then a local branch.
+  base_branch="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" || base_branch=""
+  base_branch="${base_branch#origin/}"
   for cand in "origin/${base_branch:-main}" "${base_branch:-main}"; do
     if git rev-parse --verify --quiet "${cand}^{commit}" >/dev/null 2>&1 \
         && diff_base="$(git merge-base HEAD "$cand" 2>/dev/null)"; then
@@ -376,16 +381,10 @@ if [[ -z "$diff_label" ]]; then
       break
     fi
   done
-fi
-if [[ -z "$diff_label" ]]; then
-  if [[ -n "$PR" ]]; then
-    # A PR whose base cannot be resolved must not be reviewed against some
-    # other change set (the whole tree): fail closed with the remedy.
-    source_fail "cannot resolve the base commit of PR #$PR" \
-      "cannot resolve the base commit of PR #$PR locally or from $pr_repo — fetch the PR's base branch, then re-run"
+  if [[ -z "$diff_label" ]]; then
+    diff_base="$(git hash-object -t tree /dev/null)"
+    diff_label="the empty tree (no PR and no base branch found locally, so the whole tracked tree is the change set)"
   fi
-  diff_base="$(git hash-object -t tree /dev/null)"
-  diff_label="the empty tree (no PR and no base branch found locally, so the whole tracked tree is the change set)"
 fi
 changed_files="$(git diff --name-only "$diff_base")" \
   || source_fail "cannot compute the change set" "git diff against $diff_label failed"

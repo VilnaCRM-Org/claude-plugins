@@ -42,6 +42,7 @@ route_gh() {
 #!/usr/bin/env bash
 echo "gh \$*" >> "$GH_LOG"
 case "\$*" in
+  *baseRefOid*) echo "$SHA" ;;
   *baseRef*) ;;
   "pr view"*|"pr list"*) echo 7 ;;
 esac
@@ -66,7 +67,9 @@ case "$*" in
     printf '%s\n' "${PR_LIST:-7}" ;;
   "pr view 7 --repo "*"--json body"*) printf '%s\n' "${PR_BODY:-}" ;;
   "pr view 7 --repo "*"--json title"*) echo "Add the currency field" ;;
-  "pr view 7 --repo "*"--json baseRefOid"*) printf '%s\n' "${PR_BASE_OID:-}" ;;
+  "pr view 7 --repo "*"--json baseRefOid"*)
+    [ "${PR_BASE_EXIT:-0}" -eq 0 ] || { echo "HTTP 502" >&2; exit 1; }
+    printf '%s\n' "${PR_BASE_OID:-$(git rev-parse main)}" ;;
   "repo view "*"--json url"*) [ -z "${REPO_URL:-}" ] || echo "$REPO_URL" ;;
   "pr view 7 --repo "*"--json baseRefName"*) printf '%s\n' "${PR_BASE_NAME:-}" ;;
   "api graphql "*) printf '%s\n' "${PR_ISSUES:-}" ;;
@@ -603,6 +606,7 @@ case "$*" in
   "pr list --repo "*) echo 7 ;;
   "pr view 7 --repo "*"--json body"*) echo "AC: x" ;;
   "pr view 7 --repo "*"--json title"*) echo "t" ;;
+  "pr view 7 --repo "*"--json baseRefOid"*) git rev-parse main ;;
   api*/statuses/*) echo "HTTP 403: Resource not accessible by integration" >&2; exit 1 ;;
 esac
 EOF
@@ -660,6 +664,7 @@ case "$*" in
   "pr list --repo "*) echo 7 ;;
   "pr view 7 --repo "*"--json body"*) echo "AC: x" ;;
   "pr view 7 --repo "*"--json title"*) echo "t" ;;
+  "pr view 7 --repo "*"--json baseRefOid"*) git rev-parse main ;;
   "pr comment "*) echo "HTTP 403: Resource not accessible by integration" >&2; exit 1 ;;
 esac
 EOF
@@ -741,7 +746,7 @@ EOF
   stub_git_fetch
   PR_BASE_OID="0123456789abcdef0123456789abcdef01234567" PR_BASE_NAME="no-such-branch" PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"cannot resolve the base commit of PR #7"* ]]
+  [[ "$output" == *"cannot resolve the base commit 0123456 of PR #7"* ]]
   grep -q -- '-f state=failure' "$GH_LOG"
   [ ! -f "$CLAUDE_LOG" ]
 }
@@ -785,4 +790,14 @@ EOF
   [ -n "$desc" ]
   [ "${#desc}" -le 140 ]
   [[ "$desc" == *"..." ]]
+}
+
+@test "a failed baseRefOid read fails closed instead of guessing a local base" {
+  rm -rf specs
+  pr_gh
+  PR_BASE_EXIT=1 PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot read the base commit (baseRefOid) of PR #7"* ]]
+  grep -q -- '-f state=failure' "$GH_LOG"
+  [ ! -f "$CLAUDE_LOG" ]
 }
