@@ -309,6 +309,13 @@ run_wf() { # <workflow-file> <scenario-file>
   echo "$output" | jq -e '.calls[1].prompt | contains("fr-nfr-gate.sh\" --spec-path '"'"'specs/alpha-login'"'"' --impact-context '"'"'login form with polite validation status'"'"'")'
 }
 
+@test "fr-nfr-review: a Scope reply that omits clean / head_matches_pr is treated as advisory, never publishable" {
+  echo '{"args":"alpha-login","replies":[{"match":"^scope$","reply":{"profile_valid":true,"blocked":null,"base":"origin/main","files":["src/a.tsx"],"specs_present":true,"slug":"alpha-login","spec_files":["prd.md"],"pr":7,"pr_requirements":true,"summary":"x"}},{"match":"^fr-nfr-reviewer ","reply":{"status":"OK","verdict":"PASS","new_findings":0,"gate_run":"plugin script","note":null,"findings":[]}}]}' >"$BATS_TEST_TMPDIR/scope-missing.json"
+  run node "$HARNESS" "$WF/fe-sdlc-fr-nfr-review.js" "$BATS_TEST_TMPDIR/scope-missing.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.status_posted == false and (.calls[1].prompt | contains("--advisory"))'
+}
+
 @test "fr-nfr-review: a dirty checkout or a HEAD that is not the PR head runs the gate advisory, publishing nothing" {
   run_wf fe-sdlc-fr-nfr-review.js fnr-advisory.json
   [ "$status" -eq 0 ]

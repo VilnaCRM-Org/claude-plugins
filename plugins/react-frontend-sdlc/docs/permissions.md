@@ -12,6 +12,17 @@ automatically, while Bash commands still need to be covered by the
 allowlist below. This is the plugin-wide default and the only mode its
 scripts use.
 
+## Publishing the FR/NFR gate status
+
+`scripts/fr-nfr-gate.sh` posts the mandatory `BMAD FR/NFR Review Gate`
+commit status (and its PR comment) to the repository that owns the PR. In a
+fork checkout that is the **upstream** repository, so the `gh` credential
+must hold `statuses:write` (and permission to comment) there. Run the gate
+with a maintainer credential, or from a trusted upstream workflow that does
+not execute the PR's code with write access; a fork-only token cannot
+publish the gate, and the script then fails closed and names this
+requirement. `--advisory` runs publish nothing and need no write access.
+
 ## The settings.json allowlist
 
 `/fe-sdlc-setup` writes (merge, never clobber) this allowlist into the

@@ -47,13 +47,17 @@ SPEC_PATH=""
 PR=""
 IMPACT_CONTEXT=""
 ADVISORY=0
-# Each PR / issue text is bounded on its own (with an explicit truncation
-# marker) so one oversized source cannot crowd the others out of the prompt.
-SOURCE_TEXT_LIMIT=12000
-# ...and all of them together share one budget: the prompt reaches claude as a
-# single argv string, which Linux caps at 128 KiB (MAX_ARG_STRLEN), so the
-# total stays well below it even for multi-byte (e.g. Cyrillic) text.
-TOTAL_SOURCE_LIMIT=40000
+# Budgets are in UTF-8 BYTES, not characters: the prompt reaches claude as a
+# single argv string, which Linux caps at 128 KiB (MAX_ARG_STRLEN), and a
+# character count would let 4-byte text overflow it. Each PR / issue text is
+# bounded on its own (with an explicit truncation marker) so one oversized
+# source cannot crowd the others out...
+SOURCE_BYTE_LIMIT=12000
+# ...all of them together share one budget...
+TOTAL_SOURCE_BYTE_LIMIT=40000
+# ...and the finished prompt is checked against a hard ceiling below the
+# kernel limit as the last line of defence.
+PROMPT_BYTE_LIMIT=120000
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --spec-path) SPEC_PATH="${2:?--spec-path needs a value}"; shift 2 ;;
@@ -140,7 +144,11 @@ post_status() {
     log_warn "commit $head_sha not visible to GitHub yet; retrying the status post ($attempt/3)"
     sleep $(( STATUS_RETRY_DELAY * attempt ))
   done
-  die "failed to post commit status to $pr_repo@${head_sha} (the status check is the gate's durable verdict; restore gh access and re-run): ${err:-no error output}"
+  local scope_hint=""
+  if [[ "$pr_repo" != "$repo_slug" ]]; then
+    scope_hint=" — this is a fork checkout: the status goes to the upstream repository $pr_repo, so the gh credential needs statuses:write THERE (run the gate with a maintainer credential or from a trusted upstream workflow; a fork-only token cannot publish the mandatory gate)"
+  fi
+  die "failed to post commit status to $pr_repo@${head_sha} (the status check is the gate's durable verdict; restore gh access and re-run)${scope_hint}: ${err:-no error output}"
 }
 
 # --- requirement sources beyond the spec bundle -------------------------------
@@ -155,25 +163,38 @@ source_fail() {
   die "$2"
 }
 
-# bound_text TEXT LIMIT — cap one source at LIMIT characters and say so, so a
-# long source can neither crowd out the others nor be cut silently.
-bound_text() {
-  local text=$1 limit=$2
-  if (( ${#text} > limit )); then
-    printf '%s\n[... %d characters truncated; a requirement in the omitted text is reported as unverifiable, never assumed met]' \
-      "${text:0:limit}" "$(( ${#text} - limit ))"
-  else
-    printf '%s' "$text"
-  fi
+# byte_len TEXT — the UTF-8 byte length (under LC_ALL=C, ${#} counts bytes).
+byte_len() {
+  local LC_ALL=C
+  printf '%d' "${#1}"
 }
-budget_left=$TOTAL_SOURCE_LIMIT
+
+# bound_text TEXT LIMIT — cap one source at LIMIT bytes and say so, so a long
+# source can neither crowd out the others nor be cut silently. The cut is made
+# on character boundaries (slicing in the caller's locale), shrinking until the
+# byte length fits, so no multi-byte character is split.
+bound_text() {
+  local text=$1 limit=$2 cut bytes
+  bytes="$(byte_len "$text")"
+  if (( bytes <= limit )); then
+    printf '%s' "$text"
+    return 0
+  fi
+  cut=${text:0:limit}
+  while (( $(byte_len "$cut") > limit )); do
+    cut=${cut:0:$(( ${#cut} * limit / $(byte_len "$cut") ))}
+  done
+  printf '%s\n[... %d bytes truncated; a requirement in the omitted text is reported as unverifiable, never assumed met]' \
+    "$cut" "$(( bytes - $(byte_len "$cut") ))"
+}
+budget_left=$TOTAL_SOURCE_BYTE_LIMIT
 # source_limit — the cap for the next source: its own limit or what is left of
 # the shared budget, whichever is smaller.
 source_limit() {
-  if (( budget_left < SOURCE_TEXT_LIMIT )); then
+  if (( budget_left < SOURCE_BYTE_LIMIT )); then
     printf '%d' "$budget_left"
   else
-    printf '%d' "$SOURCE_TEXT_LIMIT"
+    printf '%d' "$SOURCE_BYTE_LIMIT"
   fi
 }
 
@@ -214,7 +235,7 @@ if [[ -n "$PR" ]]; then
     || source_fail "cannot read PR #$PR (requirement source)" "cannot read PR #$PR in $pr_repo"
   if [[ -n "${pr_body//[[:space:]]/}" ]]; then
     PR_TEXT="$(bound_text "$(fence_safe "PR #${PR} — ${pr_title}"$'\n'"${pr_body}")" "$(source_limit)")"
-    budget_left=$(( budget_left - ${#PR_TEXT} ))
+    budget_left=$(( budget_left - $(byte_len "$PR_TEXT") ))
   fi
   # owner/name#number per closing reference, so a cross-repository issue is
   # read from its own repository rather than a same-numbered local one. Read
@@ -250,7 +271,7 @@ if [[ -n "$PR" ]]; then
       continue
     fi
     issue_text="$(bound_text "$(fence_safe "Issue ${issue_repo}#${n} — ${issue_title}"$'\n'"${issue_body}")" "$(source_limit)")"
-    budget_left=$(( budget_left - ${#issue_text} ))
+    budget_left=$(( budget_left - $(byte_len "$issue_text") ))
     ISSUES_TEXT+="${issue_text}"$'\n\n'
   done
   if (( omitted_issues > 0 )); then
@@ -285,6 +306,11 @@ if [[ -n "$IMPACT_CONTEXT" ]]; then
   GATE_PROMPT+=" Impact context: ${IMPACT_CONTEXT}."
 fi
 GATE_PROMPT+=" End your response with the mandatory last line 'FR_NFR_NEW_FINDINGS: <n>' where <n> is the number of new findings (0 when the change set is clean)."
+prompt_bytes="$(byte_len "$GATE_PROMPT")"
+if (( prompt_bytes > PROMPT_BYTE_LIMIT )); then
+  source_fail "gate prompt too large (${prompt_bytes} bytes)" \
+    "the gate prompt is ${prompt_bytes} bytes, over the ${PROMPT_BYTE_LIMIT}-byte ceiling for one claude argument — shorten --impact-context"
+fi
 
 post_comment() {
   local body=$1

@@ -45,7 +45,7 @@ const PLUGIN_ROOT = [
 
 const SCOPE_SCHEMA = {
   type: 'object',
-  required: ['profile_valid', 'base', 'files', 'specs_present', 'summary', 'pr', 'pr_requirements'],
+  required: ['profile_valid', 'base', 'files', 'specs_present', 'summary', 'pr', 'pr_requirements', 'clean', 'head_matches_pr'],
   properties: {
     profile_valid: { type: 'boolean' },
     blocked: { type: ['string', 'null'] },
@@ -183,7 +183,8 @@ if (!hasSpecs && !(scope.pr && scope.pr_requirements)) {
 // or on a commit that is not the PR head reviews code the status would not
 // describe: such a run is advisory (no status, no comment) and the
 // authoritative run happens on the published head (fe-sdlc-pr-until-green).
-const advisory = scope.clean === false || scope.head_matches_pr === false
+// Fail safe: a missing field counts as unverified, so the run publishes nothing.
+const advisory = scope.clean !== true || (scope.pr != null && scope.head_matches_pr !== true)
 if (advisory) degradeNotes.push('advisory gate run: uncommitted changes or HEAD is not the PR head — no BMAD FR/NFR Review Gate status or comment was posted; the authoritative run happens on the published PR head')
 const requirementSource = hasSpecs ? `specs/${scope.slug}/` : `PR #${scope.pr} description${(scope.linked_issues || []).length ? ` + issue(s) ${scope.linked_issues.map((n) => `#${n}`).join(', ')}` : ''}`
 const runnerArgs = [hasSpecs ? `--spec-path ${shellQuote(`specs/${scope.slug}`)}` : null, scope.pr ? `--pr ${scope.pr}` : null, scope.summary ? `--impact-context ${shellQuote(scope.summary)}` : null, advisory ? '--advisory' : null].filter(Boolean).join(' ')
