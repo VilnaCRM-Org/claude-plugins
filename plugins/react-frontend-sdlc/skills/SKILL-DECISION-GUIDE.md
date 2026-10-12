@@ -163,8 +163,11 @@ capability, so a NOT-APPLICABLE verdict for a technique skill always cites the a
 
 Any UI change that introduces a component the UI kit lacks, or a new variant
 of a kit component, EXECUTEs `frontend-component-development` (its
-component-first section) and `storybook-story-authoring`: the component and
-its story come before the page or feature that composes it.
+component-first section): the component comes before the page or feature
+that composes it. `storybook-story-authoring` EXECUTEs alongside it when
+`capabilities.storybook` is true (the story comes first too); when it is
+false, record that skill NOT-APPLICABLE and keep the component-first order
+with isolated unit tests.
 
 - [playwright-mobile-device-lane](playwright-mobile-device-lane/SKILL.md) — Use when adding or extending real mobile-device coverage to a Playwright suite — touch/tap specs, Pixel or iPhone device descriptors, `isMobile`/`hasTouch` contexts, device-pixel-ratio visual baselin…
 - [playwright-visual-baseline-grep-title](playwright-visual-baseline-grep-title/SKILL.md) — Use when a Playwright run filtered with -g / --grep exits 0 but an expected visual baseline PNG was never written, when a snapshot filter has to match a title containing spaces or a separator, or whe…

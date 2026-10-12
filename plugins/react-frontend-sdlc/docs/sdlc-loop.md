@@ -162,7 +162,7 @@ benefit from fan-out and unattended repetition — see
   renders one verdict (`BLOCKED`, `FIX`, `REQUEST`, `WAIT`, `READY`); the
   workflow requests the AI reviewers with the exact mentions, waits for
   their reviews, dispatches `ci-fixer` and `pr-comment-resolver`, pushes,
-  runs the mandatory FR/NFR gate on any head without a green gate status,
+  runs the mandatory FR/NFR gate on any head whose gate status is missing or failed,
   and repeats until every reachable reviewer approves the head and CI and
   the FR/NFR gate are green. Its exit condition is stage 6's, made verifiable.
 - `/react-frontend-sdlc:fe-sdlc-review-panel` runs stage 4 with every
@@ -170,10 +170,11 @@ benefit from fan-out and unattended repetition — see
 - `/react-frontend-sdlc:fe-sdlc-fr-nfr-review` runs the stage-4 BMAD
   FR/NFR gate as its own bounded loop — one `fr-nfr-reviewer` gate run per
   iteration, root-cause fixes by `react-implementer`, until zero new
-  findings with verdict PASS — on every PR: against the `specs/<slug>/`
-  bundle when there is one, else the PR description and linked issues;
-  `fe-sdlc-pr-until-green` runs it on any head whose
-  `BMAD FR/NFR Review Gate` status is missing or red.
+  findings with verdict PASS — on every PR: against the PR description and
+  linked issues, the `specs/<slug>/` bundle when there is one, and the
+  baseline NFR catalog always; `fe-sdlc-pr-until-green` runs it on any
+  head whose `BMAD FR/NFR Review Gate` status is missing or failed (a
+  pending status is waited on).
 - `/react-frontend-sdlc:fe-sdlc-feature` composes stages 0–6 for one
   planned feature and nests the three workflows above.
 

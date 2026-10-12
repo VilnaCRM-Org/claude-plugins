@@ -9,6 +9,7 @@ description: Creates the full BMAD planning artifact chain (research, brief, PRD
 
 - `project.name`, `project.repo`
 - `architecture.source_root`, `architecture.modules`, `architecture.component_prefix`
+- `capabilities.storybook`, `make.storybook_build`
 - `framework.ui`, `framework.state`, `framework.di`, `framework.router`, `framework.bundler`, `framework.runtime`, `framework.i18n`, `framework.graphql_mock`
 - `quality.coverage_statements`, `quality.coverage_branches`, `quality.coverage_functions`, `quality.coverage_lines`, `quality.mutation_msi`, `quality.jscpd_clones`, `quality.eslint_errors`, `quality.eslint_warnings`, `quality.tsc_errors`, `quality.depcruise_violations`, `quality.metrics_enforced`, `quality.visual_diffs`, `quality.lighthouse_desktop`, `quality.lighthouse_mobile`
 
@@ -53,7 +54,9 @@ relax them.
   story must carry its a11y acceptance criteria (semantic roles, keyboard
   operability, contrast, focus management) from the PRD onward.
 - UI is planned component-first: the architecture inventories the UI kit
-  (shared components carrying `architecture.component_prefix`) against what
+  (shared components carrying `architecture.component_prefix`, plus any
+  external UI-kit package the repository depends on, e.g. `framework.ui`)
+  against what
   the feature needs, and every component the kit lacks gets its own story —
   built in isolation (in Storybook when the profile has it) before any page
   uses it — ahead of the story that composes the page or feature.
@@ -333,7 +336,8 @@ the UI change must pass. UI work is decomposed component-first:
   without Storybook the criterion is the isolated unit test plus the recorded
   `SKIPPED: storybook — component-first order kept without stories` note;
 - then one **composition story** per page or feature, marked **dependent**
-  on every component story it uses, whose acceptance criteria require that
+  on every component story it uses (and **independent** when it composes
+  only existing kit components), whose acceptance criteria require that
   the page/feature is assembled from kit components (no one-off inline
   markup duplicating a kit component) plus the user-journey, routing, state
   and E2E checks. The main agent separately reviews story quality,

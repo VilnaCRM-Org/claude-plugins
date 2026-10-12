@@ -98,7 +98,8 @@ plausible-but-wrong finding never reaches the implementer.
    performs the skill triage from `skills/SKILL-DECISION-GUIDE.md`
    (EXECUTE / NOT-APPLICABLE for every skill).
 2. **Review** — in parallel: `code-quality-reviewer`; `fr-nfr-reviewer`
-   when a spec bundle exists; one `accessibility-auditor` per family
+   on every change set (against the bundle when one exists, else the PR
+   description and linked issues, plus the baseline NFR catalog); one `accessibility-auditor` per family
    (`forms`, `keyboard`, `semantics-and-names`, `contrast-and-motion`) when
    UI files changed; and one technique lens per group of four EXECUTE
    skills, each reading the skill bodies in full.
@@ -135,10 +136,11 @@ never passed with a report:
    (`--pr`, or the branch's PR) with its description and linked issues.
    Without a bundle the PR description and linked issues are the
    requirement source; the baseline NFR catalog applies either way. A
-   named bundle that does not exist, or a change with neither a bundle nor
-   a PR description / linked issue, escalates — an untraceable change
-   cannot pass; the gate script still runs once first so the head carries
-   its fail-closed failure status. An unbundled branch therefore needs its
+   named bundle that does not exist escalates at once (the caller passed a
+   wrong slug). A change with neither a bundle nor a PR description /
+   linked issue escalates too — an untraceable change cannot pass — after
+   the gate script runs once so the head carries its fail-closed failure
+   status. An unbundled branch therefore needs its
    PR open (a draft with acceptance criteria or `Closes #N` is enough)
    before the gate runs. With `--head <sha>` the agent also verifies the checkout
    sits at that PR head with a clean tree, because the gate posts its

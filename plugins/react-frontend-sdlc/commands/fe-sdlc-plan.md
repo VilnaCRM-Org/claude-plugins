@@ -63,9 +63,10 @@ a recorded assumption.
       component story per component the UI kit lacks or new variant of
       a kit component (built with its Storybook story, applicable states
       and variants, when Storybook is available), marked independent
-      only when it needs no other component story, then a dependent
-      composition story that assembles the page or feature from those
-      components
+      only when it needs no other component story, then a composition
+      story that assembles the page or feature from those components —
+      dependent on the component stories it uses, and independent when
+      it uses only existing kit components
    6. `readiness.md` — implementation-readiness verdict (PASS/FAIL with
       named findings)
 

@@ -139,7 +139,7 @@ const scope = await agent(
     '   files = `git diff --name-only <base>...HEAD` plus uncommitted changes (`git status --porcelain` paths).',
     `3. Spec bundle: ${OPTS.slug ? `specs/${OPTS.slug}/` : 'the newest specs/<slug>/ directory whose prd, epics-stories or brief names the changed files or their feature; none when no directory qualifies'}.`,
     '   specs_present is true only when that directory exists and holds at least one of prd, architecture, epics-stories (list what exists in spec_files); set slug to the directory name or null. Never create or edit a spec.',
-    `4. Pull request: ${OPTS.pr ? `PR #${OPTS.pr}` : 'the current branch\'s PR (`gh pr view --json number --jq .number`), or null when the branch has none'}. Read \`gh pr view <n> --json body,closingIssuesReferences\`: pr_requirements is true when the body is non-blank or at least one issue is linked; list the linked issue numbers in linked_issues.`,
+    `4. Pull request: ${OPTS.pr ? `PR #${OPTS.pr}` : 'the current branch\'s PR (`gh pr view --json number --jq .number`), or null when the branch has none'}. Read its body (\`gh pr view <n> --json body\`) and its closing issues (each with its own repository): pr_requirements is true only when the PR body is non-blank or at least one linked issue has a non-blank BODY — a title-only issue is no requirement source, exactly as the gate script judges it; list the qualifying issue numbers in linked_issues.`,
     OPTS.head
       ? `5. Head check: \`git rev-parse HEAD\` must equal ${OPTS.head} and \`git status --porcelain\` must print nothing — the gate posts its commit status for the local HEAD, so it must run on exactly that PR head. Otherwise set blocked to "local checkout is not at PR head ${OPTS.head.slice(0, 7)} with a clean tree — check out and pull the PR branch".`
       : '5. Head check: none requested.',
@@ -178,7 +178,7 @@ if (!hasSpecs && !(scope.pr && scope.pr_requirements)) {
   )
 }
 const requirementSource = hasSpecs ? `specs/${scope.slug}/` : `PR #${scope.pr} description${(scope.linked_issues || []).length ? ` + issue(s) ${scope.linked_issues.map((n) => `#${n}`).join(', ')}` : ''}`
-const runnerArgs = [hasSpecs ? `--spec-path specs/${scope.slug}` : null, scope.pr ? `--pr ${scope.pr}` : null, scope.summary ? `--impact-context ${shellQuote(scope.summary)}` : null].filter(Boolean).join(' ')
+const runnerArgs = [hasSpecs ? `--spec-path ${shellQuote(`specs/${scope.slug}`)}` : null, scope.pr ? `--pr ${scope.pr}` : null, scope.summary ? `--impact-context ${shellQuote(scope.summary)}` : null].filter(Boolean).join(' ')
 log(`scope: ${scope.files.length} files against ${scope.base}; requirement source ${requirementSource}${hasSpecs ? ` (${(scope.spec_files || []).join(', ') || 'files unlisted'})` : ''}`)
 
 function gatePrompt(iteration) {
@@ -205,11 +205,13 @@ const isComplete = (r) => Boolean(r) && r.status === 'COMPLETE'
 function gateEscalation(gate, iteration) {
   if (!gate) return escalate(iteration, 'fr-nfr-reviewer returned nothing', 're-run; if it repeats, check the agent definition')
   if (gate.status === 'BLOCKED') return escalate(iteration, `fr-nfr-reviewer BLOCKED — ${gate.note || ''}`, 'fix the blocking cause (plugin root, profile, gate runner), then re-run')
+  // A skipped runner is checked first: the reviewer may pair it with DEGRADED,
+  // and its remedy (restore the runner) differs from a missing source's.
+  if (/^SKIPPED/i.test(gate.gate_run || '')) {
+    return escalate(iteration, `gate runner ${gate.gate_run} — no "BMAD FR/NFR Review Gate" commit status was posted, and the gate is mandatory and must be green on every PR`, 'restore the gate runner (claude and gh on PATH, a resolvable repository, gh auth), then re-run; a manually built matrix never satisfies the gate')
+  }
   if (gate.verdict === 'DEGRADED') {
     return escalate(iteration, `fr-nfr-reviewer reported the requirement source ${requirementSource} missing or empty although scope found it — ${gate.note || ''}`, hasSpecs ? 'run /fe-sdlc-plan for this feature, then re-run' : 'restore the PR description or linked issue, then re-run')
-  }
-  if (/^SKIPPED/i.test(gate.gate_run || '')) {
-    return escalate(iteration, `gate runner ${gate.gate_run} — no "BMAD FR/NFR Review Gate" commit status was posted, and the gate is mandatory and must be green on every PR`, 'restore the gate runner (claude and gh on PATH, an origin remote, gh auth), then re-run; a manually built matrix never satisfies the gate')
   }
   return null
 }

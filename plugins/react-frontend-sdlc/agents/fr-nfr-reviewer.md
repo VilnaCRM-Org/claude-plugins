@@ -14,9 +14,9 @@ One of the three stage-4 review lenses dispatched by `/fe-sdlc-review`
 threshold checks, and `accessibility-auditor`, which owns the a11y gate
 — never duplicate their work). This agent answers exactly one question:
 **does the React change set satisfy every requirement of its sources?**
-The sources are the `specs/<slug>/` bundle when the change was
-BMAD-planned, otherwise the PR description and its linked issues, plus
-the baseline NFR catalog (`NFR-BASE-*`, see the gate script) on every
+The sources are the PR description and its linked issues (read on every
+run when a PR exists), the `specs/<slug>/` bundle as well when the change
+was BMAD-planned, and the baseline NFR catalog (`NFR-BASE-*`, see the gate script) on every
 run. The gate is mandatory for every PR: it is never "not applicable". It does so by:
 
 1. running the FR/NFR gate runner against the specs bundle,
@@ -77,7 +77,7 @@ agent runs no git commands, so it cannot derive them itself.
   ```bash
   "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --spec-path "specs/<slug>" --impact-context "<one-line change summary>"
   # no spec bundle: the PR description and linked issues are the source
-  "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --pr <n> --impact-context "<one-line change summary>"
+  "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --pr "$PR" --impact-context "<one-line change summary>"
   ```
 
   With neither a bundle nor a PR description / linked issue the script
@@ -175,7 +175,7 @@ escalate.
 | --- | --- |
 | `make.fr_nfr_gate: null` | Standard substitution: run the plugin script, note "plugin script substituted" in the Gate run section. Not a degrade, no penalty. |
 | Named requirement source missing or empty (the spec bundle path, or a PR with no description and no linked issue) | Do NOT loop. Emit a single report: matrix replaced by `SPECS MISSING: <path>` (or `REQUIREMENTS MISSING: PR #<n>`), `verdict=DEGRADED`, recommended action "re-run /fe-sdlc-plan, or link the issue / write the acceptance criteria into the PR description". Consumes one iteration; the dispatcher escalates. |
-| Gate runner cannot execute (script missing, `claude`/`gh` not on PATH, no origin remote) | Build the matrix manually from the requirement sources + change-set inspection so the report still shows what is unmet; Gate run section says `SKIPPED (<reason>)`. This NEVER satisfies the gate — no commit status was posted — and the dispatcher escalates; recommend restoring the runner. |
+| Gate runner cannot execute (script missing, `claude`/`gh` not on PATH, or the repository cannot be resolved — no origin remote AND `gh repo view` fails) | Build the matrix manually from the requirement sources + change-set inspection so the report still shows what is unmet; Gate run section says `SKIPPED (<reason>)`. This NEVER satisfies the gate — no commit status was posted — and the dispatcher escalates; recommend restoring the runner. |
 | Gate exits 1 for transport failure (after the script's own internal retry) | Counts as one consumed iteration with `new findings: unknown (transport)` in the ledger; report it and let the dispatcher decide to re-invoke. Never retry in a tight loop inside one invocation. |
 | Gate output malformed (no `FR_NFR_NEW_FINDINGS:` line) | Same as transport failure: one consumed iteration, note the contract violation verbatim. |
 

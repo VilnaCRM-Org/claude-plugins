@@ -11,7 +11,7 @@ Stage 6 of the SDLC loop. Three independent bounded loops finish the PR:
 `pr-comment-resolver` until zero review comments remain unresolved. Each
 loop keeps its OWN iteration counter. The FR/NFR gate is **mandatory for
 every PR** — spec-planned or not — and has no degrade path: a PR whose
-head lacks a green gate status is never finished. Every missing external capability degrades with a
+head lacks a green gate status is never finished. Every other missing external capability degrades with a
 report instead of failing (NFR-4).
 
 ## Inputs
@@ -175,7 +175,7 @@ report instead of failing (NFR-4).
    ```
 
    A non-`READY` verdict is routed by its CAUSE, not by its name — the
-   sensor returns `WAIT` for two different states, and conflating them
+   sensor returns `WAIT` for three different states, and conflating them
    burns counter-B budget on checks that are merely still running. Read
    the snapshot's `CI:` line and its `REVIEWER:` rows before deciding:
 

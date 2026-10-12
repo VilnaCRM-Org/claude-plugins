@@ -45,8 +45,9 @@ explicit note rather than improvising a substitute.
 
 ## Workflow
 
-0. **Component-first for any UI.** Before writing a page, view, or feature screen, inventory
-   the UI kit and build every missing component in Storybook first — see
+0. **Plan component-first for any UI.** Before writing a page, view, or feature screen,
+   inventory the UI kit and list the components it lacks. Take each missing component through
+   steps 1–6 (in Storybook when available) before the page that uses it — see
    [Component-first UI](#component-first-ui-ui-kit--storybook--composition). The page or
    feature is composed from those components once they exist — kit components, plus
    feature-local ones where the element is genuinely feature-bound.

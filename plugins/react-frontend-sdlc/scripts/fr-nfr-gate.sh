@@ -135,13 +135,30 @@ bound_text() {
 if [[ -z "$PR" ]]; then
   # Pinned to repo_slug: an unqualified `gh pr view` follows gh's configured
   # default repository, which in a fork checkout can name another repo's PR.
+  # A failed lookup or several open PRs for the branch is an error, never
+  # "no PR": guessing would gate against the wrong requirements.
   branch="$(git branch --show-current 2>/dev/null)" || branch=""
   if [[ -n "$branch" ]]; then
-    PR="$(gh pr list --repo "$repo_slug" --head "$branch" --state open \
-      --json number --jq '.[0].number // empty' 2>/dev/null)" || PR=""
+    prs="$(gh pr list --repo "$repo_slug" --head "$branch" --state open \
+      --json number --jq '.[].number')" \
+      || source_fail "cannot discover the PR for branch $branch" \
+           "gh pr list failed for branch $branch in $repo_slug — restore gh access or pass --pr"
+    pr_count="$(grep -c . <<<"$prs" || true)"
+    if (( pr_count > 1 )); then
+      source_fail "ambiguous: $pr_count open PRs for branch $branch — pass --pr" \
+        "branch $branch has $pr_count open PRs in $repo_slug ($(tr '\n' ' ' <<<"$prs")) — pass --pr to choose one"
+    fi
+    PR="$prs"
   fi
   [[ "$PR" =~ ^[1-9][0-9]*$ ]] || PR=""
 fi
+
+# fence_safe TEXT — contributor text is embedded between <<< and >>>; rewrite
+# any fence marker inside it so it cannot close the data block early.
+fence_safe() {
+  local text=${1//<<</‹‹‹}
+  printf '%s' "${text//>>>/›››}"
+}
 PR_TEXT=""
 ISSUES_TEXT=""
 if [[ -n "$PR" ]]; then
@@ -151,12 +168,16 @@ if [[ -n "$PR" ]]; then
   pr_title="$(gh pr view "$PR" --repo "$repo_slug" --json title --jq '.title // ""')" \
     || source_fail "cannot read PR #$PR (requirement source)" "cannot read PR #$PR in $repo_slug"
   if [[ -n "${pr_body//[[:space:]]/}" ]]; then
-    PR_TEXT="$(bound_text "PR #${PR} — ${pr_title}"$'\n'"${pr_body}")"
+    PR_TEXT="$(bound_text "$(fence_safe "PR #${PR} — ${pr_title}"$'\n'"${pr_body}")")"
   fi
   # owner/name#number per closing reference, so a cross-repository issue is
-  # read from its own repository rather than a same-numbered local one.
-  issue_refs="$(gh pr view "$PR" --repo "$repo_slug" --json closingIssuesReferences \
-    --jq '.closingIssuesReferences[]? | "\(.repository.owner.login)/\(.repository.name)#\(.number)"')" \
+  # read from its own repository rather than a same-numbered local one. Read
+  # through GraphQL: `gh pr view --json closingIssuesReferences` needs gh
+  # 2.79+, while the API field works with every gh 2.x.
+  issue_refs="$(gh api graphql \
+    -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){closingIssuesReferences(first:50){nodes{number repository{nameWithOwner}}}}}}' \
+    -f o="${repo_slug%%/*}" -f r="${repo_slug#*/}" -F n="$PR" \
+    --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[]? | "\(.repository.nameWithOwner)#\(.number)"')" \
     || source_fail "cannot list the issues linked to PR #$PR" \
          "cannot list the issues linked to PR #$PR in $repo_slug"
   for ref in $issue_refs; do
@@ -171,7 +192,7 @@ if [[ -n "$PR" ]]; then
     issue_title="$(gh issue view "$n" --repo "$issue_repo" --json title --jq '.title // ""')" \
       || source_fail "cannot read linked issue ${issue_repo}#$n" \
            "cannot read issue ${issue_repo}#$n linked to PR #$PR"
-    ISSUES_TEXT+="$(bound_text "Issue ${issue_repo}#${n} — ${issue_title}"$'\n'"${issue_body}")"$'\n\n'
+    ISSUES_TEXT+="$(bound_text "$(fence_safe "Issue ${issue_repo}#${n} — ${issue_title}"$'\n'"${issue_body}")")"$'\n\n'
   done
 fi
 

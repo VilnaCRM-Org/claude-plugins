@@ -177,7 +177,7 @@ run_wf() { # <workflow-file> <scenario-file>
 @test "feature: every story prompt carries the component-first UI order (UI kit → Storybook → composition)" {
   run_wf fe-sdlc-feature.js feat-happy.json
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '[.calls[] | select(.agentType == "react-frontend-sdlc:react-implementer")] | all(.prompt | contains("work component-first") and contains("when Storybook is available") and contains("SKIPPED: storybook") and contains("before any page or feature uses it") and contains("compose the page/feature from those components"))'
+  echo "$output" | jq -e '[.calls[] | select(.agentType == "react-frontend-sdlc:react-implementer")] | length > 0 and all(.prompt | contains("work component-first") and contains("when Storybook is available") and contains("SKIPPED: storybook") and (index("reuse UI-kit components") < index("build every missing component")) and (index("build every missing component") < index("before any page or feature uses it")) and (index("before any page or feature uses it") < index("then compose the page/feature from those components")))'
 }
 
 @test "feature: a failed setup check halts with the /fe-sdlc-setup instruction" {
@@ -232,7 +232,7 @@ run_wf() { # <workflow-file> <scenario-file>
   run_wf fe-sdlc-fr-nfr-review.js fnr-pr-source.json
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.result.result == "SUCCESS" and .result.specs == null and .result.pr == 7 and .result.requirement_source == "PR #7 description + issue(s) #12"'
-  echo "$output" | jq -e '.calls[0].prompt | contains("Pull request: PR #7") and contains("closingIssuesReferences")'
+  echo "$output" | jq -e '.calls[0].prompt | contains("Pull request: PR #7") and contains("non-blank BODY") and contains("title-only issue is no requirement source")'
   echo "$output" | jq -e '.calls[1].prompt | contains("fr-nfr-gate.sh\" --pr 7 --impact-context '"'"'currency field with two-decimal validation'"'"'") and (contains("--spec-path") | not) and contains("no BMAD spec bundle") and contains("baseline NFR catalog")'
 }
 
@@ -295,6 +295,18 @@ run_wf() { # <workflow-file> <scenario-file>
   run_wf fe-sdlc-fr-nfr-review.js fnr-fail-no-findings.json
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.result.result == "ESCALATED" and .result.iterations == 1 and (.result.escalation | contains("no actionable finding") and contains("manual evidence absent"))'
+}
+
+@test "fr-nfr-review: a SKIPPED runner reported with verdict DEGRADED gets the runner remedy, not the missing-source one" {
+  echo '{"args":"alpha-login","replies":[{"match":"^scope$","reply":{"profile_valid":true,"blocked":null,"base":"origin/main","files":["src/a.tsx"],"specs_present":true,"slug":"alpha-login","spec_files":["prd.md"],"pr":null,"pr_requirements":false,"summary":"x"}},{"match":"^fr-nfr-reviewer ","reply":{"status":"OK","verdict":"DEGRADED","new_findings":null,"gate_run":"SKIPPED (claude not on PATH)","note":null,"findings":[]}}]}' >"$BATS_TEST_TMPDIR/skip-degraded.json"
+  run node "$HARNESS" "$WF/fe-sdlc-fr-nfr-review.js" "$BATS_TEST_TMPDIR/skip-degraded.json"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("restore the gate runner") and (contains("/fe-sdlc-plan") | not))'
+}
+
+@test "fr-nfr-review: the spec path and summary reach the runner shell-quoted" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-converges.json
+  echo "$output" | jq -e '.calls[1].prompt | contains("fr-nfr-gate.sh\" --spec-path '"'"'specs/alpha-login'"'"' --impact-context '"'"'login form with polite validation status'"'"'")'
 }
 
 @test "fr-nfr-review: a manually built matrix (runner SKIPPED) never passes the mandatory gate — it escalates" {

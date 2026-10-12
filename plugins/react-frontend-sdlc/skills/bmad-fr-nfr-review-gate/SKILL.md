@@ -91,7 +91,7 @@ The gate invocation is resolved from the profile `make` map:
   ```bash
   "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --spec-path "specs/<slug>" --impact-context "<one-line change summary>"
   # no BMAD bundle: the PR description and linked issues are the source
-  "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --pr <n> --impact-context "<one-line change summary>"
+  "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --pr "$PR" --impact-context "<one-line change summary>"
   ```
 
 If the resolved runner cannot execute (script missing, `claude`/`gh` not on
@@ -393,7 +393,7 @@ blocks PASS.
    ```bash
    "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --spec-path "specs/<slug>" --impact-context "<one-line change summary>"
    # or, without a BMAD bundle:
-   "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --pr <n> --impact-context "<one-line change summary>"
+   "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --pr "$PR" --impact-context "<one-line change summary>"
    ```
 
 5. If manual testing is required, record evidence in a markdown file (format
