@@ -335,9 +335,13 @@ if [[ -n "$PR" ]]; then
   base_oid="$(gh pr view "$PR" --repo "$pr_repo" --json baseRefOid --jq '.baseRefOid // ""' 2>/dev/null)" || base_oid=""
   if [[ "$base_oid" =~ ^[0-9a-f]{40}$ ]]; then
     if ! git cat-file -e "${base_oid}^{commit}" 2>/dev/null; then
+      # The clone URL comes from gh, so a GitHub Enterprise host works too;
+      # github.com is only the fallback when gh cannot answer.
+      pr_repo_url="$(gh repo view "$pr_repo" --json url --jq '.url // ""' 2>/dev/null)" || pr_repo_url=""
+      [[ "$pr_repo_url" =~ ^https://[^[:space:]]+$ ]] || pr_repo_url="https://github.com/${pr_repo}"
       git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
-        fetch --quiet --no-tags "https://github.com/${pr_repo}.git" "$base_oid" 2>/dev/null \
-        || log_warn "could not fetch the PR base commit ${base_oid:0:7} from $pr_repo"
+        fetch --quiet --no-tags "${pr_repo_url}.git" "$base_oid" 2>/dev/null \
+        || log_warn "could not fetch the PR base commit ${base_oid:0:7} from ${pr_repo_url}"
     fi
     if git cat-file -e "${base_oid}^{commit}" 2>/dev/null \
         && diff_base="$(git merge-base HEAD "$base_oid" 2>/dev/null)"; then

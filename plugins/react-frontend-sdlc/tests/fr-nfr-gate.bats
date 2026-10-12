@@ -67,6 +67,7 @@ case "$*" in
   "pr view 7 --repo "*"--json body"*) printf '%s\n' "${PR_BODY:-}" ;;
   "pr view 7 --repo "*"--json title"*) echo "Add the currency field" ;;
   "pr view 7 --repo "*"--json baseRefOid"*) printf '%s\n' "${PR_BASE_OID:-}" ;;
+  "repo view "*"--json url"*) [ -z "${REPO_URL:-}" ] || echo "$REPO_URL" ;;
   "pr view 7 --repo "*"--json baseRefName"*) printf '%s\n' "${PR_BASE_NAME:-}" ;;
   "api graphql "*) printf '%s\n' "${PR_ISSUES:-}" ;;
   "issue view 12 --repo "*"--json title"*) echo "Currency field" ;;
@@ -736,4 +737,13 @@ EOF
   grep -q '^gh pr comment 7' "$GH_LOG"
   grep -q "the full review is in the gate run's output" "$GH_LOG"
   [ "$(wc -c < "$GH_LOG")" -lt 65536 ]
+}
+
+@test "the PR base commit is fetched from gh's configured host, not a hard-coded github.com" {
+  rm -rf specs
+  pr_gh
+  REPO_URL="https://ghe.invalid/acme/sample-web" PR_BASE_OID="0123456789abcdef0123456789abcdef01234567" PR_BASE_NAME="no-such-branch" PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not fetch the PR base commit 0123456 from https://ghe.invalid/acme/sample-web"* ]]
+  [[ "$output" != *"github.com/acme"* ]]
 }
