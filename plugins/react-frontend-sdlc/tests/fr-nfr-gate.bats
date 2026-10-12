@@ -105,6 +105,7 @@ EOF
   PATH="$dir:$PATH" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
   [ "$status" -eq 1 ]
   [[ "$output" == *"failed to post commit status"* ]]
+  [ "$(grep -c 'statuses/' "$GH_LOG")" -eq 1 ]
   [[ "$output" != *"PASS — zero new findings"* ]]
   grep -q -- '-f state=success' "$GH_LOG"
 }
@@ -524,4 +525,23 @@ EOF
 @test "the closing-issues query is built without single-quoted expansions (SC2016-clean)" {
   ! grep -nE "query='query\(\\$" "$GATE"
   grep -q 'closing_query="query(' "$GATE"
+}
+
+@test "a transient 422 'No commit found for SHA' on the status post is retried, then succeeds" {
+  local dir="$BATS_TEST_TMPDIR/status-422-bin" n="$BATS_TEST_TMPDIR/status-calls"
+  mkdir -p "$dir"
+  cat > "$dir/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "gh $*" >> "$STUB_GH_LOG"
+case "$*" in
+  api*/statuses/*)
+    c=$(( $(cat "$STATUS_CALLS" 2>/dev/null || echo 0) + 1 )); echo "$c" > "$STATUS_CALLS"
+    if [ "$c" -lt 2 ]; then echo "gh: No commit found for SHA: abc (HTTP 422)" >&2; exit 1; fi ;;
+esac
+EOF
+  chmod +x "$dir/gh"
+  STATUS_CALLS="$n" FR_NFR_STATUS_RETRY_DELAY=0 PATH="$dir:$PATH" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"retrying the status post (1/3)"* ]]
+  [ "$(cat "$n")" -eq 2 ]
 }

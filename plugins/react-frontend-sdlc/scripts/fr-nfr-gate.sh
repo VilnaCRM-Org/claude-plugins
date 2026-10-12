@@ -119,17 +119,28 @@ if [[ "$upstream" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
   pr_repo="$upstream"
 fi
 
+# Right after a push GitHub can answer 422 "No commit found for SHA" while the
+# new head propagates (pr-until-green re-runs the gate on a just-pushed head),
+# so that one error gets a bounded retry; any other failure stays fatal.
+STATUS_RETRY_DELAY="${FR_NFR_STATUS_RETRY_DELAY:-5}"
 post_status() {
-  local state=$1 description=$2
+  local state=$1 description=$2 attempt err
   if (( ADVISORY )); then
     log_info "advisory run: no commit status posted (would be $state: $description)"
     return 0
   fi
-  gh api "repos/${pr_repo}/statuses/${head_sha}" \
-    -f state="$state" \
-    -f context="$STATUS_CONTEXT" \
-    -f description="$description" >/dev/null \
-    || die "failed to post commit status to $pr_repo@${head_sha} (the status check is the gate's durable verdict; restore gh access and re-run)"
+  for attempt in 1 2 3; do
+    if err="$(gh api "repos/${pr_repo}/statuses/${head_sha}" \
+      -f state="$state" \
+      -f context="$STATUS_CONTEXT" \
+      -f description="$description" 2>&1 >/dev/null)"; then
+      return 0
+    fi
+    [[ "$err" == *"No commit found for SHA"* && $attempt -lt 3 ]] || break
+    log_warn "commit $head_sha not visible to GitHub yet; retrying the status post ($attempt/3)"
+    sleep $(( STATUS_RETRY_DELAY * attempt ))
+  done
+  die "failed to post commit status to $pr_repo@${head_sha} (the status check is the gate's durable verdict; restore gh access and re-run): ${err:-no error output}"
 }
 
 # --- requirement sources beyond the spec bundle -------------------------------

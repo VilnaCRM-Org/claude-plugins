@@ -188,7 +188,8 @@ capability.
 When `capabilities.storybook` is true, every new UI-kit component (and every new variant or
 state of an existing one) gets its CSF3 story BEFORE any page or feature uses it — the
 [component-first order](#component-first-ui-ui-kit--storybook--composition) — and the target
-mapped by `make.storybook_build` stays green. `SKIPPED: storybook` when
+mapped by `make.storybook_build` stays green. Record
+`SKIPPED: storybook — component-first order kept without stories` when
 `capabilities.storybook` is false or `make.storybook_build` is `null`.
 
 ## Verification
@@ -259,7 +260,7 @@ language; no suppression added and no threshold changed.
 
 - [ ] Component-first: the UI kit was inventoried, every missing component was built — with its
       Storybook story (applicable states and variants) when Storybook is available, else with
-      the recorded `SKIPPED: storybook` note — before the page/feature composed it, and the
+      the recorded `SKIPPED: storybook — component-first order kept without stories` note — before the page/feature composed it, and the
       composition layer inlines no one-off markup that duplicates a kit component
 - [ ] Component/hook/form landed in the correct module under `architecture.source_root`
 - [ ] Shared UI carries `architecture.component_prefix`; cross-feature imports use the aliases
