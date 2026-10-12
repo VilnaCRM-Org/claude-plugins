@@ -726,3 +726,14 @@ EOF
   grep -q -- '-f state=failure' "$GH_LOG"
   [ ! -f "$CLAUDE_LOG" ]
 }
+
+@test "a very long review is cut to fit GitHub's comment limit instead of failing the gate" {
+  pr_gh
+  long="$(head -c 90000 /dev/zero | tr '\0' 'r')"
+  PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="{\"result\":\"${long}\\nFR_NFR_NEW_FINDINGS: 0\"}" run "$GATE" --spec-path specs
+  [ "$status" -eq 0 ]
+  grep -q -- '-f state=success' "$GH_LOG"
+  grep -q '^gh pr comment 7' "$GH_LOG"
+  grep -q "the full review is in the gate run's output" "$GH_LOG"
+  [ "$(wc -c < "$GH_LOG")" -lt 65536 ]
+}

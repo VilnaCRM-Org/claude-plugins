@@ -68,6 +68,9 @@ PROMPT_BYTE_LIMIT=120000
 # The change-set diff the script hands to the shell-less review session, and
 # the changed-file list, which must arrive complete (see below).
 DIFF_BYTE_LIMIT=50000
+# GitHub rejects PR comment bodies over 65536 characters, and an unpostable
+# comment fails the gate: the review excerpt in the comment stays below that.
+COMMENT_BYTE_LIMIT=60000
 FILES_BYTE_LIMIT=16000
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -180,12 +183,14 @@ byte_len() {
   printf '%d' "${#1}"
 }
 
-# bound_text TEXT LIMIT — cap one source at LIMIT bytes and say so, so a long
-# source can neither crowd out the others nor be cut silently. The cut is made
+# bound_text TEXT LIMIT [MARKER] — cap TEXT at LIMIT bytes and say so (MARKER
+# overrides the default note), so a long source can neither crowd out the
+# others nor be cut silently. The cut is made
 # on character boundaries (slicing in the caller's locale), shrinking until the
 # byte length fits, so no multi-byte character is split.
 bound_text() {
   local text=$1 limit=$2 cut bytes
+  local marker=${3:-a requirement in the omitted text is reported as unverifiable, never assumed met}
   bytes="$(byte_len "$text")"
   if (( bytes <= limit )); then
     printf '%s' "$text"
@@ -201,8 +206,8 @@ bound_text() {
   if command -v iconv >/dev/null 2>&1; then
     cut="$(printf '%s' "$cut" | { iconv -f UTF-8 -t UTF-8 -c 2>/dev/null; true; })"
   fi
-  printf '%s\n[... %d bytes truncated; a requirement in the omitted text is reported as unverifiable, never assumed met]' \
-    "$cut" "$(( bytes - $(byte_len "$cut") ))"
+  printf '%s\n[... %d bytes truncated; %s]' \
+    "$cut" "$(( bytes - $(byte_len "$cut") ))" "$marker"
 }
 budget_left=$TOTAL_SOURCE_BYTE_LIMIT
 # source_limit — the cap for the next source: its own limit or what is left of
@@ -452,6 +457,7 @@ fi
 findings="${BASH_REMATCH[1]}"
 
 printf '%s\n' "$result"
+review_excerpt="$(bound_text "$result" "$COMMENT_BYTE_LIMIT" "the full review is in the gate run's output")"
 
 # Zero-test the findings count as a DIGIT STRING, never via bash arithmetic.
 # (( findings == 0 )) wraps any exact multiple of 2^64 to 0 (e.g.
@@ -468,7 +474,7 @@ Zero new findings against ${sources_text}.
 
 <details><summary>Requirement review</summary>
 
-$result
+$review_excerpt
 
 </details>"
   post_status success "zero new FR/NFR findings"
@@ -481,6 +487,6 @@ post_comment "## BMAD FR/NFR Review Gate: FAIL
 
 $findings new finding(s) against ${sources_text}:
 
-$result"
+$review_excerpt"
 log_error "FR/NFR gate: FAIL — $findings new finding(s)"
 exit 1
