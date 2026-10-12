@@ -461,7 +461,7 @@ EOF
   STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
   [ "$status" -eq 0 ]
   grep -q 'every new variant or state added to a kit component' "$CLAUDE_LOG"
-  grep -q 'no later than the page or feature that first uses it' "$CLAUDE_LOG"
+  grep -q 'added no later than that page' "$CLAUDE_LOG"
 }
 
 @test "a failed PR discovery is an error with a failure status, never a silent 'no PR'" {
@@ -817,4 +817,32 @@ EOF
   STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
   [ "$status" -eq 0 ]
   ! grep -q 'Untracked files are NOT in the diff' "$CLAUDE_LOG"
+}
+
+@test "on FAIL, a comment that cannot be posted keeps the findings count on the status" {
+  local dir="$BATS_TEST_TMPDIR/fail-comment-bin"
+  mkdir -p "$dir"
+  cat > "$dir/gh" <<'EOF'
+#!/usr/bin/env bash
+echo "gh $*" >> "$STUB_GH_LOG"
+case "$*" in
+  "pr list --repo "*) echo 7 ;;
+  "pr view 7 --repo "*"--json body"*) echo "AC: x" ;;
+  "pr view 7 --repo "*"--json title"*) echo "t" ;;
+  "pr view 7 --repo "*"--json baseRefOid"*) git rev-parse main ;;
+  "pr comment "*) echo "HTTP 403" >&2; exit 1 ;;
+esac
+EOF
+  chmod +x "$dir/gh"
+  PATH="$dir:$PATH" STUB_CLAUDE_OUTPUT="$FINDINGS_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 1 ]
+  last="$(grep -- '-f description=' "$GH_LOG" | tail -1)"
+  [[ "$last" == *"2 new FR/NFR finding(s); review comment could not be posted"* ]]
+}
+
+@test "NFR-BASE-UIKIT also verifies the no-Storybook fallback note" {
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 0 ]
+  grep -q "SKIPPED: storybook — component-first order kept without stories" "$CLAUDE_LOG"
+  grep -q 'is built before the page or feature that first uses it (component-first)' "$CLAUDE_LOG"
 }
