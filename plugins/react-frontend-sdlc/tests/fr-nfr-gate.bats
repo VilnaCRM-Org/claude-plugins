@@ -868,5 +868,5 @@ EOF
   pr_gh
   PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
   [ "$status" -eq 0 ]
-  grep -q 'select(.headRepositoryOwner.login == "acme_ent.shortcode")' "$GH_LOG"
+  grep -qF 'select(.headRepositoryOwner.login == "acme_ent.shortcode")' "$GH_LOG"
 }
