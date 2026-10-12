@@ -314,29 +314,57 @@ done
 
 # --- the change set --------------------------------------------------------
 # The sandboxed session has no shell to run git, so the script supplies the
-# diff from the merge-base with the PR's base branch to the working tree
-# (uncommitted tracked changes included), bounded and fenced like any other
+# diff from the merge-base with the PR's base to the working tree (uncommitted
+# tracked changes included), bounded and fenced like any other
 # contributor-controlled text. Untracked files are listed by name only.
-base_branch=""
+#
+# The base is the PR's exact base commit (baseRefOid), never a local remote
+# name: in a fork `origin` is the fork, whose base branch can be stale or
+# missing — a stale base would put upstream commits into the review, a missing
+# one the whole tree. The commit is used when present locally, otherwise
+# fetched from the PR's own repository; origin/<base> and a local <base> are
+# the fallbacks for a run without a PR.
+diff_base=""
+diff_label=""
 if [[ -n "$PR" ]]; then
-  base_branch="$(gh pr view "$PR" --repo "$pr_repo" --json baseRefName --jq '.baseRefName // ""' 2>/dev/null)" || base_branch=""
-fi
-if [[ ! "$base_branch" =~ ^[A-Za-z0-9._/-]+$ ]]; then
-  base_branch="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" || base_branch=""
-  base_branch="${base_branch#origin/}"
-fi
-base_ref=""
-for cand in "origin/${base_branch:-main}" "${base_branch:-main}"; do
-  if git rev-parse --verify --quiet "${cand}^{commit}" >/dev/null 2>&1; then
-    base_ref="$cand"
-    break
+  base_oid="$(gh pr view "$PR" --repo "$pr_repo" --json baseRefOid --jq '.baseRefOid // ""' 2>/dev/null)" || base_oid=""
+  if [[ "$base_oid" =~ ^[0-9a-f]{40}$ ]]; then
+    if ! git cat-file -e "${base_oid}^{commit}" 2>/dev/null; then
+      git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
+        fetch --quiet --no-tags "https://github.com/${pr_repo}.git" "$base_oid" 2>/dev/null \
+        || log_warn "could not fetch the PR base commit ${base_oid:0:7} from $pr_repo"
+    fi
+    if git cat-file -e "${base_oid}^{commit}" 2>/dev/null \
+        && diff_base="$(git merge-base HEAD "$base_oid" 2>/dev/null)"; then
+      diff_label="the merge-base with the PR base commit ${base_oid:0:7} ($pr_repo)"
+    fi
   fi
-done
-if [[ -n "$base_ref" ]] && diff_base="$(git merge-base HEAD "$base_ref" 2>/dev/null)"; then
-  diff_label="the merge-base with $base_ref"
-else
+  if [[ -z "$diff_label" ]]; then
+    base_branch="$(gh pr view "$PR" --repo "$pr_repo" --json baseRefName --jq '.baseRefName // ""' 2>/dev/null)" || base_branch=""
+  fi
+fi
+if [[ -z "$diff_label" ]]; then
+  if [[ ! "${base_branch:-}" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    base_branch="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)" || base_branch=""
+    base_branch="${base_branch#origin/}"
+  fi
+  for cand in "origin/${base_branch:-main}" "${base_branch:-main}"; do
+    if git rev-parse --verify --quiet "${cand}^{commit}" >/dev/null 2>&1 \
+        && diff_base="$(git merge-base HEAD "$cand" 2>/dev/null)"; then
+      diff_label="the merge-base with $cand"
+      break
+    fi
+  done
+fi
+if [[ -z "$diff_label" ]]; then
+  if [[ -n "$PR" ]]; then
+    # A PR whose base cannot be resolved must not be reviewed against some
+    # other change set (the whole tree): fail closed with the remedy.
+    source_fail "cannot resolve the base commit of PR #$PR" \
+      "cannot resolve the base commit of PR #$PR locally or from $pr_repo — fetch the PR's base branch, then re-run"
+  fi
   diff_base="$(git hash-object -t tree /dev/null)"
-  diff_label="the empty tree (no base branch found locally, so the whole tracked tree is the change set)"
+  diff_label="the empty tree (no PR and no base branch found locally, so the whole tracked tree is the change set)"
 fi
 changed_files="$(git diff --name-only "$diff_base")" \
   || source_fail "cannot compute the change set" "git diff against $diff_label failed"

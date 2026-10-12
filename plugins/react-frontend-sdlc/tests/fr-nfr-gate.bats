@@ -25,6 +25,8 @@ setup() {
   git init -q
   git remote add origin https://github.com/acme/sample-web.git
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+  # A local base branch, so PR runs resolve a merge-base without a network.
+  git branch -f main 2>/dev/null || true
   SHA="$(git rev-parse HEAD)"
   PATH="$STUBS:$PATH"
   GH_LOG="$BATS_TEST_TMPDIR/gh-calls.log"
@@ -39,9 +41,10 @@ route_gh() {
   cat > "$dir/gh" <<EOF
 #!/usr/bin/env bash
 echo "gh \$*" >> "$GH_LOG"
-if [ "\$1" = "pr" ] && { [ "\$2" = "view" ] || [ "\$2" = "list" ]; }; then
-  echo 7
-fi
+case "\$*" in
+  *baseRef*) ;;
+  "pr view"*|"pr list"*) echo 7 ;;
+esac
 EOF
   chmod +x "$dir/gh"
   PATH="$dir:$PATH"
@@ -63,6 +66,8 @@ case "$*" in
     printf '%s\n' "${PR_LIST:-7}" ;;
   "pr view 7 --repo "*"--json body"*) printf '%s\n' "${PR_BODY:-}" ;;
   "pr view 7 --repo "*"--json title"*) echo "Add the currency field" ;;
+  "pr view 7 --repo "*"--json baseRefOid"*) printf '%s\n' "${PR_BASE_OID:-}" ;;
+  "pr view 7 --repo "*"--json baseRefName"*) printf '%s\n' "${PR_BASE_NAME:-}" ;;
   "api graphql "*) printf '%s\n' "${PR_ISSUES:-}" ;;
   "issue view 12 --repo "*"--json title"*) echo "Currency field" ;;
   "issue view 12 --repo "*"--json body"*) printf 'AC1: the field rejects letters\n' ;;
@@ -697,4 +702,27 @@ EOF
   STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path 'specs;v2'
   [ "$status" -eq 0 ]
   grep -qF "the BMAD spec bundle under 'specs;v2'" "$CLAUDE_LOG"
+}
+
+@test "the change set is diffed against the PR's exact base commit, not a local remote name" {
+  rm -rf specs
+  pr_gh
+  base="$(git rev-parse HEAD)"
+  echo "export const a = 1" > pr-change.ts
+  git add pr-change.ts
+  git -c user.email=t@t -c user.name=t commit -q -m change
+  PR_BASE_OID="$base" PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 0 ]
+  grep -q "the merge-base with the PR base commit ${base:0:7} (acme/sample-web)" "$CLAUDE_LOG"
+  grep -q 'pr-change.ts' "$CLAUDE_LOG"
+}
+
+@test "a PR whose base commit cannot be resolved fails closed instead of reviewing the whole tree" {
+  rm -rf specs
+  pr_gh
+  PR_BASE_OID="0123456789abcdef0123456789abcdef01234567" PR_BASE_NAME="no-such-branch" PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot resolve the base commit of PR #7"* ]]
+  grep -q -- '-f state=failure' "$GH_LOG"
+  [ ! -f "$CLAUDE_LOG" ]
 }
