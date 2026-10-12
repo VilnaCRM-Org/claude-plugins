@@ -12,6 +12,34 @@ automatically, while Bash commands still need to be covered by the
 allowlist below. This is the plugin-wide default and the only mode its
 scripts use.
 
+## Publishing the FR/NFR gate status
+
+`scripts/fr-nfr-gate.sh` posts the mandatory `BMAD FR/NFR Review Gate`
+commit status (and its PR comment) to the repository that owns the PR. In a
+fork checkout that is the **upstream** repository, so the publishing `gh`
+credential must hold `statuses:write` and permission to comment there — the review comment is
+part of the gate, so a comment that cannot be posted fails it just like a
+status that cannot; a fork-only token cannot publish the gate, and the
+script then fails closed and names this requirement. `--advisory` runs publish nothing and need no
+write access.
+
+The review session never holds that credential. It reads
+contributor-controlled text (PR description, issues, diff), so the script
+runs it through `claude_run_isolated` (`scripts/lib/common.sh`) as a
+read-only sandbox: `--restricted --tools Read,Grep,Glob --strict-mcp-config`
+leaves it no shell, no code execution and no file edits, ignores the
+project's settings allowlist, and confines reads to the repository. The
+script computes the change-set diff itself and passes it in. As defence in
+depth the `GH_TOKEN` / `GITHUB_TOKEN` / enterprise token variables are unset,
+an empty `GH_CONFIG_DIR` hides any stored `gh` login, git ignores global and
+system config, credential helpers and the SSH agent, and `Bash(gh:*)`,
+`Bash(git push:*)` and `Bash(git credential:*)` are denied. The script publishes the status and
+comment itself, with its own credential, only after the session has
+returned. For fork PRs, prefer a trusted upstream workflow (for example a
+`pull_request_target` job that never checks out or executes the PR's code
+with that token) as the least-privilege publisher, over a personal
+maintainer token on a workstation.
+
 ## The settings.json allowlist
 
 `/fe-sdlc-setup` writes (merge, never clobber) this allowlist into the

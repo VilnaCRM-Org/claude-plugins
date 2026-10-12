@@ -10,7 +10,9 @@
 #                             verdict requires: coderabbit,cubic,qodo,qlty,
 #                             sonarcloud (default: coderabbit,cubic)
 #   --required-checks <list>  comma-separated check names that decide the CI
-#                             verdict; default: every check on the PR
+#                             verdict; default: every check on the PR (the
+#                             'BMAD FR/NFR Review Gate' status is always
+#                             required and judged on its own — see below)
 #   --wait-seconds <s>        keep re-reading while the verdict is WAIT, for at
 #                             most <s> seconds (default 0 — one snapshot)
 #   --interval-seconds <s>    pause between reads in wait mode (default 60)
@@ -30,16 +32,23 @@
 #   NONE           the bot has never reviewed this PR
 #   SKIPPED        no mention can reach the bot (paused seat, oversized diff,
 #                  status-check bot, push-only reviewer)
-# and renders exactly one verdict, highest priority first:
+# The 'BMAD FR/NFR Review Gate' commit status is mandatory on EVERY PR: it is
+# taken out of the generic CI set and reported as fr_nfr {status: success |
+# failure | pending | missing}; no flag waives it.
+# Renders exactly one verdict, highest priority first:
 #   BLOCKED  the PR is merged/closed or CONFLICTING — nothing bounded to do
 #   FIX      a required check failed, or review threads are unresolved
+#   GATE     the FR/NFR gate status on the head is missing or failed — run
+#            the fe-sdlc-fr-nfr-review workflow against this head
 #   REQUEST  a reviewer needs a (re-)review mention
-#   WAIT     checks are still running, or a requested review is in flight
-#   READY    checks green, zero unresolved threads, every reachable reviewer
-#            approves the head (SKIPPED reviewers are reported, never passed)
+#   WAIT     checks (or a gate run posted as pending) are still running, or a
+#            requested review is in flight
+#   READY    checks green, the FR/NFR gate green on the head, zero unresolved
+#            threads, every reachable reviewer approves the head (SKIPPED
+#            reviewers are reported, never passed)
 # Human output is one `KEY: value` line per fact plus `VERDICT:` and `NEXT:`;
-# --json emits {pr, repo, head, state, draft, mergeable, ci, unresolved,
-# reviewers, notes, verdict, next}. Exit 0 whenever a snapshot was rendered
+# --json emits {pr, repo, head, state, draft, mergeable, ci, fr_nfr,
+# unresolved, reviewers, notes, verdict, next}. Exit 0 whenever a snapshot was rendered
 # (the verdict is data), 1 on usage errors or a failed gh call.
 # SDLC_NOW_EPOCH overrides "now" (tests).
 set -euo pipefail
@@ -179,11 +188,29 @@ for c in pr.get("statusCheckRollup") or []:
     else:
         verdict = c.get("conclusion") or "PENDING"
     checks[name] = verdict
-scope = required if required else list(checks)
+# The FR/NFR gate is judged on its own (mandatory for every PR, never waived by
+# --required-checks), so ci-fixer is never handed a status it cannot fix from
+# workflow logs.
+GATE_CONTEXT = "BMAD FR/NFR Review Gate"
+gate_verdict = checks.pop(GATE_CONTEXT, None)
+# An explicit --required-checks naming only the gate still narrows the generic
+# CI scope (to nothing) instead of falling back to every check.
+required_explicit = bool(required)
+required = [c for c in required if c != GATE_CONTEXT]
+if gate_verdict is None:
+    fr_nfr_status = "missing"
+elif gate_verdict == "SUCCESS":
+    fr_nfr_status = "success"
+elif gate_verdict in FAILING:
+    fr_nfr_status = "failure"
+else:
+    fr_nfr_status = "pending"
+fr_nfr = {"context": GATE_CONTEXT, "status": fr_nfr_status}
+scope = required if required_explicit else list(checks)
 failing = sorted(n for n in scope if checks.get(n) in FAILING)
 pending = sorted(n for n in scope if n in checks and checks[n] not in FAILING and checks[n] not in PASSING)
 missing = sorted(n for n in required if n not in checks)
-if not checks and not required:
+if not checks and not required_explicit:
     ci_status = "none"
     notes.append("CI: the PR reports no checks — the CI half of the exit condition is satisfied-with-report, not verified")
 elif failing:
@@ -297,16 +324,22 @@ elif ci_status == "red" or unresolved:
     if unresolved:
         parts.append(f"resolve {unresolved} review thread(s) (pr-comment-resolver)")
     nxt = "; ".join(parts) + "; then commit and push"
+elif fr_nfr_status in ("missing", "failure"):
+    verdict = "GATE"
+    nxt = (f"fe-sdlc-fr-nfr-review --pr {pr.get('number')} --head {head} — the {GATE_CONTEXT} status is "
+           f"{fr_nfr_status} on head {head[:7]}; the gate is mandatory for every PR")
 elif needs_request:
     verdict = "REQUEST"
     names = ",".join(r["name"] for r in needs_request)
     full = " --full" if any(r["status"] == "NOT_APPROVED" and r["name"] == "coderabbit" for r in needs_request) else ""
     nxt = f"request-ai-reviews.sh --pr {pr.get('number')} --reviewers {names}{full}"
-elif ci_status == "pending" or in_flight:
+elif ci_status == "pending" or fr_nfr_status == "pending" or in_flight:
     verdict = "WAIT"
     what = []
     if pending or missing:
         what.append(f"checks {','.join(pending + missing)}")
+    if fr_nfr_status == "pending":
+        what.append(f"the {GATE_CONTEXT} status")
     if in_flight:
         what.append("reviews from " + ",".join(r["name"] for r in in_flight))
     nxt = f"pr-state.sh --pr {pr.get('number')} --wait-seconds 540 — waiting for " + " and ".join(what)
@@ -318,6 +351,7 @@ result = {
     "state": state, "draft": bool(pr.get("isDraft")), "mergeable": mergeable,
     "ci": {"status": ci_status, "failing": failing, "pending": pending, "missing": missing,
            "checks": checks},
+    "fr_nfr": fr_nfr,
     "unresolved": {"total": unresolved, "by_reviewer": by_reviewer},
     "reviewers": reviewer_rows, "notes": notes, "verdict": verdict, "next": nxt,
 }
@@ -326,6 +360,7 @@ if json_out == "1":
 else:
     print(f"PR: #{result['pr']} {repo} head={head[:7]} state={state} draft={str(result['draft']).lower()} mergeable={mergeable}")
     print(f"CI: {ci_status} failing=[{','.join(failing)}] pending=[{','.join(pending)}] missing=[{','.join(missing)}]")
+    print(f"FR_NFR_GATE: {fr_nfr_status}")
     print(f"UNRESOLVED: {unresolved}" + (" (" + " ".join(f"{k}={v}" for k, v in sorted(by_reviewer.items())) + ")" if by_reviewer else ""))
     for r in reviewer_rows:
         extra = f" ack={'yes' if r['ack'] else 'no'}" if r["status"] == "REQUESTED" else ""

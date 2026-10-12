@@ -1,3 +1,1 @@
-{"args":"alpha-login","replies":[
- {"match":"^scope$","reply":{"profile_valid":false,"blocked":"run /fe-sdlc-setup","base":"","files":[],"specs_present":false,"slug":null,"spec_files":[],"summary":""}}
-]}
+{"args": "alpha-login", "replies": [{"match": "^scope$", "reply": {"profile_valid": false, "blocked": "run /fe-sdlc-setup", "base": "", "files": [], "specs_present": false, "slug": null, "spec_files": [], "summary": "", "clean": true, "head_matches_pr": null, "pr": null, "pr_requirements": false, "linked_issues": []}}]}

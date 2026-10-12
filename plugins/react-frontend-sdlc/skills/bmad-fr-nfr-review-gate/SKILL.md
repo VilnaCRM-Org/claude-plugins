@@ -1,12 +1,19 @@
 ---
 name: bmad-fr-nfr-review-gate
-description: Run a BMAD spec-driven post-implementation review gate for React/TypeScript frontend work that blocks completion until every requirement row scores 5/5 and the gate reports zero new findings. Use when a GitHub PR, feature, bugfix, or task implemented against BMAD specs needs verification of every FR/NFR, pinned NFR catalog category, expanded quality dimension, system quality attribute, positive/negative/edge test case, the frontend quality surface (coverage, mutation MSI, jscpd duplication, rust-code-analysis metrics, ESLint/TypeScript, dependency-cruiser boundaries), the Lighthouse desktop/mobile performance budgets, the mandatory accessibility gate (WCAG 2.2 AA), visual regression, whole-codebase impact surface, manual test evidence, GitHub review and requested-changes state, and CI check before completion.
+description: Run the mandatory BMAD FR/NFR post-implementation review gate for React/TypeScript frontend work — on every pull request — that blocks completion until every requirement row scores 5/5 and the gate reports zero new findings. Use when any GitHub PR, feature, bugfix, or task needs verification — against its BMAD specs when they exist, otherwise against the PR description and linked issues plus the baseline NFR catalog — of every FR/NFR, pinned NFR catalog category, expanded quality dimension, system quality attribute, positive/negative/edge test case, the frontend quality surface (coverage, mutation MSI, jscpd duplication, rust-code-analysis metrics, ESLint/TypeScript, dependency-cruiser boundaries), the Lighthouse desktop/mobile performance budgets, the mandatory accessibility gate (WCAG 2.2 AA), visual regression, whole-codebase impact surface, manual test evidence, GitHub review and requested-changes state, and CI check before completion.
 ---
 
 # BMAD FR/NFR Review Gate
 
-Use this skill after implementation when a PR, feature, bugfix, or task has
-BMAD specs under `specs/`. The gate checks whether the React change set
+Use this skill after implementation on EVERY pull request, feature, bugfix,
+or task — the gate is mandatory and all of its checks must be green before
+completion. Its requirement source is the BMAD bundle under `specs/<slug>/`
+when the work was BMAD-planned, otherwise the PR description and its linked
+(closing) issues; the baseline NFR catalog (`NFR-BASE-*`: accessibility,
+tests, quality suppressions, security, i18n, performance, UI-kit/Storybook
+component reuse) applies on top either way. A change with no requirement
+source at all fails the gate — link the issue or write the acceptance
+criteria into the PR description. The gate checks whether the React change set
 corresponds to every functional and non-functional requirement, verifies the
 expanded quality dimensions, every pinned system quality attribute, the
 generated positive/negative/edge test cases, automated test and CI coverage,
@@ -83,18 +90,29 @@ The gate invocation is resolved from the profile `make` map:
 
   ```bash
   "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --spec-path "specs/<slug>" --impact-context "<one-line change summary>"
+  # no BMAD bundle: the PR description and linked issues are the source
+  "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --pr "$PR" --impact-context "<one-line change summary>"
   ```
 
 If the resolved runner cannot execute (script missing, `claude`/`gh` not on
 PATH, no origin remote), do NOT loop: build the per-requirement matrix manually
-from spec reading plus change-set inspection, mark the gate run
-`SKIPPED: <reason>`, and derive the new-findings count from the matrix delta
-against the prior iteration ledger. The matrix verdict still governs PASS/FAIL;
-record the degrade note in the report.
+from the requirement sources plus change-set inspection so the report shows
+what is unmet, mark the gate run `SKIPPED: <reason>`, and stop with the gate
+NOT MET — no `BMAD FR/NFR Review Gate` status was posted, and the gate is only
+satisfied by a real run that posts a green status on the PR head. Restore the
+runner and re-run.
 
 ## Inputs
 
-- BMAD spec bundle or file: `--spec-path specs/<slug>` (default `specs/`).
+- BMAD spec bundle or file: `--spec-path specs/<slug>` (optional — omit it
+  when the work has no bundle).
+- Pull request: `--pr <n>` (default: the current branch's PR); its
+  description and linked issues are read as requirement sources on every
+  run. With neither a bundle nor a PR description / linked issue the script
+  posts a failure status and exits 1 — so for an unbundled change set, open
+  the PR first (a draft is fine) with acceptance criteria or `Closes #N`
+  before running the gate. A linked issue counts only when it has a body;
+  cross-repository issues are read from their own repository.
 - Impact context: `--impact-context` carries a one-line change summary plus
   graph/relationship conclusions (see below) and, when manual testing was
   performed, a pointer to the manual-evidence file.
@@ -102,9 +120,16 @@ record the degrade note in the report.
   rows. The shipped script does not ingest it directly — summarize its
   conclusions in `--impact-context` and cite the file path in the report.
 - Publishing behavior (shipped script): always posts the
-  `BMAD FR/NFR Review Gate` commit status for the PR HEAD; posts a PR comment
-  carrying the findings only when the finding count is above zero — success
-  stays comment-quiet, the status check is the durable signal. Exit 0 means
+  `BMAD FR/NFR Review Gate` commit status for the PR HEAD and a PR comment
+  carrying the review result on every run — PASS and FAIL — so each PR shows
+  the BMAD review itself; the status check stays the durable signal. The
+  comment header names the verdict, the attempt (`--iteration`) and the
+  reviewed head commit, followed by the requirement sources and diff base,
+  then the review in fixed sections: Verdict, Requirement matrix
+  (Requirement | Verdict | Evidence), Evidence, New findings and
+  Non-blocking follow-ups. In a
+  fork checkout both go to the upstream repository. `--advisory` (a run on
+  uncommitted changes or a non-head checkout) posts neither. Exit 0 means
   zero new findings; findings, malformed output, or transport failure after
   one retry exit 1 with a failure status.
 - A repo wrapper mapped via `make.fr_nfr_gate` may expose extra inputs:
@@ -361,8 +386,10 @@ blocks PASS.
 
 ## Workflow
 
-1. Read the BMAD spec bundle: PRD, architecture, epics/stories, research, and
-   implementation-readiness files when present.
+1. Read the requirement sources: the BMAD spec bundle (PRD, architecture,
+   epics/stories, research, and implementation-readiness files) when one
+   exists, the PR description and its linked issues always, and the
+   baseline NFR catalog.
 2. Extract every FR, NFR, acceptance criterion, story requirement, and
    readiness requirement with source path evidence.
 3. Confirm expected positive, negative, and edge test classes from the spec so
@@ -372,6 +399,8 @@ blocks PASS.
 
    ```bash
    "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --spec-path "specs/<slug>" --impact-context "<one-line change summary>"
+   # or, without a BMAD bundle:
+   "${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --pr "$PR" --impact-context "<one-line change summary>"
    ```
 
 5. If manual testing is required, record evidence in a markdown file (format

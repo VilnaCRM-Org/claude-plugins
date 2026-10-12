@@ -5,7 +5,13 @@
 #   STUB_CLAUDE_EXIT     exit code for every call    (default: 0)
 #   STUB_CLAUDE_OUTPUT   stdout for non-version calls (default: none)
 #   STUB_CLAUDE_LOG      append-log of argv per call  (default: off)
+#   STUB_CLAUDE_NO_RESTRICTED=1  --help omits --restricted (an old CLI)
 set -euo pipefail
+if [[ "${1:-}" == "--help" ]]; then
+  printf 'Usage: claude [options]\n  --tools <tools...>\n'
+  [[ "${STUB_CLAUDE_NO_RESTRICTED:-0}" == 1 ]] || printf '  --restricted  Restricted mode\n'
+  exit 0
+fi
 if [[ -n "${STUB_CLAUDE_LOG:-}" ]]; then
   printf 'claude %s\n' "$*" >>"$STUB_CLAUDE_LOG"
 fi

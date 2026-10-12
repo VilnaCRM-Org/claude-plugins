@@ -37,6 +37,13 @@ runs no git).
   traceability for the FR/NFR lens. When the argument is a PR URL,
   resolve the branch (and the PR number for the conclusion comment) from
   it, then its `specs/<slug>/` bundle.
+- The PR number, whenever the branch has a PR (with or without a
+  `specs/<slug>/` bundle): from the PR-URL argument or
+  `gh pr view --json number --jq .number`. Pass it to `fr-nfr-reviewer`
+  (`--pr <n>`): the PR description and linked issues are a requirement
+  source on every run, next to the bundle when one exists. An unbundled branch must have its PR
+  open first — a draft carrying acceptance criteria or `Closes #N` is
+  enough — or the gate fails closed.
 - Direct-load the triage decision guide (§1.2 dependency edge):
 
   ```text
@@ -125,11 +132,18 @@ runs no git).
    row (a WCAG 2.2 AA violation — missing accessible name, broken focus
    order, insufficient contrast, an unlabeled control) blocks the stage
    verdict exactly the same way and never defers to stage 5 QA.
-   `fr-nfr-reviewer` `verdict=DEGRADED` (spec bundle missing or empty)
+   `fr-nfr-reviewer` `verdict=DEGRADED` (the named requirement source —
+   spec bundle, or PR description and linked issues — missing or empty)
    is a blocking finding, not a loop state: nothing exists to remediate
    and re-invoking cannot change the outcome, so escalate immediately —
    do NOT re-invoke the agents — with `recommended_action` "re-run
-   /fe-sdlc-plan". An `accessibility-auditor` `verdict=DEGRADED` arises
+   /fe-sdlc-plan, or link the issue / write the acceptance criteria into
+   the PR description". The FR/NFR lens runs on EVERY change set: without
+   a `specs/<slug>/` bundle it verifies against the PR description and its
+   linked issues plus the baseline NFR catalog, and a gate runner that
+   could not run (`gate_run: SKIPPED`) is a blocking finding too — the
+   gate is mandatory and only a posted green `BMAD FR/NFR Review Gate`
+   status satisfies it. An `accessibility-auditor` `verdict=DEGRADED` arises
    ONLY when the change set touches no rendered UI surface (zero
    render-path files): it is a clean no-op (a11y lens satisfied for this
    change set), recorded with a note and not re-invoked for remediation;

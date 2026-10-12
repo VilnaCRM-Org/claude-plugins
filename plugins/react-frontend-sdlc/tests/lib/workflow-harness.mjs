@@ -4,7 +4,7 @@
 //   node workflow-harness.mjs <workflow.js> <scenario.json>
 // The scenario is {"args": <any>, "replies": [{"match": "<regex over label
 // then prompt>", "reply": <object | array of objects consumed in order>}],
-// "workflows": {"<name>": <object>}}. Prints {"meta", "result", "calls",
+// "workflows": {"<name>": <object | array of objects consumed in order>}}. Prints {"meta", "result", "calls",
 // "phases", "logs"} as JSON. Exit 1 when the script throws or an agent call
 // matches no reply (a scenario gap, reported with the offending label).
 import { readFileSync } from 'node:fs'
@@ -69,6 +69,11 @@ const api = {
     calls.push({ label: `workflow:${name}`, args: wfArgs })
     const w = (scenario.workflows || {})[name]
     if (w === undefined) throw new Error(`unknown workflow: ${name}`)
+    if (Array.isArray(w)) {
+      const k = cursors.get(`workflow:${name}`) || 0
+      cursors.set(`workflow:${name}`, k + 1)
+      return w[Math.min(k, w.length - 1)]
+    }
     return w
   },
   budget: { total: null, spent: () => 0, remaining: () => Infinity },

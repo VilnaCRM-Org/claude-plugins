@@ -1,14 +1,19 @@
 ---
-description: "Create or update the PR, then drive the CI-fix and comment-resolution loops until checks are green and zero AI review comments remain unresolved"
+description: "Create or update the PR, then drive the CI-fix, mandatory BMAD FR/NFR gate and comment-resolution loops until checks and the FR/NFR gate are green on the head and zero AI review comments remain unresolved"
 argument-hint: "[slug | PR-URL]"
 ---
 
 # /fe-sdlc-finish-pr — PR finishing loops (FR-8)
 
-Stage 6 of the SDLC loop. Two independent bounded loops finish the PR:
-`ci-fixer` until all checks are green, and `pr-comment-resolver` until
-zero review comments remain unresolved. Each loop keeps its OWN
-iteration counter. Every missing external capability degrades with a
+Stage 6 of the SDLC loop. Three independent bounded loops finish the PR:
+`ci-fixer` until all checks are green, the BMAD FR/NFR gate until its
+`BMAD FR/NFR Review Gate` commit status is green on the current head, and
+`pr-comment-resolver` until zero review comments remain unresolved. Each
+loop keeps its OWN iteration counter. Counter A owns every check EXCEPT
+the `BMAD FR/NFR Review Gate` status: a red gate is never handed to
+`ci-fixer`, it is routed through counter C. The FR/NFR gate is **mandatory for
+every PR** — spec-planned or not — and has no degrade path: a PR whose
+head lacks a green gate status is never finished. Every other missing external capability degrades with a
 report instead of failing (NFR-4).
 
 ## Inputs
@@ -64,6 +69,10 @@ report instead of failing (NFR-4).
    this loop with the note "CI stage skipped: no checks configured"
    and treat the CI half of the exit condition as satisfied-with-report
    (NFR-4 — a degrade path never loops and never hard-fails).
+
+   The `BMAD FR/NFR Review Gate` status is excluded from this loop — the
+   sensor reports it as `fr_nfr`, never in its CI `failing` list — and is
+   handled by counter C (the `GATE` route in step 5).
 
    Otherwise dispatch the `ci-fixer` agent (Task tool): it polls
    `gh pr checks`; for each failing check, fetches the failure logs
@@ -161,7 +170,8 @@ report instead of failing (NFR-4).
    otherwise escalate.
 
 5. **Final status** — SUCCESS when checks are green (or CI was
-   skipped-with-report) AND zero comments remain unresolved. Confirm the
+   skipped-with-report) AND the `BMAD FR/NFR Review Gate` status is
+   `success` on the current head AND zero comments remain unresolved. Confirm the
    claim with the bundled sensor rather than from memory — its `READY`
    verdict is the exit condition, and its `REVIEWER:` lines show whether
    each AI reviewer approved the current head:
@@ -171,7 +181,7 @@ report instead of failing (NFR-4).
    ```
 
    A non-`READY` verdict is routed by its CAUSE, not by its name — the
-   sensor returns `WAIT` for two different states, and conflating them
+   sensor returns `WAIT` for three different states, and conflating them
    burns counter-B budget on checks that are merely still running. Read
    the snapshot's `CI:` line and its `REVIEWER:` rows before deciding:
 
@@ -185,6 +195,22 @@ report instead of failing (NFR-4).
      `REQUESTED`) and checks not pending** — a mention is already posted
      and its review is still coming; go back to step 3, which respects
      the script's `WAIT:` interval instead of re-mentioning.
+   - **`WAIT` with `FR_NFR_GATE: pending`** — a repository CI job is
+     running the gate on this head. Wait and re-check
+     (`pr-state.sh --pr <n> --wait-seconds 540`); counter C is NOT touched,
+     and the gate is not re-run locally while that job is in flight.
+   - **`GATE`** — the `FR_NFR_GATE:` line reads `missing` or `failure`:
+     the mandatory BMAD FR/NFR gate has not passed on this head. Run the
+     gate loop pinned to the head — check out the PR branch at that
+     commit with a clean tree, then
+     `/react-frontend-sdlc:fe-sdlc-fr-nfr-review --pr <n> --head <sha>`
+     (requirement source: `specs/<slug>/` when it exists, else the PR
+     description and its linked issues). Commit and push its fixes, then
+     re-check; a pushed fix is a new head, so the gate re-runs on it.
+     One gate run-fix-push cycle is one iteration of counter C
+     (`fr_nfr_gate iteration <c>/3`). A gate escalation (no requirement
+     source, a runner that could not run, an exhausted gate counter)
+     escalates this command — the gate is never skipped.
    - **`REQUEST`** — a reviewer has never reviewed this head (`NONE`,
      `STALE`, or `NOT_APPROVED` with no unresolved threads); go back to step 3 to
      post the mention.
@@ -192,43 +218,46 @@ report instead of failing (NFR-4).
    Either route may instead hand the PR to the
    `fe-sdlc-pr-until-green` workflow, which drives this loop unattended. If ANY
    degrade path was taken, the status is SUCCESS-WITH-REPORT and the
-   summary lists every degrade note. Always print: PR URL, checks
-   state, unresolved count, counters used (`A <a>/5`, `B <b>/5`),
-   degrade notes.
+   summary lists every degrade note (the FR/NFR gate is never one).
+   Always print: PR URL, checks state, FR/NFR gate state, unresolved
+   count, counters used (`A <a>/5`, `B <b>/5`, `C <c>/3`), degrade notes.
 
 ## Loop & exit condition
 
-Two independent loops, re-checked per their own iterations: counter A
-re-polls checks, counter B re-fetches unresolved threads. Exit
-condition (FR-1 stage table): **CI green + 0 unresolved AI review
-comments** — where "CI green" is satisfied-with-report when no checks
-exist, and the agent-run AI review loop substitutes as the comment
+Three independent loops, re-checked per their own iterations: counter A
+re-polls checks, counter B re-fetches unresolved threads, counter C
+re-runs the FR/NFR gate on the current head. Exit condition (FR-1 stage
+table): **CI green + BMAD FR/NFR Review Gate green on the head + 0
+unresolved AI review comments** — where "CI green" is
+satisfied-with-report when no checks exist (the FR/NFR gate never is), and the agent-run AI review loop substitutes as the comment
 source when no reviewer app exists (NFR-4).
 
 ## Iteration guard
 
-TWO separate counters, `MAX_ITERATIONS=5` EACH: `ci_fix <a>/5` and
-`comment_resolution <b>/5`. Restate the active counter every turn.
+THREE separate counters: `ci_fix <a>/5` and `comment_resolution <b>/5`
+(`MAX_ITERATIONS=5` each), and `fr_nfr_gate <c>/3`. Restate the active counter every turn.
 Budgets are independent — spending one never consumes the other, and
-exhausting either one escalates.
+exhausting any one escalates.
 
 ## Failure escalation
 
-Escalate — emit the canonical report and stop — on ANY of: either
-counter breaching; a step-1 PR-state/create blocking finding (merged,
-closed, or `gh pr create` failure); or a `ci-fixer` `BLOCKED` return in
-step 2. The escalation is identical in form for every case; the
-`blocking_finding` line names the cause, and the `iteration` line
-carries whatever counter values had been reached (both `0/5` for a
-pre-loop step-1/step-2 block):
+Escalate — emit the canonical report and stop — on ANY of: any counter
+breaching (A, B, or C); a step-1 PR-state/create blocking finding
+(merged, closed, or `gh pr create` failure); a `ci-fixer` `BLOCKED`
+return in step 2; or an escalated FR/NFR gate run (no requirement
+source, a runner that could not run and post its status, a checkout not
+at the PR head, or the gate's own iteration budget). The escalation is
+identical in form for every case; the `blocking_finding` line names the
+cause, and the `iteration` line carries whatever counter values had been
+reached (`A 0/5, B 0/5, C 0/3` for a pre-loop step-1/step-2 block):
 
 ```text
 === SDLC ESCALATION ===
-stage: finish-pr         iteration: A <a>/5, B <b>/5
-exit_condition: CI green + 0 unresolved AI review comments
+stage: finish-pr         iteration: A <a>/5, B <b>/5, C <c>/3
+exit_condition: CI green + BMAD FR/NFR Review Gate green on the head + 0 unresolved AI review comments
 status: NOT MET
-blocking_finding: <cause — which loop breached + first unresolved item, OR "PR <state>/create-failure", OR "ci-fixer BLOCKED — <reason>">
-iteration_log: <one line per iteration, both counters>
+blocking_finding: <cause — which loop breached + first unresolved item, OR "PR <state>/create-failure", OR "ci-fixer BLOCKED — <reason>", OR "FR/NFR gate escalated — <reason>">
+iteration_log: <one line per iteration, all three counters>
 recommended_action: <human next step>
 === END ===
 ```

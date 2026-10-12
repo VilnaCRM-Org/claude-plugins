@@ -30,6 +30,7 @@ user: /fe-sdlc "task text | issue URL"
         artifact: QA report ──[FAIL + repro steps]── loop-back ──────────────────────────┘
   └─ stage 6 /fe-sdlc-finish-pr ── gh pr create/edit ─► artifact: PR URL
         ├─ ci-fixer loop <=5 (counter A) ──► checks green (or skip-with-note)
+        ├─ FR/NFR gate loop <=3 (counter C, fe-sdlc-fr-nfr-review on the head) ──► gate green
         ├─ pr-comment-resolver loop <=5 (counter B, get-pr-comments.sh) ──► 0 unresolved
         │     └─[no reviewer app]── ai-review-loop.sh findings as the comment source
         └─ exit: SUCCESS run report (issue, specs, PR, reports linked)
@@ -50,7 +51,7 @@ issue, re-checks `readiness.md`, re-runs the review/a11y gate, re-runs
 | 3   | implement   | Ralph `EXIT_SIGNAL` success, all stories done                                    | 5 iterations + circuit breaker                                             |
 | 4   | review      | zero new findings in last gate iteration AND a11y gate clean AND quality PASS    | 5 iterations                                                               |
 | 5   | qa          | QA verdict PASS — visual + E2E + Lighthouse + a11y (FAIL routes back to stage 3) | 5 iterations                                                               |
-| 6   | finish-pr   | CI green (or skip-with-note) + 0 unresolved AI review comments                   | 5 iterations (two independent counters: CI fix, comment resolution)        |
+| 6   | finish-pr   | CI green (or skip-with-note) + FR/NFR gate green on head + 0 open AI comments    | 5 iterations (three counters: CI fix, comments, FR/NFR gate max 3)         |
 
 ## Loop-backs
 
@@ -77,9 +78,10 @@ bound the run. Two stages carry more than one counter:
   attempts/resumes) plus Ralph's own circuit breaker; EITHER tripping
   ends the stage. A breaker trip is terminal even on iteration 1 and does
   NOT consume the remaining stage iterations.
-- **finish-pr** — two independent `MAX_ITERATIONS=5` counters, CI-fix (A)
-  and comment-resolution (B); spending one never consumes the other, and
-  exhausting either escalates.
+- **finish-pr** — three independent counters: CI-fix (A) and
+  comment-resolution (B) at `MAX_ITERATIONS=5` each, and the FR/NFR gate
+  (C) at 3; spending one never consumes another, and exhausting any of them
+  escalates.
 
 The QA→implement loop-back does not refresh stage 3's budget: the
 re-entry consumes whatever iterations remain, and if stage 3 is already
@@ -134,7 +136,8 @@ resumes at stage 3 (loop-back) while stage 3 budget remains.
 ## Terminal states
 
 - **SUCCESS** — stage 6's exit condition met (CI green, or skip-with-note when
-  CI is absent, + zero unresolved AI review comments); the run report links the
+  CI is absent, + the `BMAD FR/NFR Review Gate` status green on the PR head,
+  never skipped, + zero unresolved AI review comments); the run report links the
   issue, the specs chain,
   and the PR.
 - **ESCALATED** — a guard breached, Ralph's circuit breaker tripped
@@ -156,18 +159,22 @@ benefit from fan-out and unattended repetition — see
 
 - `/react-frontend-sdlc:fe-sdlc-pr-until-green` runs stage 6 as a
   sensor-driven state machine: `scripts/pr-state.sh` reads the PR and
-  renders one verdict (`BLOCKED`, `FIX`, `REQUEST`, `WAIT`, `READY`); the
+  renders one verdict (`BLOCKED`, `FIX`, `GATE`, `REQUEST`, `WAIT`, `READY`); the
   workflow requests the AI reviewers with the exact mentions, waits for
   their reviews, dispatches `ci-fixer` and `pr-comment-resolver`, pushes,
-  and repeats until every reachable reviewer approves the head and CI is
-  green. Its exit condition is stage 6's, made verifiable.
+  runs the mandatory FR/NFR gate on any head whose gate status is missing or failed,
+  and repeats until every reachable reviewer approves the head and CI and
+  the FR/NFR gate are green. Its exit condition is stage 6's, made verifiable.
 - `/react-frontend-sdlc:fe-sdlc-review-panel` runs stage 4 with every
   lens in parallel and three refuters per finding.
 - `/react-frontend-sdlc:fe-sdlc-fr-nfr-review` runs the stage-4 BMAD
   FR/NFR gate as its own bounded loop — one `fr-nfr-reviewer` gate run per
   iteration, root-cause fixes by `react-implementer`, until zero new
-  findings with verdict PASS — and only when the feature has a
-  `specs/<slug>/` bundle; without one it reports the gate not applicable.
+  findings with verdict PASS — on every PR with a non-empty change set: against the PR description and
+  linked issues, the `specs/<slug>/` bundle when there is one, and the
+  baseline NFR catalog always; `fe-sdlc-pr-until-green` runs it on any
+  head whose `BMAD FR/NFR Review Gate` status is missing or failed (a
+  pending status is waited on).
 - `/react-frontend-sdlc:fe-sdlc-feature` composes stages 0–6 for one
   planned feature and nests the three workflows above.
 

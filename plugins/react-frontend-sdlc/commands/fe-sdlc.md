@@ -32,7 +32,7 @@ each with the structured run report below.
 | 3   | implement   | `/fe-sdlc-implement`           | Ralph `EXIT_SIGNAL` success, all stories done                                    | 5 iterations + circuit breaker                                         |
 | 4   | review      | `/fe-sdlc-review`              | zero new findings in last gate iteration; a11y gate clean                        | 5 iterations                                                           |
 | 5   | qa          | `/fe-sdlc-qa`                  | QA verdict PASS — visual + E2E + Lighthouse + a11y (FAIL routes back to stage 3) | 5 iterations                                                           |
-| 6   | finish-pr   | `/fe-sdlc-finish-pr`           | CI green + 0 unresolved AI review comments                                       | 5 iterations                                                           |
+| 6   | finish-pr   | `/fe-sdlc-finish-pr`           | CI green + FR/NFR gate green on the head + 0 unresolved AI review comments       | 5 iterations (FR/NFR gate: 3)                                          |
 
 ### Resumability — artifact → stage detection
 
@@ -66,6 +66,7 @@ creating, so a duplicate cannot be opened even on a racing re-run.
 | review clean; QA verdict absent                                                       | stage 5                                |
 | review clean; QA verdict FAIL (loop-back, stage 3 budget remaining)                   | stage 3                                |
 | QA PASS; PR missing, checks not green, or comments unresolved                         | stage 6                                |
+| QA PASS; `BMAD FR/NFR Review Gate` status missing or red on the current PR head       | stage 6                                |
 | finish-pr exit condition met                                                          | nothing to do → SUCCESS report         |
 
 ### Stage 0 — setup-check
@@ -111,7 +112,7 @@ with the breaker (NFR-6) — surface it.
 
 The run loops over stages with gated transitions as above. Run-level
 exit condition: **finish-pr exit condition met** — stage 6's
-"CI green + 0 unresolved AI review comments" — then SUCCESS. The only
+"CI green + FR/NFR gate green on the head + 0 unresolved AI review comments" — then SUCCESS. The only
 other terminal state is ESCALATED (guard breach, breaker trip, or
 unmet setup-check). Both produce the final run report.
 
@@ -144,7 +145,7 @@ stages:
 | implement | <n>/5 (+breaker state) | Ralph EXIT_SIGNAL success, all stories done | yes/no |
 | review | <n>/5 | zero new findings in last gate iteration; a11y gate clean | yes/no |
 | qa | <n>/5 (loop-backs: <k>) | QA verdict PASS — visual + E2E + Lighthouse + a11y | yes/no |
-| finish-pr | A <a>/5, B <b>/5 | CI green + 0 unresolved AI review comments | yes/no |
+| finish-pr | A <a>/5, B <b>/5, C <c>/3 | CI green + FR/NFR gate green on the head + 0 unresolved AI review comments | yes/no |
 artifacts: <issue URL> | <SPECS_DIR> | <PR URL>
 degrade_notes: <every NFR-4 note collected across stages, or none>
 escalation: <the failing stage's === SDLC ESCALATION === block, when ESCALATED>

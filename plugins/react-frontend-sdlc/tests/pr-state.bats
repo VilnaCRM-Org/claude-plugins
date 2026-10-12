@@ -149,12 +149,57 @@ EOF
   [[ "$output" == *"VERDICT: READY"* ]]
 }
 
-@test "a PR with no checks is READY with a satisfied-with-report note" {
+@test "a PR with no checks is never READY: the mandatory FR/NFR gate status is missing" {
   export GH_PR_FIXTURE="$FX/pr-open-nochecks.json"
   run "$SCRIPT" --pr 7
   [[ "$output" == *"CI: none"* ]]
   [[ "$output" == *"INFO: CI: the PR reports no checks"* ]]
-  [[ "$output" == *"VERDICT: READY"* ]]
+  [[ "$output" == *"FR_NFR_GATE: missing"* ]]
+  [[ "$output" == *"VERDICT: GATE"* ]]
+}
+
+@test "GATE when CI is green and both bots approve but the FR/NFR gate never ran on the head" {
+  export GH_PR_FIXTURE="$FX/pr-open-green-nogate.json"
+  run "$SCRIPT" --pr 7
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CI: green"* ]]
+  [[ "$output" == *"FR_NFR_GATE: missing"* ]]
+  [[ "$output" == *"VERDICT: GATE"* ]]
+  [[ "$output" == *"NEXT: fe-sdlc-fr-nfr-review --pr 7 --head a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"* ]]
+  [[ "$output" == *"mandatory for every PR"* ]]
+}
+
+@test "GATE when the FR/NFR gate failed on the head; the gate status is never handed to ci-fixer" {
+  export GH_PR_FIXTURE="$FX/pr-open-gate-failed.json"
+  run "$SCRIPT" --pr 7
+  [[ "$output" == *"CI: green failing=[]"* ]]
+  [[ "$output" == *"FR_NFR_GATE: failure"* ]]
+  [[ "$output" == *"VERDICT: GATE"* ]]
+  [[ "$output" != *"ci-fixer"* ]]
+}
+
+@test "--required-checks cannot waive the FR/NFR gate" {
+  export GH_PR_FIXTURE="$FX/pr-open-green-nogate.json"
+  run "$SCRIPT" --pr 7 --required-checks "unit testing"
+  [[ "$output" == *"CI: green"* ]]
+  [[ "$output" == *"VERDICT: GATE"* ]]
+  run "$SCRIPT" --pr 7 --required-checks "unit testing,BMAD FR/NFR Review Gate"
+  [[ "$output" == *"CI: green failing=[] pending=[] missing=[]"* ]]
+  [[ "$output" == *"VERDICT: GATE"* ]]
+}
+
+@test "WAIT while the FR/NFR gate status is posted as pending" {
+  export GH_PR_FIXTURE="$FX/pr-open-gate-pending.json"
+  run "$SCRIPT" --pr 7
+  [[ "$output" == *"FR_NFR_GATE: pending"* ]]
+  [[ "$output" == *"VERDICT: WAIT"* ]]
+  [[ "$output" == *"the BMAD FR/NFR Review Gate status"* ]]
+}
+
+@test "--json carries the fr_nfr object" {
+  export GH_PR_FIXTURE="$FX/pr-open-gate-failed.json"
+  run "$SCRIPT" --pr 7 --json
+  echo "$output" | jq -e '.fr_nfr == {"context":"BMAD FR/NFR Review Gate","status":"failure"} and .verdict == "GATE" and (.ci.checks | has("BMAD FR/NFR Review Gate") | not)'
 }
 
 @test "BLOCKED for a merged or conflicting PR" {
@@ -246,7 +291,8 @@ EOF
   export GH_PR_FIXTURE="$FX/pr-open-nochecks.json"
   run "$SCRIPT" --pr 7 --required-checks "unit testing"
   [[ "$output" == *"CI: pending failing=[] pending=[] missing=[unit testing]"* ]]
-  [[ "$output" == *"VERDICT: WAIT"* ]]
+  [[ "$output" == *"VERDICT: GATE"* ]]
+  [[ "$output" != *"VERDICT: READY"* ]]
   [[ "$output" != *"reports no checks"* ]]
 }
 
@@ -267,4 +313,12 @@ EOF
   run "$SCRIPT" --pr 7
   [ "$status" -eq 1 ]
   [[ "$output" == *"gh api failed listing check suites"* ]]
+}
+
+@test "--required-checks naming only the FR/NFR gate narrows the CI scope to nothing, not to every check" {
+  export GH_PR_FIXTURE="$FX/pr-open-red.json"
+  run "$SCRIPT" --pr 7 --required-checks "BMAD FR/NFR Review Gate"
+  [[ "$output" == *"CI: green failing=[] pending=[] missing=[]"* ]]
+  [[ "$output" == *"FR_NFR_GATE: success"* ]]
+  [[ "$output" != *"VERDICT: FIX"* ]]
 }

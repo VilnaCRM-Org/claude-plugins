@@ -54,7 +54,7 @@ loop (`/fe-sdlc-implement` → bmalph/Ralph → parallel react-implementer
 subagents, one story per agent) and the fixer dispatched by review-gate,
 QA, and accessibility-gate loop-backs.
 
-Three non-negotiable disciplines:
+Four non-negotiable disciplines:
 
 1. **Container-only execution.** The toolchain never runs on the host.
    Every build, test, and quality command goes through the profile `make`
@@ -97,6 +97,19 @@ Three non-negotiable disciplines:
    `data-testid`; import cross-feature with the configured aliases
    (`@/`, and any other entry in `architecture.path_aliases`), relative
    only within a folder.
+4. **Component-first UI.** A story that builds UI follows the order in
+   `${CLAUDE_PLUGIN_ROOT}/skills/frontend-component-development/SKILL.md`
+   ("Component-first UI"): inventory the UI kit (shared components carrying
+   `architecture.component_prefix`, plus any external UI-kit package the
+   repository depends on), build every missing component — and every new
+   variant of an existing one — in isolation with its tests and, when
+   `capabilities.storybook` is true and `make.storybook_build` is mapped, its
+   Storybook story (applicable states and variants, build green); without
+   Storybook keep the order and record `SKIPPED: storybook — component-first
+   order kept without stories`. Only then compose the page or feature from
+   those components (kit and feature-local). Never inline one-off markup in a
+   page that duplicates, or should be, a kit component. A composition story
+   whose component stories are not done is BLOCKED, not improvised.
 
 ## Inputs
 

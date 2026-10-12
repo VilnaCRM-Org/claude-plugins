@@ -74,12 +74,17 @@ during the work. It does **not** replace this gate.
 - `quality-standards`
 - `testing-workflow`
 
+**Mandatory on every pull request (independent of the new-feature list above):**
+
+- `bmad-fr-nfr-review-gate` for EVERY pull request — new feature, bugfix, refactor, docs or
+  chore alike; it is mandatory and never "Not applicable". Run it through the target mapped by `make.fr_nfr_gate` (the plugin substitutes
+  its own gate script when the mapping is `null`). With BMAD specs, verify against
+  `specs/<slug>/`; without them, the PR description and its linked issues are the requirement
+  source, plus the baseline NFR catalog. A PR with no requirement source at all fails the gate
+  — link the issue or write the acceptance criteria into the PR description.
+
 **Conditional BMAD skills:**
 
-- `bmad-fr-nfr-review-gate` when BMAD specs exist for the implemented work. Run it through the
-  target mapped by `make.fr_nfr_gate` (the plugin substitutes its own gate script when the
-  mapping is `null`); if no BMAD specs exist, record **"Not applicable"** with the concrete
-  reason.
 - `bmad-autonomous-planning` is a planning-time skill only; during the gate record
   **"Not applicable — planning skill"** unless the task itself was to produce specs.
 
@@ -155,6 +160,14 @@ capability, so a NOT-APPLICABLE verdict for a technique skill always cites the a
 - [stryker-mutation-timeout-regression-alarm](stryker-mutation-timeout-regression-alarm/SKILL.md) — Use when a Stryker mutation workflow carries no `timeout-minutes` on its shard or merge job, when a mutation run's cost jumps an order of magnitude with no change to the mutate scope, when mutants co…
 
 ### Storybook, visual and Playwright
+
+Any UI change that introduces a component the UI kit lacks, or a new variant
+of a kit component, EXECUTEs `frontend-component-development` (its
+component-first section): the component comes before the page or feature
+that composes it. `storybook-story-authoring` EXECUTEs alongside it when
+`capabilities.storybook` is true (the story comes first too); when it is
+false, record that skill NOT-APPLICABLE and keep the component-first order
+with isolated unit tests.
 
 - [playwright-mobile-device-lane](playwright-mobile-device-lane/SKILL.md) — Use when adding or extending real mobile-device coverage to a Playwright suite — touch/tap specs, Pixel or iPhone device descriptors, `isMobile`/`hasTouch` contexts, device-pixel-ratio visual baselin…
 - [playwright-visual-baseline-grep-title](playwright-visual-baseline-grep-title/SKILL.md) — Use when a Playwright run filtered with -g / --grep exits 0 but an expected visual baseline PNG was never written, when a snapshot filter has to match a title containing spaces or a separator, or whe…

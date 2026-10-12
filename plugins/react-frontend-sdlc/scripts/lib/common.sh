@@ -302,10 +302,31 @@ except Exception:
 # claude_run_once PROMPT -> prints .result on stdout; returns 1 on a
 # non-zero claude exit, an is_error=true response, OR malformed JSON
 # (all three are transport-level failures that earn one retry).
+# With CLAUDE_RUN_ISOLATED=1 (see claude_run_isolated) the session is a
+# read-only sandbox holding no credential: --restricted with --tools
+# Read,Grep,Glob leaves it no shell, no code execution and no file edits,
+# ignores the project's settings allowlist and confines file reads to the
+# working directory; --strict-mcp-config drops MCP servers. As defence in
+# depth the GitHub token variables are unset, GH_CONFIG_DIR is an empty
+# directory (no stored gh login), git ignores global/system config, credential
+# helpers and the SSH agent, and gh / git push / git credential are denied.
 claude_run_once() {
-  local prompt=$1 raw result
-  if ! raw="$(claude -p "$prompt" --output-format json \
-              --permission-mode acceptEdits --max-turns 30)"; then
+  local prompt=$1 raw result rc=0 gh_config=""
+  local -a cmd=(claude -p "$prompt" --output-format json
+                --permission-mode acceptEdits --max-turns 30)
+  if [[ "${CLAUDE_RUN_ISOLATED:-0}" == 1 ]]; then
+    gh_config="$(mktemp -d)"
+    cmd=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN
+         -u SSH_AUTH_SOCK -u GIT_ASKPASS -u SSH_ASKPASS
+         GH_CONFIG_DIR="$gh_config" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+         GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
+         "${cmd[@]}"
+         --restricted --tools 'Read,Grep,Glob' --strict-mcp-config
+         --disallowedTools 'Bash(gh:*)' 'Bash(git push:*)' 'Bash(git credential:*)')
+  fi
+  raw="$("${cmd[@]}")" || rc=$?
+  [[ -z "$gh_config" ]] || rm -rf "$gh_config"
+  if (( rc != 0 )); then
     log_warn "claude exited non-zero"
     return 1
   fi
@@ -319,6 +340,20 @@ claude_run_once() {
     return 1
   fi
   printf '%s\n' "$result"
+}
+
+# claude_supports_restricted — true when the installed claude CLI offers the
+# --restricted mode claude_run_isolated depends on (Claude Code 2.1.248+).
+claude_supports_restricted() {
+  claude --help 2>/dev/null | grep -q -- '--restricted'
+}
+
+# claude_run_isolated PROMPT — claude_run_once for a session that reads
+# untrusted, contributor-controlled text (PR descriptions, issues, diffs). The
+# caller keeps its own GitHub credential and publishes the outcome itself
+# after the session returns; the session never holds it.
+claude_run_isolated() {
+  CLAUDE_RUN_ISOLATED=1 claude_run_once "$1"
 }
 
 # --- project profile helpers (architecture §4) ---------------------------
