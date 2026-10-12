@@ -24,7 +24,7 @@ the whole skill NOT-APPLICABLE when `capabilities.storybook` is `false`.
 ## Overview
 
 **Stories come first.** In the plugin's component-first UI workflow
-(see [frontend-component-development](../frontend-component-development/SKILL.md#component-first-ui-ui-kit--storybook--composition)),
+(see [frontend-component-development](../frontend-component-development/SKILL.md#component-first-ui-workflow)),
 a component the UI kit does not provide is built in Storybook — story,
 applicable states and variants — before any page or feature imports it, and
 a new variant of an existing kit component gets its story before it is used.

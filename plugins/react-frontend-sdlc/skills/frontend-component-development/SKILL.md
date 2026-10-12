@@ -48,7 +48,7 @@ explicit note rather than improvising a substitute.
 0. **Plan component-first for any UI.** Before writing a page, view, or feature screen,
    inventory the UI kit and list the components it lacks. Take each missing component through
    steps 1–6 (in Storybook when available) before the page that uses it — see
-   [Component-first UI](#component-first-ui-ui-kit--storybook--composition). The page or
+   [Component-first UI](#component-first-ui-workflow). The page or
    feature is composed from those components once they exist — kit components, plus
    feature-local ones where the element is genuinely feature-bound.
 1. **Locate the boundary.** Find the owning module or shared-component boundary from
@@ -146,7 +146,7 @@ Route deeper audits and any flagged finding to
 is false, run the manual a11y checks above and record `SKIPPED: accessibility-audit
 (capabilities.accessibility_audit=false)` rather than assuming the gate passed.
 
-## Component-first UI (UI kit → Storybook → composition)
+## Component-first UI workflow
 
 Every UI change follows the same order — components first, composition last:
 
@@ -187,7 +187,7 @@ capability.
 
 When `capabilities.storybook` is true, every new UI-kit component (and every new variant or
 state of an existing one) gets its CSF3 story BEFORE any page or feature uses it — the
-[component-first order](#component-first-ui-ui-kit--storybook--composition) — and the target
+[component-first order](#component-first-ui-workflow) — and the target
 mapped by `make.storybook_build` stays green. Record
 `SKIPPED: storybook — component-first order kept without stories` when
 `capabilities.storybook` is false or `make.storybook_build` is `null`.
