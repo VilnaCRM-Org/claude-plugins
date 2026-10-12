@@ -861,3 +861,12 @@ EOF
   [ "$status" -eq 0 ]
   grep -q 'advisory run without a PR or base branch' "$CLAUDE_LOG"
 }
+
+@test "an Enterprise-style owner with '_' or '.' is accepted by branch-name PR discovery" {
+  rm -rf specs
+  git remote set-url origin https://github.com/acme_ent.shortcode/sample-web.git
+  pr_gh
+  PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 0 ]
+  grep -q 'select(.headRepositoryOwner.login == "acme_ent.shortcode")' "$GH_LOG"
+}

@@ -236,8 +236,11 @@ if [[ -z "$PR" ]]; then
     # head repository belongs to this checkout's owner count: another fork's
     # same-named branch can neither be adopted nor make discovery ambiguous.
     head_owner="${repo_slug%%/*}"
-    [[ "$head_owner" =~ ^[A-Za-z0-9-]+$ ]] \
-      || die "cannot derive the head owner from $repo_slug"
+    # Same character set as the upstream check: GitHub Enterprise
+    # (externally provisioned) logins may carry '_' or '.'.
+    [[ "$head_owner" =~ ^[A-Za-z0-9_.-]+$ ]] \
+      || source_fail "cannot derive the head owner from $repo_slug" \
+           "cannot derive the head-repository owner from $repo_slug — pass --pr"
     prs="$(gh pr list --repo "$pr_repo" --head "$branch" --state open \
       --json number,headRepositoryOwner \
       --jq ".[] | select(.headRepositoryOwner.login == \"$head_owner\") | .number")" \
