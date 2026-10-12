@@ -143,6 +143,11 @@ fi
 STATUS_RETRY_DELAY="${FR_NFR_STATUS_RETRY_DELAY:-5}"
 post_status() {
   local state=$1 description=$2 attempt err
+  # GitHub rejects descriptions over 140 characters; a long branch name in one
+  # must not turn the real failure into an unpostable status.
+  if (( ${#description} > 140 )); then
+    description="${description:0:137}..."
+  fi
   if (( ADVISORY )); then
     log_info "advisory run: no commit status posted (would be $state: $description)"
     return 0
@@ -227,8 +232,15 @@ if [[ -z "$PR" ]]; then
   # "no PR": guessing would gate against the wrong requirements.
   branch="$(git branch --show-current 2>/dev/null)" || branch=""
   if [[ -n "$branch" ]]; then
+    # --head matches the bare branch name across every fork, so only PRs whose
+    # head repository belongs to this checkout's owner count: another fork's
+    # same-named branch can neither be adopted nor make discovery ambiguous.
+    head_owner="${repo_slug%%/*}"
+    [[ "$head_owner" =~ ^[A-Za-z0-9-]+$ ]] \
+      || die "cannot derive the head owner from $repo_slug"
     prs="$(gh pr list --repo "$pr_repo" --head "$branch" --state open \
-      --json number --jq '.[].number')" \
+      --json number,headRepositoryOwner \
+      --jq ".[] | select(.headRepositoryOwner.login == \"$head_owner\") | .number")" \
       || source_fail "cannot discover the PR for branch $branch" \
            "gh pr list failed for branch $branch in $pr_repo — restore gh access or pass --pr"
     pr_count="$(grep -c . <<<"$prs" || true)"

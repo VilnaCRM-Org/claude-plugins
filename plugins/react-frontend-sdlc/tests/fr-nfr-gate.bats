@@ -85,6 +85,23 @@ EOF
   PATH="$dir:$PATH"
 }
 
+# stub_git_fetch: every `git fetch` fails offline and is logged to FETCH_LOG;
+# all other git commands run the real git, so no test touches the network.
+stub_git_fetch() {
+  local dir="$BATS_TEST_TMPDIR/git-bin" real
+  real="$(command -v git)"
+  mkdir -p "$dir"
+  cat > "$dir/git" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ "\$a" = fetch ]; then echo "git \$*" >> "$BATS_TEST_TMPDIR/fetch.log"; exit 1; fi
+done
+exec "$real" "\$@"
+EOF
+  chmod +x "$dir/git"
+  PATH="$dir:$PATH"
+}
+
 ZERO_JSON='{"result":"All requirements covered.\nFR_NFR_NEW_FINDINGS: 0"}'
 FINDINGS_JSON='{"result":"- FR-3 sign-up form validation not covered by the change set\n- NFR-6 missing WCAG focus-order guard\nFR_NFR_NEW_FINDINGS: 2"}'
 
@@ -721,6 +738,7 @@ EOF
 @test "a PR whose base commit cannot be resolved fails closed instead of reviewing the whole tree" {
   rm -rf specs
   pr_gh
+  stub_git_fetch
   PR_BASE_OID="0123456789abcdef0123456789abcdef01234567" PR_BASE_NAME="no-such-branch" PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
   [ "$status" -eq 1 ]
   [[ "$output" == *"cannot resolve the base commit of PR #7"* ]]
@@ -742,8 +760,29 @@ EOF
 @test "the PR base commit is fetched from gh's configured host, not a hard-coded github.com" {
   rm -rf specs
   pr_gh
+  stub_git_fetch
   REPO_URL="https://ghe.invalid/acme/sample-web" PR_BASE_OID="0123456789abcdef0123456789abcdef01234567" PR_BASE_NAME="no-such-branch" PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
   [ "$status" -eq 1 ]
   [[ "$output" == *"could not fetch the PR base commit 0123456 from https://ghe.invalid/acme/sample-web"* ]]
   [[ "$output" != *"github.com/acme"* ]]
+  grep -q 'fetch --quiet --no-tags https://ghe.invalid/acme/sample-web.git 0123456789abcdef0123456789abcdef01234567' "$BATS_TEST_TMPDIR/fetch.log"
+}
+
+@test "branch-name PR discovery only adopts PRs whose head repository belongs to this checkout" {
+  rm -rf specs
+  pr_gh
+  PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 0 ]
+  grep -q 'pr list --repo acme/sample-web --head .* --json number,headRepositoryOwner --jq .\[\] | select(.headRepositoryOwner.login == "acme") | .number' "$GH_LOG"
+}
+
+@test "a status description over GitHub's 140-character limit is truncated, not rejected" {
+  git checkout -q -b "$(printf 'feature-%.0s' $(seq 1 25))"
+  pr_gh
+  PR_LIST_EXIT=1 STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 1 ]
+  desc="$(grep -o -- '-f description=.*' "$GH_LOG" | head -1 | sed 's/^-f description=//')"
+  [ -n "$desc" ]
+  [ "${#desc}" -le 140 ]
+  [[ "$desc" == *"..." ]]
 }
