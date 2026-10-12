@@ -37,10 +37,11 @@ runs no git).
   traceability for the FR/NFR lens. When the argument is a PR URL,
   resolve the branch (and the PR number for the conclusion comment) from
   it, then its `specs/<slug>/` bundle.
-- The PR number, when no `specs/<slug>/` bundle exists: from the PR-URL
-  argument or `gh pr view --json number --jq .number`. Pass it to
-  `fr-nfr-reviewer` as the requirement source (`--pr <n>`; the PR
-  description and linked issues). An unbundled branch must have its PR
+- The PR number, whenever the branch has a PR (with or without a
+  `specs/<slug>/` bundle): from the PR-URL argument or
+  `gh pr view --json number --jq .number`. Pass it to `fr-nfr-reviewer`
+  (`--pr <n>`): the PR description and linked issues are a requirement
+  source on every run, next to the bundle when one exists. An unbundled branch must have its PR
   open first — a draft carrying acceptance criteria or `Closes #N` is
   enough — or the gate fails closed.
 - Direct-load the triage decision guide (§1.2 dependency edge):

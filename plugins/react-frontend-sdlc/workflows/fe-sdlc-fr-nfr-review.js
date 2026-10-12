@@ -56,6 +56,8 @@ const SCOPE_SCHEMA = {
     spec_files: { type: 'array', items: { type: 'string' } },
     pr: { type: ['integer', 'null'] },
     pr_requirements: { type: 'boolean' },
+    clean: { type: 'boolean' },
+    head_matches_pr: { type: ['boolean', 'null'] },
     linked_issues: { type: 'array', items: { type: 'integer' } },
     summary: { type: 'string' },
   },
@@ -142,7 +144,7 @@ const scope = await agent(
     `4. Pull request: ${OPTS.pr ? `PR #${OPTS.pr}` : 'the current branch\'s PR (`gh pr view --json number --jq .number`), or null when the branch has none'}. Read its body (\`gh pr view <n> --json body\`) and its closing issues (each with its own repository): pr_requirements is true only when the PR body is non-blank or at least one linked issue has a non-blank BODY — a title-only issue is no requirement source, exactly as the gate script judges it; list the qualifying issue numbers in linked_issues.`,
     OPTS.head
       ? `5. Head check: \`git rev-parse HEAD\` must equal ${OPTS.head} and \`git status --porcelain\` must print nothing — the gate posts its commit status for the local HEAD, so it must run on exactly that PR head. Otherwise set blocked to "local checkout is not at PR head ${OPTS.head.slice(0, 7)} with a clean tree — check out and pull the PR branch".`
-      : '5. Head check: none requested.',
+      : '5. Head check: report clean (true when `git status --porcelain` prints nothing) and, when a PR exists, head_matches_pr (true when `git rev-parse HEAD` equals `gh pr view <n> --json headRefOid --jq .headRefOid`; null without a PR). Do not block on either.',
     `6. summary: ${OPTS.summary ? `use "${OPTS.summary}"` : 'one line describing the change set (what the changed files implement), for the gate impact context'}.`,
     'Return the structured output only; edit nothing.',
   ].join('\n'),
@@ -177,8 +179,14 @@ if (!hasSpecs && !(scope.pr && scope.pr_requirements)) {
     { requirement_source: 'none', status_posted: recorded?.status_posted === true },
   )
 }
+// The gate posts its status for the local HEAD, so a run on uncommitted changes
+// or on a commit that is not the PR head reviews code the status would not
+// describe: such a run is advisory (no status, no comment) and the
+// authoritative run happens on the published head (fe-sdlc-pr-until-green).
+const advisory = scope.clean === false || scope.head_matches_pr === false
+if (advisory) degradeNotes.push('advisory gate run: uncommitted changes or HEAD is not the PR head — no BMAD FR/NFR Review Gate status or comment was posted; the authoritative run happens on the published PR head')
 const requirementSource = hasSpecs ? `specs/${scope.slug}/` : `PR #${scope.pr} description${(scope.linked_issues || []).length ? ` + issue(s) ${scope.linked_issues.map((n) => `#${n}`).join(', ')}` : ''}`
-const runnerArgs = [hasSpecs ? `--spec-path ${shellQuote(`specs/${scope.slug}`)}` : null, scope.pr ? `--pr ${scope.pr}` : null, scope.summary ? `--impact-context ${shellQuote(scope.summary)}` : null].filter(Boolean).join(' ')
+const runnerArgs = [hasSpecs ? `--spec-path ${shellQuote(`specs/${scope.slug}`)}` : null, scope.pr ? `--pr ${scope.pr}` : null, scope.summary ? `--impact-context ${shellQuote(scope.summary)}` : null, advisory ? '--advisory' : null].filter(Boolean).join(' ')
 log(`scope: ${scope.files.length} files against ${scope.base}; requirement source ${requirementSource}${hasSpecs ? ` (${(scope.spec_files || []).join(', ') || 'files unlisted'})` : ''}`)
 
 function gatePrompt(iteration) {
@@ -193,7 +201,7 @@ function gatePrompt(iteration) {
     ...scope.files.map((f) => `  - ${f}`),
     ...prior,
     '',
-    `Per your agent contract: resolve the gate runner from make.fr_nfr_gate in .claude/react-sdlc.yml (the plugin script "$P/scripts/fr-nfr-gate.sh" ${runnerArgs} when null), run it exactly once — it must really run and post the "BMAD FR/NFR Review Gate" commit status, a manually built matrix does not satisfy the mandatory gate — build the full per-requirement matrix, and mirror the FR_NFR_REVIEWER last line into the structured output: verdict, new_findings (null only when the gate run failed for transport or a malformed contract line), gate_run (the runner used, or SKIPPED (<reason>)).`,
+    `Per your agent contract: resolve the gate runner from make.fr_nfr_gate in .claude/react-sdlc.yml (the plugin script "$P/scripts/fr-nfr-gate.sh" ${runnerArgs} when null), run it exactly once — it must really run${advisory ? ' (advisory: it posts no status by design)' : ' and post the "BMAD FR/NFR Review Gate" commit status'}; a manually built matrix does not satisfy the mandatory gate — build the full per-requirement matrix, and mirror the FR_NFR_REVIEWER last line into the structured output: verdict, new_findings (null only when the gate run failed for transport or a malformed contract line), gate_run (the runner used, or SKIPPED (<reason>)).`,
     'Every NEW finding is one findings[] entry with the requirement id, the file it points at, evidence, and a root-cause fix — never a suppression, a threshold change, or a skipped test. Edit nothing.',
   ].join('\n')
 }
@@ -235,6 +243,7 @@ function success(iteration) {
     iterations: iteration,
     exit_condition: 'fr-nfr-reviewer reported new_findings=0 with verdict=PASS',
     requirement_source: requirementSource,
+    status_posted: !advisory,
     specs: hasSpecs ? `specs/${scope.slug}/` : null,
     pr: scope.pr ?? null,
     fixed: ledger.flatMap((l) => l.findings),

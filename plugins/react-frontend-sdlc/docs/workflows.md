@@ -126,7 +126,10 @@ verifies its findings like any other. This workflow is the gate itself, the
 loop the [bmad-fr-nfr-review-gate](../skills/bmad-fr-nfr-review-gate/SKILL.md)
 skill describes, and it is **mandatory for every pull request with a
 non-empty change set** (an empty diff has nothing to gate) — never skipped,
-never passed with a report:
+and never passed without a real gate run reporting zero new findings with
+verdict PASS (a run that needed a transport retry, or an advisory run on a
+dirty / non-head checkout, still ends `SUCCESS-WITH-REPORT`, but only after
+such a PASS):
 
 1. **Scope** — one agent validates the profile, computes the changed-file
    set against the diff base, and resolves the requirement sources: the

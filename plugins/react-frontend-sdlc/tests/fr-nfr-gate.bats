@@ -57,17 +57,20 @@ pr_gh() {
 #!/usr/bin/env bash
 echo "gh $*" >> "$STUB_GH_LOG"
 case "$*" in
-  "pr list --repo acme/sample-web --head "*)
+  "repo view acme/sample-web --json parent"*) [ -z "${UPSTREAM:-}" ] || echo "$UPSTREAM" ;;
+  "pr list --repo "*"--head "*)
     [ "${PR_LIST_EXIT:-0}" -eq 0 ] || { echo "HTTP 502" >&2; exit 1; }
     printf '%s\n' "${PR_LIST:-7}" ;;
-  "pr view 7 --repo acme/sample-web --json body"*) printf '%s\n' "${PR_BODY:-}" ;;
-  "pr view 7 --repo acme/sample-web --json title"*) echo "Add the currency field" ;;
+  "pr view 7 --repo "*"--json body"*) printf '%s\n' "${PR_BODY:-}" ;;
+  "pr view 7 --repo "*"--json title"*) echo "Add the currency field" ;;
   "api graphql "*) printf '%s\n' "${PR_ISSUES:-}" ;;
   "issue view 12 --repo "*"--json title"*) echo "Currency field" ;;
   "issue view 12 --repo "*"--json body"*) printf 'AC1: the field rejects letters\n' ;;
   "issue view 13 --repo "*"--json title"*) echo "Title only" ;;
   "issue view 13 --repo "*"--json body"*) printf '\n' ;;
   "issue view 14 "*) echo "HTTP 502" >&2; exit 1 ;;
+  "issue view 15 --repo "*"--json title"*) echo "Long issue" ;;
+  "issue view 15 --repo "*"--json body"*) printf 'AC: %.0s' $(seq 1 4000); printf '\n' ;;
 esac
 EOF
   chmod +x "$dir/gh"
@@ -113,7 +116,7 @@ EOF
   [[ "$output" == *"FAIL — 2 new finding(s)"* ]]
   grep -q -- '-f state=failure' "$GH_LOG"
   grep -qF -- '-f context=BMAD FR/NFR Review Gate' "$GH_LOG"
-  grep -q 'pr comment 7 --body' "$GH_LOG"
+  grep -q 'pr comment 7 --repo acme/sample-web --body' "$GH_LOG"
   grep -q 'FR-3 sign-up form validation not covered' "$GH_LOG"
   grep -q 'NFR-6 missing WCAG focus-order guard' "$GH_LOG"
 }
@@ -350,7 +353,7 @@ EOF
   PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$FINDINGS_JSON" run "$GATE" --pr 7
   [ "$status" -eq 1 ]
   ! grep -q 'pr list' "$GH_LOG"
-  grep -q 'pr comment 7 --body' "$GH_LOG"
+  grep -q 'pr comment 7 --repo acme/sample-web --body' "$GH_LOG"
   grep -q 'against the pull request description' "$GH_LOG"
 }
 
@@ -467,4 +470,58 @@ EOF
   [ "$status" -eq 0 ]
   grep -q 'api graphql -f query=.*closingIssuesReferences' "$GH_LOG"
   ! grep -q -- '--json closingIssuesReferences' "$GH_LOG"
+}
+
+@test "a PASS posts a PR comment carrying the review, not only the status" {
+  pr_gh
+  PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 0 ]
+  grep -q -- '-f state=success' "$GH_LOG"
+  grep -q 'pr comment 7 --repo acme/sample-web --body ## BMAD FR/NFR Review Gate: PASS' "$GH_LOG"
+  grep -q 'All requirements covered' "$GH_LOG"
+}
+
+@test "--advisory reviews but posts neither a status nor a comment" {
+  pr_gh
+  PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$FINDINGS_JSON" run "$GATE" --spec-path specs --advisory
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"advisory run: no commit status posted"* ]]
+  ! grep -q 'statuses/' "$GH_LOG"
+  ! grep -q 'pr comment' "$GH_LOG"
+  grep -q '^claude ' "$CLAUDE_LOG"
+}
+
+@test "in a fork checkout the PR, its issues and the status go to the upstream repository" {
+  rm -rf specs
+  pr_gh
+  UPSTREAM="upstream-org/sample-web" PR_BODY="AC: x" PR_ISSUES="upstream-org/sample-web#12" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 0 ]
+  grep -q 'pr list --repo upstream-org/sample-web --head ' "$GH_LOG"
+  grep -q 'pr view 7 --repo upstream-org/sample-web --json body' "$GH_LOG"
+  grep -q -- '-f o=upstream-org -f r=sample-web' "$GH_LOG"
+  grep -q "api repos/upstream-org/sample-web/statuses/$SHA" "$GH_LOG"
+}
+
+@test "more than 50 linked issues fails closed instead of gating a partial requirement set" {
+  rm -rf specs
+  pr_gh
+  PR_BODY="AC: x" PR_ISSUES=$'acme/sample-web#12\nHAS_NEXT_PAGE' STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"links more than 50 closing issues"* ]]
+  grep -q -- '-f state=failure' "$GH_LOG"
+  [ ! -f "$CLAUDE_LOG" ]
+}
+
+@test "all sources share one budget: later linked issues are omitted with a marker, the prompt stays under the argv limit" {
+  rm -rf specs
+  pr_gh
+  PR_BODY="AC: x" PR_ISSUES=$'acme/sample-web#15\nacme/sample-web#15\nacme/sample-web#15\nacme/sample-web#15\nacme/sample-web#15' STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
+  [ "$status" -eq 0 ]
+  grep -q '1 more linked issue(s) omitted by the prompt budget' "$CLAUDE_LOG"
+  [ "$(wc -c < "$CLAUDE_LOG")" -lt 131072 ]
+}
+
+@test "the closing-issues query is built without single-quoted expansions (SC2016-clean)" {
+  ! grep -nE "query='query\(\\$" "$GATE"
+  grep -q 'closing_query="query(' "$GATE"
 }

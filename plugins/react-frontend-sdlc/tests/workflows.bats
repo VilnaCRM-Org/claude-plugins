@@ -309,6 +309,15 @@ run_wf() { # <workflow-file> <scenario-file>
   echo "$output" | jq -e '.calls[1].prompt | contains("fr-nfr-gate.sh\" --spec-path '"'"'specs/alpha-login'"'"' --impact-context '"'"'login form with polite validation status'"'"'")'
 }
 
+@test "fr-nfr-review: a dirty checkout or a HEAD that is not the PR head runs the gate advisory, publishing nothing" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-advisory.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "SUCCESS-WITH-REPORT" and .result.status_posted == false and (.result.degrade_notes | any(contains("advisory gate run")))'
+  echo "$output" | jq -e '.calls[1].prompt | contains("--advisory") and contains("advisory: it posts no status by design")'
+  run_wf fe-sdlc-fr-nfr-review.js fnr-converges.json
+  echo "$output" | jq -e '.result.status_posted == true and (.calls[1].prompt | contains("--advisory") | not)'
+}
+
 @test "fr-nfr-review: a manually built matrix (runner SKIPPED) never passes the mandatory gate — it escalates" {
   run_wf fe-sdlc-fr-nfr-review.js fnr-skipped-runner.json
   [ "$status" -eq 0 ]

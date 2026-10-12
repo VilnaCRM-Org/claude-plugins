@@ -2,12 +2,16 @@
 # fr-nfr-gate.sh — FR/NFR verification gate: PR comment + commit status
 # (architecture §5, feeds FR-6/FR-11).
 #
-# Usage: fr-nfr-gate.sh [--spec-path PATH] [--pr N] [--impact-context TEXT]
+# Usage: fr-nfr-gate.sh [--spec-path PATH] [--pr N] [--impact-context TEXT] [--advisory]
 #   --spec-path PATH       BMAD spec bundle to verify against (optional)
 #   --pr N                 PR whose description and linked (closing) issues
 #                          supply requirements (default: the current branch's
 #                          PR, when one exists)
 #   --impact-context TEXT  extra context appended to the verification prompt
+#   --advisory             review only: post no commit status and no PR
+#                          comment (a run on uncommitted changes, or on a
+#                          checkout that is not the PR head, must not publish
+#                          a verdict for a commit it did not review)
 #
 # The gate is mandatory for EVERY pull request, not only spec-planned ones.
 # Requirement sources, all used when present: the spec bundle, the PR
@@ -24,11 +28,11 @@
 # is_error=true response, or malformed JSON all count as transport
 # failures, shared with ai-review-loop.sh via lib/common.sh). The prompt demands a
 # mandatory last line
-# 'FR_NFR_NEW_FINDINGS: <n>'. Always posts the 'BMAD FR/NFR Review
-# Gate' commit status for HEAD; posts a PR comment carrying the
-# findings only when n > 0 (success stays comment-quiet to limit PR
-# noise — the status check is the durable signal, so a status post
-# that fails is itself fatal). Exit 0 = zero new findings with the
+# 'FR_NFR_NEW_FINDINGS: <n>'. Unless --advisory, always posts the 'BMAD
+# FR/NFR Review Gate' commit status for HEAD and a PR comment carrying the
+# review result on EVERY run — PASS and FAIL alike — so each PR shows the
+# BMAD review itself, not just a status. The status check is the durable
+# signal, so a status post that fails is itself fatal. Exit 0 = zero new findings with the
 # success status recorded; anything else (findings, malformed output,
 # transport failure after retry, an unpostable status) exits 1.
 set -euo pipefail
@@ -42,15 +46,21 @@ STATUS_CONTEXT='BMAD FR/NFR Review Gate'
 SPEC_PATH=""
 PR=""
 IMPACT_CONTEXT=""
+ADVISORY=0
 # Each PR / issue text is bounded on its own (with an explicit truncation
 # marker) so one oversized source cannot crowd the others out of the prompt.
 SOURCE_TEXT_LIMIT=12000
+# ...and all of them together share one budget: the prompt reaches claude as a
+# single argv string, which Linux caps at 128 KiB (MAX_ARG_STRLEN), so the
+# total stays well below it even for multi-byte (e.g. Cyrillic) text.
+TOTAL_SOURCE_LIMIT=40000
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --spec-path) SPEC_PATH="${2:?--spec-path needs a value}"; shift 2 ;;
     --pr) PR="${2:?--pr needs a value}"; shift 2 ;;
     --impact-context) IMPACT_CONTEXT="${2:?--impact-context needs a value}"; shift 2 ;;
-    *) die "unknown argument: $1 (usage: fr-nfr-gate.sh [--spec-path PATH] [--pr N] [--impact-context TEXT])" ;;
+    --advisory) ADVISORY=1; shift ;;
+    *) die "unknown argument: $1 (usage: fr-nfr-gate.sh [--spec-path PATH] [--pr N] [--impact-context TEXT] [--advisory])" ;;
   esac
 done
 [[ -z "$PR" || "$PR" =~ ^[1-9][0-9]*$ ]] || die "--pr must be a PR number, got: $PR"
@@ -99,13 +109,27 @@ repo_slug="$(resolve_repo_slug)" \
   || die "cannot resolve repository (no origin remote and gh repo view failed)"
 head_sha="$(git rev-parse HEAD)" || die "cannot resolve HEAD (need at least one commit)"
 
+# In a fork checkout `origin` names the fork, but the PR, its linked issues
+# and the status rollup the PR reads live in the upstream (parent)
+# repository: every PR read and the status go there.
+pr_repo="$repo_slug"
+upstream="$(gh repo view "$repo_slug" --json parent \
+  --jq '.parent // empty | "\(.owner.login)/\(.name)"' 2>/dev/null)" || upstream=""
+if [[ "$upstream" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  pr_repo="$upstream"
+fi
+
 post_status() {
   local state=$1 description=$2
-  gh api "repos/${repo_slug}/statuses/${head_sha}" \
+  if (( ADVISORY )); then
+    log_info "advisory run: no commit status posted (would be $state: $description)"
+    return 0
+  fi
+  gh api "repos/${pr_repo}/statuses/${head_sha}" \
     -f state="$state" \
     -f context="$STATUS_CONTEXT" \
     -f description="$description" >/dev/null \
-    || die "failed to post commit status to $repo_slug@${head_sha} (the status check is the gate's durable verdict; restore gh access and re-run)"
+    || die "failed to post commit status to $pr_repo@${head_sha} (the status check is the gate's durable verdict; restore gh access and re-run)"
 }
 
 # --- requirement sources beyond the spec bundle -------------------------------
@@ -120,15 +144,25 @@ source_fail() {
   die "$2"
 }
 
-# bound_text TEXT — cap one source at SOURCE_TEXT_LIMIT characters and say so,
-# so a long source can neither crowd out the others nor be cut silently.
+# bound_text TEXT LIMIT — cap one source at LIMIT characters and say so, so a
+# long source can neither crowd out the others nor be cut silently.
 bound_text() {
-  local text=$1
-  if (( ${#text} > SOURCE_TEXT_LIMIT )); then
+  local text=$1 limit=$2
+  if (( ${#text} > limit )); then
     printf '%s\n[... %d characters truncated; a requirement in the omitted text is reported as unverifiable, never assumed met]' \
-      "${text:0:SOURCE_TEXT_LIMIT}" "$(( ${#text} - SOURCE_TEXT_LIMIT ))"
+      "${text:0:limit}" "$(( ${#text} - limit ))"
   else
     printf '%s' "$text"
+  fi
+}
+budget_left=$TOTAL_SOURCE_LIMIT
+# source_limit — the cap for the next source: its own limit or what is left of
+# the shared budget, whichever is smaller.
+source_limit() {
+  if (( budget_left < SOURCE_TEXT_LIMIT )); then
+    printf '%d' "$budget_left"
+  else
+    printf '%d' "$SOURCE_TEXT_LIMIT"
   fi
 }
 
@@ -139,14 +173,14 @@ if [[ -z "$PR" ]]; then
   # "no PR": guessing would gate against the wrong requirements.
   branch="$(git branch --show-current 2>/dev/null)" || branch=""
   if [[ -n "$branch" ]]; then
-    prs="$(gh pr list --repo "$repo_slug" --head "$branch" --state open \
+    prs="$(gh pr list --repo "$pr_repo" --head "$branch" --state open \
       --json number --jq '.[].number')" \
       || source_fail "cannot discover the PR for branch $branch" \
-           "gh pr list failed for branch $branch in $repo_slug — restore gh access or pass --pr"
+           "gh pr list failed for branch $branch in $pr_repo — restore gh access or pass --pr"
     pr_count="$(grep -c . <<<"$prs" || true)"
     if (( pr_count > 1 )); then
       source_fail "ambiguous: $pr_count open PRs for branch $branch — pass --pr" \
-        "branch $branch has $pr_count open PRs in $repo_slug ($(tr '\n' ' ' <<<"$prs")) — pass --pr to choose one"
+        "branch $branch has $pr_count open PRs in $pr_repo ($(tr '\n' ' ' <<<"$prs")) — pass --pr to choose one"
     fi
     PR="$prs"
   fi
@@ -162,24 +196,32 @@ fence_safe() {
 PR_TEXT=""
 ISSUES_TEXT=""
 if [[ -n "$PR" ]]; then
-  pr_body="$(gh pr view "$PR" --repo "$repo_slug" --json body --jq '.body // ""')" \
+  pr_body="$(gh pr view "$PR" --repo "$pr_repo" --json body --jq '.body // ""')" \
     || source_fail "cannot read PR #$PR (requirement source)" \
-         "cannot read PR #$PR in $repo_slug (the PR description is a requirement source)"
-  pr_title="$(gh pr view "$PR" --repo "$repo_slug" --json title --jq '.title // ""')" \
-    || source_fail "cannot read PR #$PR (requirement source)" "cannot read PR #$PR in $repo_slug"
+         "cannot read PR #$PR in $pr_repo (the PR description is a requirement source)"
+  pr_title="$(gh pr view "$PR" --repo "$pr_repo" --json title --jq '.title // ""')" \
+    || source_fail "cannot read PR #$PR (requirement source)" "cannot read PR #$PR in $pr_repo"
   if [[ -n "${pr_body//[[:space:]]/}" ]]; then
-    PR_TEXT="$(bound_text "$(fence_safe "PR #${PR} — ${pr_title}"$'\n'"${pr_body}")")"
+    PR_TEXT="$(bound_text "$(fence_safe "PR #${PR} — ${pr_title}"$'\n'"${pr_body}")" "$(source_limit)")"
+    budget_left=$(( budget_left - ${#PR_TEXT} ))
   fi
   # owner/name#number per closing reference, so a cross-repository issue is
   # read from its own repository rather than a same-numbered local one. Read
   # through GraphQL: `gh pr view --json closingIssuesReferences` needs gh
   # 2.79+, while the API field works with every gh 2.x.
-  issue_refs="$(gh api graphql \
-    -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){closingIssuesReferences(first:50){nodes{number repository{nameWithOwner}}}}}}' \
-    -f o="${repo_slug%%/*}" -f r="${repo_slug#*/}" -F n="$PR" \
-    --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[]? | "\(.repository.nameWithOwner)#\(.number)"')" \
+  # A 51st linked issue would be dropped silently by one page: more than one
+  # page fails closed instead of gating against a partial requirement set.
+  closing_query="query(\$o:String!,\$r:String!,\$n:Int!){repository(owner:\$o,name:\$r){pullRequest(number:\$n){closingIssuesReferences(first:50){pageInfo{hasNextPage} nodes{number repository{nameWithOwner}}}}}}"
+  issue_refs="$(gh api graphql -f query="$closing_query" \
+    -f o="${pr_repo%%/*}" -f r="${pr_repo#*/}" -F n="$PR" \
+    --jq '.data.repository.pullRequest.closingIssuesReferences | (.nodes[]? | "\(.repository.nameWithOwner)#\(.number)"), (if .pageInfo.hasNextPage then "HAS_NEXT_PAGE" else empty end)')" \
     || source_fail "cannot list the issues linked to PR #$PR" \
-         "cannot list the issues linked to PR #$PR in $repo_slug"
+         "cannot list the issues linked to PR #$PR in $pr_repo"
+  if grep -qx 'HAS_NEXT_PAGE' <<<"$issue_refs"; then
+    source_fail "more than 50 issues linked to PR #$PR" \
+      "PR #$PR links more than 50 closing issues — split the PR; the gate will not verify a partial requirement set"
+  fi
+  omitted_issues=0
   for ref in $issue_refs; do
     [[ "$ref" =~ ^([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([1-9][0-9]*)$ ]] || continue
     issue_repo="${BASH_REMATCH[1]}"
@@ -192,8 +234,17 @@ if [[ -n "$PR" ]]; then
     issue_title="$(gh issue view "$n" --repo "$issue_repo" --json title --jq '.title // ""')" \
       || source_fail "cannot read linked issue ${issue_repo}#$n" \
            "cannot read issue ${issue_repo}#$n linked to PR #$PR"
-    ISSUES_TEXT+="$(bound_text "$(fence_safe "Issue ${issue_repo}#${n} — ${issue_title}"$'\n'"${issue_body}")")"$'\n\n'
+    if (( budget_left <= 0 )); then
+      omitted_issues=$(( omitted_issues + 1 ))
+      continue
+    fi
+    issue_text="$(bound_text "$(fence_safe "Issue ${issue_repo}#${n} — ${issue_title}"$'\n'"${issue_body}")" "$(source_limit)")"
+    budget_left=$(( budget_left - ${#issue_text} ))
+    ISSUES_TEXT+="${issue_text}"$'\n\n'
   done
+  if (( omitted_issues > 0 )); then
+    ISSUES_TEXT+="[... ${omitted_issues} more linked issue(s) omitted by the prompt budget; their requirements are reported as unverifiable, never assumed met]"
+  fi
 fi
 
 if [[ -z "$SPEC_PATH" && -z "$PR_TEXT" && -z "$ISSUES_TEXT" ]]; then
@@ -231,7 +282,11 @@ post_comment() {
     log_warn "no PR found for the current branch; skipping PR comment"
     return 0
   fi
-  gh pr comment "$pr" --body "$body" >/dev/null \
+  if (( ADVISORY )); then
+    log_info "advisory run: no PR comment posted"
+    return 0
+  fi
+  gh pr comment "$pr" --repo "$pr_repo" --body "$body" >/dev/null \
     || log_warn "failed to post PR comment on #$pr"
 }
 
@@ -261,6 +316,15 @@ printf '%s\n' "$result"
 findings_norm="$(strip_zeros "$findings")"
 if [[ "$findings_norm" == "0" ]]; then
   post_status success "zero new FR/NFR findings"
+  post_comment "## BMAD FR/NFR Review Gate: PASS
+
+Zero new findings against ${sources_text}.
+
+<details><summary>Requirement review</summary>
+
+$result
+
+</details>"
   log_info "FR/NFR gate: PASS — zero new findings"
   exit 0
 fi

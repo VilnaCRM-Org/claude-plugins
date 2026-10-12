@@ -120,9 +120,11 @@ runner and re-run.
   rows. The shipped script does not ingest it directly — summarize its
   conclusions in `--impact-context` and cite the file path in the report.
 - Publishing behavior (shipped script): always posts the
-  `BMAD FR/NFR Review Gate` commit status for the PR HEAD; posts a PR comment
-  carrying the findings only when the finding count is above zero — success
-  stays comment-quiet, the status check is the durable signal. Exit 0 means
+  `BMAD FR/NFR Review Gate` commit status for the PR HEAD and a PR comment
+  carrying the review result on every run — PASS and FAIL — so each PR shows
+  the BMAD review itself; the status check stays the durable signal. In a
+  fork checkout both go to the upstream repository. `--advisory` (a run on
+  uncommitted changes or a non-head checkout) posts neither. Exit 0 means
   zero new findings; findings, malformed output, or transport failure after
   one retry exit 1 with a failure status.
 - A repo wrapper mapped via `make.fr_nfr_gate` may expose extra inputs:

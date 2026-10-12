@@ -159,7 +159,7 @@ benefit from fan-out and unattended repetition — see
 
 - `/react-frontend-sdlc:fe-sdlc-pr-until-green` runs stage 6 as a
   sensor-driven state machine: `scripts/pr-state.sh` reads the PR and
-  renders one verdict (`BLOCKED`, `FIX`, `REQUEST`, `WAIT`, `READY`); the
+  renders one verdict (`BLOCKED`, `FIX`, `GATE`, `REQUEST`, `WAIT`, `READY`); the
   workflow requests the AI reviewers with the exact mentions, waits for
   their reviews, dispatches `ci-fixer` and `pr-comment-resolver`, pushes,
   runs the mandatory FR/NFR gate on any head whose gate status is missing or failed,
@@ -170,7 +170,7 @@ benefit from fan-out and unattended repetition — see
 - `/react-frontend-sdlc:fe-sdlc-fr-nfr-review` runs the stage-4 BMAD
   FR/NFR gate as its own bounded loop — one `fr-nfr-reviewer` gate run per
   iteration, root-cause fixes by `react-implementer`, until zero new
-  findings with verdict PASS — on every PR: against the PR description and
+  findings with verdict PASS — on every PR with a non-empty change set: against the PR description and
   linked issues, the `specs/<slug>/` bundle when there is one, and the
   baseline NFR catalog always; `fe-sdlc-pr-until-green` runs it on any
   head whose `BMAD FR/NFR Review Gate` status is missing or failed (a

@@ -257,8 +257,9 @@ language; no suppression added and no threshold changed.
 
 ## Verification Checklist
 
-- [ ] Component-first: the UI kit was inventoried, every missing component was built with its
-      Storybook story (states and variants) before the page/feature composed it, and the
+- [ ] Component-first: the UI kit was inventoried, every missing component was built — with its
+      Storybook story (applicable states and variants) when Storybook is available, else with
+      the recorded `SKIPPED: storybook` note — before the page/feature composed it, and the
       composition layer inlines no one-off markup that duplicates a kit component
 - [ ] Component/hook/form landed in the correct module under `architecture.source_root`
 - [ ] Shared UI carries `architecture.component_prefix`; cross-feature imports use the aliases

@@ -9,7 +9,9 @@ Stage 6 of the SDLC loop. Three independent bounded loops finish the PR:
 `ci-fixer` until all checks are green, the BMAD FR/NFR gate until its
 `BMAD FR/NFR Review Gate` commit status is green on the current head, and
 `pr-comment-resolver` until zero review comments remain unresolved. Each
-loop keeps its OWN iteration counter. The FR/NFR gate is **mandatory for
+loop keeps its OWN iteration counter. Counter A owns every check EXCEPT
+the `BMAD FR/NFR Review Gate` status: a red gate is never handed to
+`ci-fixer`, it is routed through counter C. The FR/NFR gate is **mandatory for
 every PR** — spec-planned or not — and has no degrade path: a PR whose
 head lacks a green gate status is never finished. Every other missing external capability degrades with a
 report instead of failing (NFR-4).
@@ -67,6 +69,10 @@ report instead of failing (NFR-4).
    this loop with the note "CI stage skipped: no checks configured"
    and treat the CI half of the exit condition as satisfied-with-report
    (NFR-4 — a degrade path never loops and never hard-fails).
+
+   The `BMAD FR/NFR Review Gate` status is excluded from this loop — the
+   sensor reports it as `fr_nfr`, never in its CI `failing` list — and is
+   handled by counter C (the `GATE` route in step 5).
 
    Otherwise dispatch the `ci-fixer` agent (Task tool): it polls
    `gh pr checks`; for each failing check, fetches the failure logs
