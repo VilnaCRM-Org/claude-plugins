@@ -177,7 +177,7 @@ run_wf() { # <workflow-file> <scenario-file>
 @test "feature: every story prompt carries the component-first UI order (UI kit → Storybook → composition)" {
   run_wf fe-sdlc-feature.js feat-happy.json
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '[.calls[] | select(.agentType == "react-frontend-sdlc:react-implementer")] | all(.prompt | contains("work component-first") and contains("Storybook story") and contains("before any page or feature uses it") and contains("compose the page/feature from kit components only"))'
+  echo "$output" | jq -e '[.calls[] | select(.agentType == "react-frontend-sdlc:react-implementer")] | all(.prompt | contains("work component-first") and contains("when Storybook is available") and contains("SKIPPED: storybook") and contains("before any page or feature uses it") and contains("compose the page/feature from those components"))'
 }
 
 @test "feature: a failed setup check halts with the /fe-sdlc-setup instruction" {
@@ -233,13 +233,20 @@ run_wf() { # <workflow-file> <scenario-file>
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.result.result == "SUCCESS" and .result.specs == null and .result.pr == 7 and .result.requirement_source == "PR #7 description + issue(s) #12"'
   echo "$output" | jq -e '.calls[0].prompt | contains("Pull request: PR #7") and contains("closingIssuesReferences")'
-  echo "$output" | jq -e '.calls[1].prompt | contains("fr-nfr-gate.sh\" --pr 7 --impact-context") and (contains("--spec-path") | not) and contains("no BMAD spec bundle") and contains("baseline NFR catalog")'
+  echo "$output" | jq -e '.calls[1].prompt | contains("fr-nfr-gate.sh\" --pr 7 --impact-context '"'"'currency field with two-decimal validation'"'"'") and (contains("--spec-path") | not) and contains("no BMAD spec bundle") and contains("baseline NFR catalog")'
+}
+
+@test "fr-nfr-review: a malformed --pr value escalates instead of borrowing its trailing digits" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-bad-pr.json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.result.result == "ESCALATED" and (.calls | length == 0) and (.result.escalation | contains("malformed --pr value \"repo/pull/456-invalid123\""))'
 }
 
 @test "fr-nfr-review: a change with no spec bundle, no PR description and no linked issue escalates as untraceable" {
   run_wf fe-sdlc-fr-nfr-review.js fnr-no-source.json
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.result.result == "ESCALATED" and .result.requirement_source == "none" and (.calls | length == 1)'
+  echo "$output" | jq -e '.result.result == "ESCALATED" and .result.requirement_source == "none" and .result.status_posted == true and (.calls | length == 2)'
+  echo "$output" | jq -e '.calls[1].label == "record-no-source" and (.calls[1].prompt | contains("fr-nfr-gate.sh\" --pr 7 exactly once"))'
   echo "$output" | jq -e '.result.escalation | contains("no requirement source") and contains("mandatory for every PR") and contains("Closes #N")'
 }
 

@@ -30,6 +30,7 @@ user: /fe-sdlc "task text | issue URL"
         artifact: QA report ──[FAIL + repro steps]── loop-back ──────────────────────────┘
   └─ stage 6 /fe-sdlc-finish-pr ── gh pr create/edit ─► artifact: PR URL
         ├─ ci-fixer loop <=5 (counter A) ──► checks green (or skip-with-note)
+        ├─ FR/NFR gate loop <=3 (counter C, fe-sdlc-fr-nfr-review on the head) ──► gate green
         ├─ pr-comment-resolver loop <=5 (counter B, get-pr-comments.sh) ──► 0 unresolved
         │     └─[no reviewer app]── ai-review-loop.sh findings as the comment source
         └─ exit: SUCCESS run report (issue, specs, PR, reports linked)
@@ -77,9 +78,10 @@ bound the run. Two stages carry more than one counter:
   attempts/resumes) plus Ralph's own circuit breaker; EITHER tripping
   ends the stage. A breaker trip is terminal even on iteration 1 and does
   NOT consume the remaining stage iterations.
-- **finish-pr** — two independent `MAX_ITERATIONS=5` counters, CI-fix (A)
-  and comment-resolution (B); spending one never consumes the other, and
-  exhausting either escalates.
+- **finish-pr** — three independent counters: CI-fix (A) and
+  comment-resolution (B) at `MAX_ITERATIONS=5` each, and the FR/NFR gate
+  (C) at 3; spending one never consumes another, and exhausting any of them
+  escalates.
 
 The QA→implement loop-back does not refresh stage 3's budget: the
 re-entry consumes whatever iterations remain, and if stage 3 is already
@@ -134,7 +136,8 @@ resumes at stage 3 (loop-back) while stage 3 budget remains.
 ## Terminal states
 
 - **SUCCESS** — stage 6's exit condition met (CI green, or skip-with-note when
-  CI is absent, + zero unresolved AI review comments); the run report links the
+  CI is absent, + the `BMAD FR/NFR Review Gate` status green on the PR head,
+  never skipped, + zero unresolved AI review comments); the run report links the
   issue, the specs chain,
   and the PR.
 - **ESCALATED** — a guard breached, Ralph's circuit breaker tripped

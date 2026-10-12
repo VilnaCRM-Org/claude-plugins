@@ -122,7 +122,7 @@ function storyPrompt(story, round, feedback) {
     `Implement story ${story.id} — ${story.title} (implement round ${round}/${OPTS.maxImplementRounds}) from specs/${OPTS.slug}/epics-stories.md for issue ${OPTS.issue}.`,
     story.files_hint?.length ? `Files the story names: ${story.files_hint.join(', ')}.` : '',
     feedback ? `Loop-back feedback to satisfy first:\n${feedback}` : '',
-    'If the story builds UI, work component-first: reuse UI-kit components; build every missing component (and new variant) in isolation with its Storybook story covering its states and variants before any page or feature uses it; then compose the page/feature from kit components only.',
+    'If the story builds UI, work component-first: reuse UI-kit components (the shared kit and any external UI-kit package); build every missing component (and new variant) in isolation before any page or feature uses it — when Storybook is available (capabilities.storybook true and make.storybook_build mapped) with its story covering the applicable states and variants and the build green, otherwise record "SKIPPED: storybook — component-first order kept without stories"; then compose the page/feature from those components (kit and feature-local) only.',
     'Follow your agent contract end to end (TDD, container-only execution through the profile make map, bulletproof-react layering, no suppression, semantic selectors), toggle the story checkbox only when its acceptance criteria are met, run no git, and end with the ---RALPH_STATUS--- block. Mirror that block into the structured output.',
   ].filter(Boolean).join('\n')
 }

@@ -74,14 +74,17 @@ during the work. It does **not** replace this gate.
 - `quality-standards`
 - `testing-workflow`
 
-**Conditional BMAD skills:**
+**Mandatory on every pull request (independent of the new-feature list above):**
 
-- `bmad-fr-nfr-review-gate` for EVERY pull request — it is mandatory and never "Not
-  applicable". Run it through the target mapped by `make.fr_nfr_gate` (the plugin substitutes
+- `bmad-fr-nfr-review-gate` for EVERY pull request — new feature, bugfix, refactor, docs or
+  chore alike; it is mandatory and never "Not applicable". Run it through the target mapped by `make.fr_nfr_gate` (the plugin substitutes
   its own gate script when the mapping is `null`). With BMAD specs, verify against
   `specs/<slug>/`; without them, the PR description and its linked issues are the requirement
   source, plus the baseline NFR catalog. A PR with no requirement source at all fails the gate
   — link the issue or write the acceptance criteria into the PR description.
+
+**Conditional BMAD skills:**
+
 - `bmad-autonomous-planning` is a planning-time skill only; during the gate record
   **"Not applicable — planning skill"** unless the task itself was to produce specs.
 

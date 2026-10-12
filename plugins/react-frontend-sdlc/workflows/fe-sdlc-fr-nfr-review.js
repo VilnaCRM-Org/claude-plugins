@@ -23,7 +23,17 @@ function parseTokens(text) {
 }
 if (args != null && typeof args === 'object') Object.assign(OPTS, args)
 else if (args != null) parseTokens(String(args))
-if (OPTS.pr != null) OPTS.pr = String(OPTS.pr).match(/(\d+)\s*$/)?.[1] ?? null
+// --pr accepts the forms fe-sdlc-pr-until-green accepts — N, #N or a
+// pull-request URL — and nothing else: trailing digits of a malformed value
+// must never become a PR number.
+const PR_ARG = /^(?:#?([1-9]\d*)|https?:\/\/\S+\/pull\/([1-9]\d*)\/?)$/
+let badPrArg = null
+if (OPTS.pr != null) {
+  const m = String(OPTS.pr).trim().match(PR_ARG)
+  if (m) OPTS.pr = m[1] ?? m[2]
+  else { badPrArg = String(OPTS.pr); OPTS.pr = null }
+}
+const shellQuote = (t) => `'${String(t).replace(/'/g, `'\\''`)}'`
 
 const PLUGIN_ROOT = [
   'Resolve the react-frontend-sdlc plugin root into P and echo it:',
@@ -115,6 +125,8 @@ const escalate = (iteration, finding, action, extra) => ({
   ...extra,
 })
 
+if (badPrArg != null) return escalate(0, `malformed --pr value "${badPrArg}"`, 'pass a PR number, #N, or a pull-request URL')
+
 // ---------------------------------------------------------------------------
 phase('Scope')
 const scope = await agent(
@@ -146,15 +158,27 @@ if (OPTS.slug && !hasSpecs) {
   return escalate(0, `the caller named specs/${OPTS.slug}/ but no BMAD spec bundle exists there`, 'run /fe-sdlc-plan for this feature, then re-run')
 }
 if (!hasSpecs && !(scope.pr && scope.pr_requirements)) {
+  // Run the gate script anyway: its fail-closed path posts the failure status,
+  // so the head carries a durable red verdict instead of no gate status at all.
+  phase('Gate')
+  const recorded = await agent(
+    [
+      PLUGIN_ROOT,
+      '',
+      `Record the fail-closed FR/NFR gate verdict for the current HEAD: run "$P/scripts/fr-nfr-gate.sh"${scope.pr ? ` --pr ${scope.pr}` : ''} exactly once, in the repository root.`,
+      'With no requirement source it posts a failure "BMAD FR/NFR Review Gate" status and exits 1 naming "cannot trace this change to any requirement". Return {status_posted: true} when it did, else {status_posted: false, note: "<its last error line>"}. Edit nothing.',
+    ].join('\n'),
+    { label: 'record-no-source', phase: 'Gate', effort: 'low', schema: { type: 'object', required: ['status_posted'], properties: { status_posted: { type: 'boolean' }, note: { type: ['string', 'null'] } } } },
+  )
   return escalate(
     0,
     `no requirement source for this change set — no specs/<slug>/ bundle, and ${scope.pr ? `PR #${scope.pr} has an empty description and no linked issue` : 'the branch has no PR'}; the FR/NFR gate is mandatory for every PR and cannot pass an untraceable change`,
-    'link the issue the PR implements (Closes #N) or write its acceptance criteria into the PR description (or run /fe-sdlc-plan), then re-run',
-    { requirement_source: 'none' },
+    'open the PR if there is none (a draft is fine), link the issue it implements (Closes #N) or write its acceptance criteria into the PR description (or run /fe-sdlc-plan), then re-run',
+    { requirement_source: 'none', status_posted: recorded?.status_posted === true },
   )
 }
 const requirementSource = hasSpecs ? `specs/${scope.slug}/` : `PR #${scope.pr} description${(scope.linked_issues || []).length ? ` + issue(s) ${scope.linked_issues.map((n) => `#${n}`).join(', ')}` : ''}`
-const runnerArgs = [hasSpecs ? `--spec-path specs/${scope.slug}` : null, scope.pr ? `--pr ${scope.pr}` : null, '--impact-context "<summary>"'].filter(Boolean).join(' ')
+const runnerArgs = [hasSpecs ? `--spec-path specs/${scope.slug}` : null, scope.pr ? `--pr ${scope.pr}` : null, scope.summary ? `--impact-context ${shellQuote(scope.summary)}` : null].filter(Boolean).join(' ')
 log(`scope: ${scope.files.length} files against ${scope.base}; requirement source ${requirementSource}${hasSpecs ? ` (${(scope.spec_files || []).join(', ') || 'files unlisted'})` : ''}`)
 
 function gatePrompt(iteration) {

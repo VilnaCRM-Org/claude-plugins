@@ -48,7 +48,8 @@ explicit note rather than improvising a substitute.
 0. **Component-first for any UI.** Before writing a page, view, or feature screen, inventory
    the UI kit and build every missing component in Storybook first — see
    [Component-first UI](#component-first-ui-ui-kit--storybook--composition). The page or
-   feature is composed only from kit components once they exist.
+   feature is composed from those components once they exist — kit components, plus
+   feature-local ones where the element is genuinely feature-bound.
 1. **Locate the boundary.** Find the owning module or shared-component boundary from
    `architecture.modules` and `architecture.source_root`. Reusable, module-agnostic UI is shared;
    feature-specific UI stays in its owning feature. See
@@ -156,15 +157,15 @@ Every UI change follows the same order — components first, composition last:
    component built in isolation before any page uses it: reusable UI goes into the kit (shared
    root, configured prefix); only genuinely feature-bound pieces stay in their feature's
    `components/` folder. For each new component — and each new variant or state added to an
-   existing kit component — write the CSF3 story first (default, every variant, and every state:
-   loading, empty, error, disabled, focus/hover; see
+   existing kit component — write the CSF3 story first (default, every variant, and every state
+   the component supports — loading, empty, error, disabled, focus/hover where applicable; see
    [storybook-story-authoring](../storybook-story-authoring/SKILL.md)), the Testing Library test
    (TDD), the i18n copy and the accessibility semantics, and keep the target mapped by
    `make.storybook_build` green.
 3. **Compose the page or feature.** Only after its components exist and their stories are green,
-   assemble the page/feature from them: the composition layer wires data, state, routing, DI and
-   i18n, and lays components out — it does not inline one-off styled markup that duplicates a kit
-   component or should have been one.
+   assemble the page/feature from them (kit components and the feature-local ones from step 2):
+   the composition layer wires data, state, routing, DI and i18n, and lays components out — it
+   does not inline one-off styled markup that duplicates a kit component or should have been one.
 
 When `capabilities.storybook` is false or `make.storybook_build` is `null`, keep the order (build
 and unit-test the component in isolation before composing it) and record

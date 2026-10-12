@@ -66,6 +66,7 @@ creating, so a duplicate cannot be opened even on a racing re-run.
 | review clean; QA verdict absent                                                       | stage 5                                |
 | review clean; QA verdict FAIL (loop-back, stage 3 budget remaining)                   | stage 3                                |
 | QA PASS; PR missing, checks not green, or comments unresolved                         | stage 6                                |
+| QA PASS; `BMAD FR/NFR Review Gate` status missing or red on the current PR head       | stage 6                                |
 | finish-pr exit condition met                                                          | nothing to do → SUCCESS report         |
 
 ### Stage 0 — setup-check

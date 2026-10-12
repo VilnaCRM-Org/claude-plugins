@@ -59,10 +59,12 @@ a recorded assumption.
    4. `architecture.md` — technical design
    5. `epics-stories.md` — epics and stories, each story marked
       independent or dependent (the `/fe-sdlc-implement`
-      parallel-dispatch input). UI work is split component-first: an
-      independent component story per component the UI kit lacks (built
-      with its Storybook story, states and variants), then a dependent
-      composition story that assembles the page or feature from kit
+      parallel-dispatch input). UI work is split component-first: a
+      component story per component the UI kit lacks or new variant of
+      a kit component (built with its Storybook story, applicable states
+      and variants, when Storybook is available), marked independent
+      only when it needs no other component story, then a dependent
+      composition story that assembles the page or feature from those
       components
    6. `readiness.md` — implementation-readiness verdict (PASS/FAIL with
       named findings)

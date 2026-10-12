@@ -123,8 +123,9 @@ that reports `BLOCKED` escalates.
 The review panel runs `fr-nfr-reviewer` as one lens among several and
 verifies its findings like any other. This workflow is the gate itself, the
 loop the [bmad-fr-nfr-review-gate](../skills/bmad-fr-nfr-review-gate/SKILL.md)
-skill describes, and it is **mandatory for every pull request** — never
-skipped, never passed with a report:
+skill describes, and it is **mandatory for every pull request with a
+non-empty change set** (an empty diff has nothing to gate) — never skipped,
+never passed with a report:
 
 1. **Scope** — one agent validates the profile, computes the changed-file
    set against the diff base, and resolves the requirement sources: the
@@ -136,7 +137,10 @@ skipped, never passed with a report:
    requirement source; the baseline NFR catalog applies either way. A
    named bundle that does not exist, or a change with neither a bundle nor
    a PR description / linked issue, escalates — an untraceable change
-   cannot pass. With `--head <sha>` the agent also verifies the checkout
+   cannot pass; the gate script still runs once first so the head carries
+   its fail-closed failure status. An unbundled branch therefore needs its
+   PR open (a draft with acceptance criteria or `Closes #N` is enough)
+   before the gate runs. With `--head <sha>` the agent also verifies the checkout
    sits at that PR head with a clean tree, because the gate posts its
    commit status for the local `HEAD`.
 2. **Gate** — `fr-nfr-reviewer` runs the gate runner exactly once

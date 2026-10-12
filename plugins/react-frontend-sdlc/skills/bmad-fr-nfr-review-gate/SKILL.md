@@ -1,6 +1,6 @@
 ---
 name: bmad-fr-nfr-review-gate
-description: Run a BMAD spec-driven post-implementation review gate for React/TypeScript frontend work that blocks completion until every requirement row scores 5/5 and the gate reports zero new findings. Use when a GitHub PR, feature, bugfix, or task implemented against BMAD specs needs verification of every FR/NFR, pinned NFR catalog category, expanded quality dimension, system quality attribute, positive/negative/edge test case, the frontend quality surface (coverage, mutation MSI, jscpd duplication, rust-code-analysis metrics, ESLint/TypeScript, dependency-cruiser boundaries), the Lighthouse desktop/mobile performance budgets, the mandatory accessibility gate (WCAG 2.2 AA), visual regression, whole-codebase impact surface, manual test evidence, GitHub review and requested-changes state, and CI check before completion.
+description: Run the mandatory BMAD FR/NFR post-implementation review gate for React/TypeScript frontend work — on every pull request — that blocks completion until every requirement row scores 5/5 and the gate reports zero new findings. Use when any GitHub PR, feature, bugfix, or task needs verification — against its BMAD specs when they exist, otherwise against the PR description and linked issues plus the baseline NFR catalog — of every FR/NFR, pinned NFR catalog category, expanded quality dimension, system quality attribute, positive/negative/edge test case, the frontend quality surface (coverage, mutation MSI, jscpd duplication, rust-code-analysis metrics, ESLint/TypeScript, dependency-cruiser boundaries), the Lighthouse desktop/mobile performance budgets, the mandatory accessibility gate (WCAG 2.2 AA), visual regression, whole-codebase impact surface, manual test evidence, GitHub review and requested-changes state, and CI check before completion.
 ---
 
 # BMAD FR/NFR Review Gate
@@ -109,7 +109,10 @@ runner and re-run.
 - Pull request: `--pr <n>` (default: the current branch's PR); its
   description and linked issues are read as requirement sources on every
   run. With neither a bundle nor a PR description / linked issue the script
-  posts a failure status and exits 1.
+  posts a failure status and exits 1 — so for an unbundled change set, open
+  the PR first (a draft is fine) with acceptance criteria or `Closes #N`
+  before running the gate. A linked issue counts only when it has a body;
+  cross-repository issues are read from their own repository.
 - Impact context: `--impact-context` carries a one-line change summary plus
   graph/relationship conclusions (see below) and, when manual testing was
   performed, a pointer to the manual-evidence file.

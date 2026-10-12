@@ -314,3 +314,11 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"gh api failed listing check suites"* ]]
 }
+
+@test "--required-checks naming only the FR/NFR gate narrows the CI scope to nothing, not to every check" {
+  export GH_PR_FIXTURE="$FX/pr-open-red.json"
+  run "$SCRIPT" --pr 7 --required-checks "BMAD FR/NFR Review Gate"
+  [[ "$output" == *"CI: green failing=[] pending=[] missing=[]"* ]]
+  [[ "$output" == *"FR_NFR_GATE: success"* ]]
+  [[ "$output" != *"VERDICT: FIX"* ]]
+}

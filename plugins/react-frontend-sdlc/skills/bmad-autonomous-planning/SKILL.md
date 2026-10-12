@@ -55,8 +55,8 @@ relax them.
 - UI is planned component-first: the architecture inventories the UI kit
   (shared components carrying `architecture.component_prefix`) against what
   the feature needs, and every component the kit lacks gets its own story —
-  built in Storybook before any page uses it — ahead of the story that
-  composes the page or feature.
+  built in isolation (in Storybook when the profile has it) before any page
+  uses it — ahead of the story that composes the page or feature.
 
 ## Inputs
 
@@ -324,10 +324,14 @@ its own acceptance criteria, including the accessibility and visual checks
 the UI change must pass. UI work is decomposed component-first:
 
 - one **component story** per component the UI kit lacks (or per new
-  variant of an existing kit component), marked **independent**, whose
-  acceptance criteria include its Storybook story covering default, every
-  variant and every state, its unit test, its i18n copy and its a11y
-  semantics, with the target mapped by `make.storybook_build` green;
+  variant of an existing kit component), marked **independent** only when it
+  has no dependency on another component story (otherwise **dependent** on
+  the stories it builds on), whose acceptance criteria include its unit test,
+  its i18n copy and its a11y semantics, and — when `capabilities.storybook`
+  is true and `make.storybook_build` is mapped — its Storybook story covering
+  default, every variant and every applicable state with that target green;
+  without Storybook the criterion is the isolated unit test plus the recorded
+  `SKIPPED: storybook — component-first order kept without stories` note;
 - then one **composition story** per page or feature, marked **dependent**
   on every component story it uses, whose acceptance criteria require that
   the page/feature is assembled from kit components (no one-off inline

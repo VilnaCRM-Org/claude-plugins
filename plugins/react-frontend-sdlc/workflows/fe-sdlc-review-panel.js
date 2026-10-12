@@ -155,7 +155,7 @@ function lenses(iteration) {
   // baseline NFR catalog either way.
   const requirementSource = scope.specs_present && scope.slug
     ? `specs/${scope.slug}/`
-    : 'the PR description and its linked issues (no BMAD spec bundle — run the gate script with --pr instead of --spec-path)'
+    : "the PR description and its linked issues (no BMAD spec bundle — run the gate script without --spec-path; it reads the branch's PR, which must already exist, a draft is fine)"
   out.push({
     label: 'fr-nfr-reviewer',
     agentType: 'react-frontend-sdlc:fr-nfr-reviewer',

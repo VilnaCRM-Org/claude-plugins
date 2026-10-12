@@ -100,11 +100,14 @@ Four non-negotiable disciplines:
 4. **Component-first UI.** A story that builds UI follows the order in
    `${CLAUDE_PLUGIN_ROOT}/skills/frontend-component-development/SKILL.md`
    ("Component-first UI"): inventory the UI kit (shared components carrying
-   `architecture.component_prefix`), build every missing component — and
-   every new variant of an existing one — in isolation with its Storybook
-   story (states and variants, `make.storybook_build` green when
-   `capabilities.storybook` is true) and its tests, and only then compose
-   the page or feature from kit components. Never inline one-off markup in a
+   `architecture.component_prefix`, plus any external UI-kit package the
+   repository depends on), build every missing component — and every new
+   variant of an existing one — in isolation with its tests and, when
+   `capabilities.storybook` is true and `make.storybook_build` is mapped, its
+   Storybook story (applicable states and variants, build green); without
+   Storybook keep the order and record `SKIPPED: storybook — component-first
+   order kept without stories`. Only then compose the page or feature from
+   those components (kit and feature-local). Never inline one-off markup in a
    page that duplicates, or should be, a kit component. A composition story
    whose component stories are not done is BLOCKED, not improvised.
 

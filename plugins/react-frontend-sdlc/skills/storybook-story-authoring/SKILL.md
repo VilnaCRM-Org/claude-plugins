@@ -26,11 +26,14 @@ the whole skill NOT-APPLICABLE when `capabilities.storybook` is `false`.
 **Stories come first.** In the plugin's component-first UI workflow
 (see [frontend-component-development](../frontend-component-development/SKILL.md#component-first-ui-ui-kit--storybook--composition)),
 a component the UI kit does not provide is built in Storybook — story,
-states and variants — before any page or feature imports it, and a new
-variant of an existing kit component gets its story before it is used. A
-story written after the page that consumes the component is the wrong order.
+applicable states and variants — before any page or feature imports it, and
+a new variant of an existing kit component gets its story before it is used.
+A story written after the page that consumes the component is the wrong
+order. This applies when `capabilities.storybook` is true; without Storybook
+the whole skill is NOT-APPLICABLE and the component-first order is kept with
+isolated unit tests instead.
 
-Every user-visible component ships at least one story, colocated with the component source. A story
+When `capabilities.storybook` is true, every user-visible component ships at least one story, colocated with the component source. A story
 is the component's interactive documentation and, where the browser suites drive Storybook, its test
 bed — so an unbuildable story is a red gate, not a cosmetic miss.
 

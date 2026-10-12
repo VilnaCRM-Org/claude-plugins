@@ -189,6 +189,10 @@ report instead of failing (NFR-4).
      `REQUESTED`) and checks not pending** — a mention is already posted
      and its review is still coming; go back to step 3, which respects
      the script's `WAIT:` interval instead of re-mentioning.
+   - **`WAIT` with `FR_NFR_GATE: pending`** — a repository CI job is
+     running the gate on this head. Wait and re-check
+     (`pr-state.sh --pr <n> --wait-seconds 540`); counter C is NOT touched,
+     and the gate is not re-run locally while that job is in flight.
    - **`GATE`** — the `FR_NFR_GATE:` line reads `missing` or `failure`:
      the mandatory BMAD FR/NFR gate has not passed on this head. Run the
      gate loop pinned to the head — check out the PR branch at that
@@ -227,25 +231,27 @@ source when no reviewer app exists (NFR-4).
 THREE separate counters: `ci_fix <a>/5` and `comment_resolution <b>/5`
 (`MAX_ITERATIONS=5` each), and `fr_nfr_gate <c>/3`. Restate the active counter every turn.
 Budgets are independent — spending one never consumes the other, and
-exhausting either one escalates.
+exhausting any one escalates.
 
 ## Failure escalation
 
-Escalate — emit the canonical report and stop — on ANY of: either
-counter breaching; a step-1 PR-state/create blocking finding (merged,
-closed, or `gh pr create` failure); or a `ci-fixer` `BLOCKED` return in
-step 2. The escalation is identical in form for every case; the
-`blocking_finding` line names the cause, and the `iteration` line
-carries whatever counter values had been reached (both `0/5` for a
-pre-loop step-1/step-2 block):
+Escalate — emit the canonical report and stop — on ANY of: any counter
+breaching (A, B, or C); a step-1 PR-state/create blocking finding
+(merged, closed, or `gh pr create` failure); a `ci-fixer` `BLOCKED`
+return in step 2; or an escalated FR/NFR gate run (no requirement
+source, a runner that could not run and post its status, a checkout not
+at the PR head, or the gate's own iteration budget). The escalation is
+identical in form for every case; the `blocking_finding` line names the
+cause, and the `iteration` line carries whatever counter values had been
+reached (`A 0/5, B 0/5, C 0/3` for a pre-loop step-1/step-2 block):
 
 ```text
 === SDLC ESCALATION ===
 stage: finish-pr         iteration: A <a>/5, B <b>/5, C <c>/3
 exit_condition: CI green + BMAD FR/NFR Review Gate green on the head + 0 unresolved AI review comments
 status: NOT MET
-blocking_finding: <cause — which loop breached + first unresolved item, OR "PR <state>/create-failure", OR "ci-fixer BLOCKED — <reason>">
-iteration_log: <one line per iteration, both counters>
+blocking_finding: <cause — which loop breached + first unresolved item, OR "PR <state>/create-failure", OR "ci-fixer BLOCKED — <reason>", OR "FR/NFR gate escalated — <reason>">
+iteration_log: <one line per iteration, all three counters>
 recommended_action: <human next step>
 === END ===
 ```

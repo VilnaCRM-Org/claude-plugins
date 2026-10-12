@@ -193,6 +193,9 @@ for c in pr.get("statusCheckRollup") or []:
 # workflow logs.
 GATE_CONTEXT = "BMAD FR/NFR Review Gate"
 gate_verdict = checks.pop(GATE_CONTEXT, None)
+# An explicit --required-checks naming only the gate still narrows the generic
+# CI scope (to nothing) instead of falling back to every check.
+required_explicit = bool(required)
 required = [c for c in required if c != GATE_CONTEXT]
 if gate_verdict is None:
     fr_nfr_status = "missing"
@@ -203,11 +206,11 @@ elif gate_verdict in FAILING:
 else:
     fr_nfr_status = "pending"
 fr_nfr = {"context": GATE_CONTEXT, "status": fr_nfr_status}
-scope = required if required else list(checks)
+scope = required if required_explicit else list(checks)
 failing = sorted(n for n in scope if checks.get(n) in FAILING)
 pending = sorted(n for n in scope if n in checks and checks[n] not in FAILING and checks[n] not in PASSING)
 missing = sorted(n for n in required if n not in checks)
-if not checks and not required:
+if not checks and not required_explicit:
     ci_status = "none"
     notes.append("CI: the PR reports no checks — the CI half of the exit condition is satisfied-with-report, not verified")
 elif failing:

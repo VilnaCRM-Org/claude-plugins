@@ -53,8 +53,11 @@ story is done — or a safety mechanism stops it.
      artifact declares; a dependent story starts only after every
      prerequisite story is done.
    - **Component-first UI**: component stories (a missing UI-kit
-     component, built with its Storybook story) always finish before the
-     composition story that assembles a page or feature from them. If the
+     component or a new variant of a kit component, built with its
+     Storybook story when Storybook is available — otherwise recording
+     `SKIPPED: storybook — component-first order kept without stories`)
+     always finish before the composition story that assembles a page or
+     feature from them. If the
      plan bundles both in one story, the implementer still builds and
      stories the components first, then composes.
 4. **Container-only execution** — every `react-implementer` runs build,
