@@ -305,8 +305,12 @@ sources=()
 [[ -n "$SPEC_PATH" ]] && sources+=("the BMAD spec bundle under '${SPEC_PATH}'")
 [[ -n "$PR_TEXT" ]] && sources+=("the pull request description")
 [[ -n "$ISSUES_TEXT" ]] && sources+=("the linked issue(s)")
-sources_text="$(IFS=';'; printf '%s' "${sources[*]}")"
-sources_text="${sources_text//;/, }"
+# Joined element by element: a separator inside an element (a legal filename
+# character in a spec path) is never rewritten.
+sources_text=""
+for src in "${sources[@]}"; do
+  sources_text+="${sources_text:+, }${src}"
+done
 
 # --- the change set --------------------------------------------------------
 # The sandboxed session has no shell to run git, so the script supplies the

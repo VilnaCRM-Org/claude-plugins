@@ -690,3 +690,11 @@ EOF
   [[ "$output" == *"split the PR so the gate can verify every changed file"* ]]
   [ ! -f "$CLAUDE_LOG" ]
 }
+
+@test "a separator character inside a spec path survives into the source description" {
+  mkdir -p 'specs;v2'
+  echo "FR-1: x" > 'specs;v2/prd.md'
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path 'specs;v2'
+  [ "$status" -eq 0 ]
+  grep -qF "the BMAD spec bundle under 'specs;v2'" "$CLAUDE_LOG"
+}
