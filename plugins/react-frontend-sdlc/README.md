@@ -17,7 +17,7 @@ Checked by `/fe-sdlc-setup` preflight (each failure prints a named
 remediation):
 
 - a git repository (your React/TypeScript frontend project)
-- Claude Code CLI ≥ 2.1
+- Claude Code CLI ≥ 2.1 (≥ 2.1.248 for the FR/NFR gate, whose read-only review sandbox uses `claude --restricted`; the gate checks this and fails fast with an upgrade hint)
 - GitHub CLI ≥ 2, authenticated (`gh auth login`)
 - bmalph ≥ 2.11.0, and a healthy `_bmad/` workspace when one already
   exists (`bmalph doctor`; fresh repos are bootstrapped by

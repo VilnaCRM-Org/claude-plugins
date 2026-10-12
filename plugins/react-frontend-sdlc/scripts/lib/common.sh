@@ -342,6 +342,12 @@ claude_run_once() {
   printf '%s\n' "$result"
 }
 
+# claude_supports_restricted — true when the installed claude CLI offers the
+# --restricted mode claude_run_isolated depends on (Claude Code 2.1.248+).
+claude_supports_restricted() {
+  claude --help 2>/dev/null | grep -q -- '--restricted'
+}
+
 # claude_run_isolated PROMPT — claude_run_once for a session that reads
 # untrusted, contributor-controlled text (PR descriptions, issues, diffs). The
 # caller keeps its own GitHub credential and publishes the outcome itself
