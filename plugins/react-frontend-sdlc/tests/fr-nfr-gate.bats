@@ -385,7 +385,7 @@ EOF
   [ "$status" -eq 1 ]
   ! grep -q 'pr list' "$GH_LOG"
   grep -q 'pr comment 7 --repo acme/sample-web --body' "$GH_LOG"
-  grep -q 'against the pull request description' "$GH_LOG"
+  grep -q 'Requirement sources:\*\* the pull request description' "$GH_LOG"
 }
 
 @test "--pr must be a positive number" {
@@ -869,4 +869,34 @@ EOF
   PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE"
   [ "$status" -eq 0 ]
   grep -qF 'select(.headRepositoryOwner.login == "acme_ent.shortcode")' "$GH_LOG"
+}
+
+@test "every published comment names the attempt, the reviewed head, the sources and the base, like the back-end reviews" {
+  pr_gh
+  PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs --iteration 2
+  [ "$status" -eq 0 ]
+  grep -q "BMAD FR/NFR Review Gate: PASS — attempt 2 at \`${SHA:0:7}\`" "$GH_LOG"
+  grep -q "Reviewed head:\*\* \`${SHA}\`" "$GH_LOG"
+  grep -q 'Requirement sources:\*\* the BMAD spec bundle' "$GH_LOG"
+  grep -q 'Diff base:\*\* the merge-base with the PR base commit' "$GH_LOG"
+  : > "$GH_LOG"
+  PR_BODY="AC: x" STUB_CLAUDE_OUTPUT="$FINDINGS_JSON" run "$GATE" --spec-path specs --iteration 3
+  [ "$status" -eq 1 ]
+  grep -q "BMAD FR/NFR Review Gate: FAIL — attempt 3 at" "$GH_LOG"
+  grep -q '2 new finding(s).' "$GH_LOG"
+}
+
+@test "the reviewer is asked for the back-end comment structure: verdict, matrix, evidence, findings, follow-ups" {
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 0 ]
+  for section in '### Verdict' '### Requirement matrix' '### Evidence' '### New findings' '### Non-blocking follow-ups'; do
+    grep -qF "$section" "$CLAUDE_LOG"
+  done
+  grep -q 'Requirement | Verdict | Evidence' "$CLAUDE_LOG"
+}
+
+@test "--iteration must be a small positive number" {
+  run "$GATE" --iteration 0
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--iteration must be a number"* ]]
 }

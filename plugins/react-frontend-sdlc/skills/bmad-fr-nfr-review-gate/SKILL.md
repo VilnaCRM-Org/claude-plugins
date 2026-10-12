@@ -122,7 +122,12 @@ runner and re-run.
 - Publishing behavior (shipped script): always posts the
   `BMAD FR/NFR Review Gate` commit status for the PR HEAD and a PR comment
   carrying the review result on every run — PASS and FAIL — so each PR shows
-  the BMAD review itself; the status check stays the durable signal. In a
+  the BMAD review itself; the status check stays the durable signal. The
+  comment header names the verdict, the attempt (`--iteration`) and the
+  reviewed head commit, followed by the requirement sources and diff base,
+  then the review in fixed sections: Verdict, Requirement matrix
+  (Requirement | Verdict | Evidence), Evidence, New findings and
+  Non-blocking follow-ups. In a
   fork checkout both go to the upstream repository. `--advisory` (a run on
   uncommitted changes or a non-head checkout) posts neither. Exit 0 means
   zero new findings; findings, malformed output, or transport failure after

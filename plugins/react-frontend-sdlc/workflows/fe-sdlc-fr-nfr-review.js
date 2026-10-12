@@ -202,7 +202,7 @@ function gatePrompt(iteration) {
     ...scope.files.map((f) => `  - ${f}`),
     ...prior,
     '',
-    `Per your agent contract: resolve the gate runner from make.fr_nfr_gate in .claude/react-sdlc.yml (the plugin script "$P/scripts/fr-nfr-gate.sh" ${runnerArgs} when null), run it exactly once — it must really run${advisory ? ' (advisory: it posts no status by design)' : ' and post the "BMAD FR/NFR Review Gate" commit status'}; a manually built matrix does not satisfy the mandatory gate — build the full per-requirement matrix, and mirror the FR_NFR_REVIEWER last line into the structured output: verdict, new_findings (null only when the gate run failed for transport or a malformed contract line), gate_run (the runner used, or SKIPPED (<reason>)).`,
+    `Per your agent contract: resolve the gate runner from make.fr_nfr_gate in .claude/react-sdlc.yml (the plugin script "$P/scripts/fr-nfr-gate.sh" ${runnerArgs} --iteration ${iteration} when null), run it exactly once — it must really run${advisory ? ' (advisory: it posts no status by design)' : ' and post the "BMAD FR/NFR Review Gate" commit status'}; a manually built matrix does not satisfy the mandatory gate — build the full per-requirement matrix, and mirror the FR_NFR_REVIEWER last line into the structured output: verdict, new_findings (null only when the gate run failed for transport or a malformed contract line), gate_run (the runner used, or SKIPPED (<reason>)).`,
     'Every NEW finding is one findings[] entry with the requirement id, the file it points at, evidence, and a root-cause fix — never a suppression, a threshold change, or a skipped test. Edit nothing.',
   ].join('\n')
 }

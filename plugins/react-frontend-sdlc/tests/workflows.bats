@@ -304,6 +304,11 @@ run_wf() { # <workflow-file> <scenario-file>
   echo "$output" | jq -e '.result.result == "ESCALATED" and (.result.escalation | contains("restore the gate runner") and (contains("/fe-sdlc-plan") | not))'
 }
 
+@test "fr-nfr-review: each gate run is told its attempt number for the PR comment" {
+  run_wf fe-sdlc-fr-nfr-review.js fnr-converges.json
+  echo "$output" | jq -e '(.calls[1].prompt | contains("--iteration 1 when null")) and (.calls[4].prompt | contains("--iteration 2 when null"))'
+}
+
 @test "fr-nfr-review: the spec path and summary reach the runner shell-quoted" {
   run_wf fe-sdlc-fr-nfr-review.js fnr-converges.json
   echo "$output" | jq -e '.calls[1].prompt | contains("fr-nfr-gate.sh\" --spec-path '"'"'specs/alpha-login'"'"' --impact-context '"'"'login form with polite validation status'"'"'")'
