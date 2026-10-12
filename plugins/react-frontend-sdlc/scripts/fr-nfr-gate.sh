@@ -382,8 +382,15 @@ else
     fi
   done
   if [[ -z "$diff_label" ]]; then
+    # Without any base the change set is unknown. Reviewing the whole tree and
+    # publishing that verdict for HEAD would describe something other than
+    # the change, so only an advisory run (which publishes nothing) may do it.
+    if (( ! ADVISORY )); then
+      source_fail "no base to diff against (no PR, no default branch)" \
+        "no PR and no base branch (origin/<default> or a local main) is available, so the change set cannot be determined — fetch the default branch, pass --pr, or run with --advisory"
+    fi
     diff_base="$(git hash-object -t tree /dev/null)"
-    diff_label="the empty tree (no PR and no base branch found locally, so the whole tracked tree is the change set)"
+    diff_label="the empty tree (advisory run without a PR or base branch, so the whole tracked tree is the change set)"
   fi
 fi
 changed_files="$(git diff --name-only "$diff_base")" \

@@ -25,8 +25,10 @@ setup() {
   git init -q
   git remote add origin https://github.com/acme/sample-web.git
   git -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
-  # A local base branch, so PR runs resolve a merge-base without a network.
+  # A local base branch, so PR runs resolve a merge-base without a network,
+  # and a separate working branch whatever git's default branch name is.
   git branch -f main 2>/dev/null || true
+  git checkout -q -b feature-under-test
   SHA="$(git rev-parse HEAD)"
   PATH="$STUBS:$PATH"
   GH_LOG="$BATS_TEST_TMPDIR/gh-calls.log"
@@ -845,4 +847,17 @@ EOF
   [ "$status" -eq 0 ]
   grep -q "SKIPPED: storybook — component-first order kept without stories" "$CLAUDE_LOG"
   grep -q 'is built before the page or feature that first uses it (component-first)' "$CLAUDE_LOG"
+}
+
+@test "with no PR and no base branch a publishing run fails closed; only --advisory may review the whole tree" {
+  git branch -D main >/dev/null
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"the change set cannot be determined"* ]]
+  grep -q -- '-f state=failure' "$GH_LOG"
+  ! grep -q -- '-f state=success' "$GH_LOG"
+  [ ! -f "$CLAUDE_LOG" ]
+  STUB_CLAUDE_OUTPUT="$ZERO_JSON" run "$GATE" --spec-path specs --advisory
+  [ "$status" -eq 0 ]
+  grep -q 'advisory run without a PR or base branch' "$CLAUDE_LOG"
 }
