@@ -18,7 +18,7 @@ Read these files, in this order, before you change anything:
 
 ## Command Reference
 
-Run `make ci-list` to print the gate targets in order. The ordered list of verification targets is in the [Verification section of `AGENTS.md`](AGENTS.md#verification); it is kept there and not repeated here.
+Run `make help` to list every target. The ordered list of verification targets is in the [Verification section of `AGENTS.md`](AGENTS.md#verification); it is kept there and not repeated here.
 
 ## BMAD-METHOD Integration
 
