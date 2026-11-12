@@ -118,13 +118,18 @@ jobs:
       - name: Install template-compatibility linters (rust-backend-sdlc K7 cases)
         run: |
           set -euo pipefail
-          pipx install yamllint==1.38.0
-          pipx install typos==1.52.0
+          # --force: the runner image may already ship another yamllint
+          # version, and pipx would then keep it instead of the pin.
+          pipx install --force yamllint==1.38.0
+          pipx install --force typos==1.52.0
+          # pipx installs into PIPX_BIN_DIR (/opt/pipx_bin on hosted runners),
+          # not necessarily ~/.local/bin, so resolve the directory.
+          pipx_bin="$(pipx environment --value PIPX_BIN_DIR)"
           npm install --prefix "$RUNNER_TEMP/k7" prettier@3.9.10 markdownlint-cli2@0.24.0
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$pipx_bin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/k7/node_modules/.bin" >> "$GITHUB_PATH"
-          "$HOME/.local/bin/yamllint" --version
-          "$HOME/.local/bin/typos" --version
+          "$pipx_bin/yamllint" --version
+          "$pipx_bin/typos" --version
           "$RUNNER_TEMP/k7/node_modules/.bin/prettier" --version
           "$RUNNER_TEMP/k7/node_modules/.bin/markdownlint-cli2" --help >/dev/null
       - name: Run bats suites
