@@ -37,7 +37,7 @@ Drive the FR/NFR gate loop to `FR_NFR_NEW_FINDINGS: 0` within 5 iterations: run 
 - Every requirement id of the bundle, the PR description and the linked issues (forms `FR-12`, `FR12`, `NFR-3`, `G12`) and all seven baseline ids have one matrix row, each PASS with a test target as evidence, or N/A with a concrete reason and a source reference.
 - With a PR: the commit status `BMAD FR/NFR Review Gate` reads `success` on the head SHA.
 - Without a PR: the run was advisory and the report carries the D11 note; the outcome is `SUCCESS-WITH-REPORT`, and the green status on the head SHA is left to the finish-pr `GATE` run once the PR exists.
-- The output ends with the matrix, the verdict line `FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=<PASS|FAIL>` (`new_findings` copied verbatim from the gate's last line) and exactly one fenced `json` findings block.
+- The output ends with the matrix, exactly one fenced `json` findings block and, as the last line, the verdict line `FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=<PASS|FAIL>` (`new_findings` copied verbatim from the gate's last line).
 - Publishing ended in exactly one recorded outcome: the lens comment handed to the calling stage, the deferral to finish-pr, or `SKIPPED: capabilities.publish_pr_comments is false`.
 - Any other ending is the escalation block of step 8.
 
@@ -75,7 +75,7 @@ Evidence is a test that exercises the requirement (its path and name, and the ga
 
 ### 5. Emit the findings block and the verdict line
 
-The output ends with the verdict line and then exactly one fenced `json` block holding the findings array (`[]` when empty). Each finding has exactly these seven keys: `id` (`FRN-<n>`, unique), `severity` (`Critical`, `High`, `Medium`, `Low` or `Info`), `file` (repository-relative path, or `null` for a requirement-level finding), `line` (integer ≥ 1, or `null`), `rule` (the requirement id, for example `NFR-BASE-TEST`), `summary` (one line, at most 300 characters) and `status` (`open`, `fixed` or `dropped`).
+The output ends with exactly one fenced `json` block holding the findings array (`[]` when empty), followed only by the verdict line, which is the last line of the output. Each finding has exactly these seven keys: `id` (`FRN-<n>`, unique), `severity` (`Critical`, `High`, `Medium`, `Low` or `Info`), `file` (repository-relative path, or `null` for a requirement-level finding), `line` (integer ≥ 1, or `null`), `rule` (the requirement id, for example `NFR-BASE-TEST`), `summary` (one line, at most 300 characters) and `status` (`open`, `fixed` or `dropped`).
 
 ```json
 [
