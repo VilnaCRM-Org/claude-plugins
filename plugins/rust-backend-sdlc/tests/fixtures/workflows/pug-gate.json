@@ -155,6 +155,10 @@
         "fixed": [
           "FRN-1 FR-3 crates/billing/invoicing/domain/src/invoice.rs:57: totals round half-up; FR-3 demands half-even per currency"
         ],
+        "changed_files": [
+          "crates/billing/invoicing/domain/src/invoice.rs",
+          "crates/billing/invoicing/domain/src/invoice/tests.rs"
+        ],
         "requirement_source": "specs/42-invoice-totals/ + PR #7 description and linked issue(s) #42",
         "advisory": false,
         "degrade_notes": []
@@ -164,6 +168,7 @@
         "iterations": 1,
         "new_findings": 0,
         "fixed": [],
+        "changed_files": [],
         "requirement_source": "specs/42-invoice-totals/ + PR #7 description and linked issue(s) #42",
         "advisory": false,
         "degrade_notes": []

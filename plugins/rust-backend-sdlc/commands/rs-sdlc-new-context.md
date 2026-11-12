@@ -254,7 +254,7 @@ The gate set runs after the commit, because the contract-snapshot and mutation g
    Return the changed-files list, the targets-run list, the self-review checklist and the ---RALPH_STATUS--- block.
    ```
 
-   `STATUS: BLOCKED` → `ESCALATED` as in step 4 item 4. An empty changed-files list → `ESCALATED` (`blocking_finding: remediation round <r> changed no file`), because the same stage would fail the same way. Otherwise commit with step 5 items 1 to 8 and the subject `fix(#N): <what>`, here `fix(#<N>): resolve <gate> failure in <group>/<context>`, then run the failed stage again; the stages that already passed are not repeated.
+   `STATUS: BLOCKED` → `ESCALATED` as in step 4 item 4. An empty changed-files list → `ESCALATED` (`blocking_finding: remediation round <r> changed no file`), because the same stage would fail the same way. Otherwise commit with step 5 items 1 to 8 and the subject `fix(#N): <what>`, here `fix(#<N>): resolve <gate> failure in <group>/<context>`, then run the gate set again from its first stage (item 4), because a fix can break a stage that passed before; the exit condition then holds on the new head.
 6. **Closing check**, after the last stage passed and so after the last remediation commit, in the background (`RUN_IN_CONTAINER=1` appended in container mode):
 
    ```bash
@@ -293,7 +293,7 @@ The gate set runs after the commit, because the contract-snapshot and mutation g
 
 Exit string (stage `new-context`, byte-identical in the loop documentation): context gate set green, 0 protected files changed, committed
 
-The loop is the remediation round: a follow-up checklist dispatch (step 4), a hook-failure fix (step 5), a failing gate-set stage fixed and run again (step 6) and a QA `FAIL` in the hand-off (step 7) share one bounded counter. The stage ends:
+The loop is the remediation round: a follow-up checklist dispatch (step 4), a hook-failure fix (step 5), a failing gate-set stage fixed and the gate set run again (step 6) and a QA `FAIL` in the hand-off (step 7) share one bounded counter. The stage ends:
 
 - `SUCCESS` when C1–C12 are done: every stage of the gate set passed, the closing check passed, 0 protected files changed and everything is committed, with no degrade note;
 - `SUCCESS-WITH-REPORT` when it got there with a degrade note: a null stage or evidence key (D1), the C8 rollback `not run (ask rule)` (D13), `base_ref=HEAD` or a failed fetch (D24), an issue not verified (D10), or a stage list not readable from the Makefile;

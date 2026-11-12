@@ -24,7 +24,7 @@ Every `make` call except the foreground allowlist `make.ci_list`, `make help`, `
 
 In container mode, before the first make target, raw container-route call or hooked git call, check `docker compose ps --status running --quiet app`; empty output starts `make.start` in the background (≤ 900 s, one restart attempt); `docker info` failing or the stack not starting is D25.
 
-This stage's own `make` calls are `make check-commit-message` and `make install-hooks`, both on the foreground allowlist, written in suffix form with variables only from the closed set `RUN_IN_CONTAINER COMMIT_TITLE base_ref BREAKING_CHANGE_APPROVED CONFIG_CHANGE_APPROVED group context name SCHEMATHESIS_URL` (here only `COMMIT_TITLE`). Its one backgrounded call is the bundle commit of step 8, whose hooks compile and test the workspace. `<UTC>` is the current UTC time as `YYYYMMDDTHHMMSSZ`. The stage dispatches no agent, writes nothing but the bundle and the plugin's files under `target/rust-sdlc/`, and never pushes: the finish-pr stage pushes the branch.
+This stage's own `make` calls are `make check-commit-message` and `make install-hooks`, both on the foreground allowlist, and in container mode `make start RUN_IN_CONTAINER=1` (step 7), written in suffix form with variables only from the closed set `RUN_IN_CONTAINER COMMIT_TITLE base_ref BREAKING_CHANGE_APPROVED CONFIG_CHANGE_APPROVED group context name SCHEMATHESIS_URL` (here only `COMMIT_TITLE`, and `RUN_IN_CONTAINER=1` on `make start`). Each target is the one its `make.*` key maps, and a `null` key is never replaced by a raw command. Its backgrounded calls are `make start` and the bundle commit of step 8, whose hooks compile and test the workspace. `<UTC>` is the current UTC time as `YYYYMMDDTHHMMSSZ`. The stage dispatches no agent, writes nothing but the bundle and the plugin's files under `target/rust-sdlc/`, and never pushes: the finish-pr stage pushes the branch.
 
 ### Step 1 — Validate the profile
 
@@ -118,14 +118,14 @@ A failed round names its artifact; the correction is made in that artifact (the 
 
 ### Step 7 — Container precondition and hooks
 
-1. Container mode (`capabilities.run_in_container: true`): before `make install-hooks`, `make check-commit-message` or the hooked commit runs, run `docker compose ps --status running --quiet app`. Empty output → `make.start` in the background (≤ 900 s, one restart attempt); `docker info` failing or the stack still not running → `ESCALATED` (D25) with the probe output.
+1. Container mode (`capabilities.run_in_container: true`): before `make install-hooks`, `make check-commit-message` or the hooked commit runs, run `docker compose ps --status running --quiet app`. Empty output and `make.start` mapped → `make start RUN_IN_CONTAINER=1` in the background, in the wrapper of step 8 item 6 (≤ 900 s, one restart attempt); `make.start: null`, `docker info` failing or the stack still not running → `ESCALATED` (D25) with the probe output.
 2. Check the hooks:
 
    ```bash
    "${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh" hooks_active
    ```
 
-   `HOOKS: active` → continue. `HOOKS: unset` → `make install-hooks` (foreground), then check again; still not active → `ESCALATED`. `HOOKS: foreign <value>` → `ESCALATED` with `blocking_finding: core.hooksPath=<value>` and `recommended_action: make install-hooks`. `HOOKS: missing <file>` → `ESCALATED` naming the file.
+   `HOOKS: active` → continue. `HOOKS: unset` and `make.install_hooks` mapped → `make install-hooks` (foreground), then check again; still not active → `ESCALATED`. `HOOKS: unset` with `make.install_hooks: null` → `ESCALATED` (`blocking_finding: HOOKS: unset (make.install_hooks absent)`), because the bundle commit would run without the hooks. `HOOKS: foreign <value>` → `ESCALATED` with `blocking_finding: core.hooksPath=<value>` and `recommended_action: make install-hooks`. `HOOKS: missing <file>` → `ESCALATED` naming the file.
 
 ### Step 8 — Commit the bundle
 

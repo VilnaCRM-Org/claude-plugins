@@ -330,7 +330,7 @@ GitHub mode: the title check, `HOOKS: active`, `git push -u origin HEAD`, then `
    ```
 
    The no-Docker message → D25 (`NEXT:` and stop). Any other non-zero exit → `ESCALATED` with the last 40 log lines; a rejected push is never retried under another spelling and is outside the remediation rounds.
-4. **Existing pull request** (a re-run): `gh pr list --head chore/<N>-initialize-service --state open --json number,url --limit 20` → an open one is reused (`S14: UNCHANGED PR #<n>`), and items 5 and 6 are skipped.
+4. **Existing pull request** (a re-run): `gh pr list --head chore/<N>-initialize-service --state open --json number,url --limit 20` → an open one is reused (`S14: UNCHANGED PR #<n>`, `<url>` its `url`), and only item 5 is skipped.
 5. **Body (ADR-27: raw file → `common.sh redact --in … --out …` → `--body-file`).** Read `.github/pull_request_template.md` and use its level-2 headings in their order (guidance lines dropped, checkbox lists kept with only the boxes that hold ticked); without the template, `## Description`, `## Related issue`, `## How it was tested`, `## Checklist`. Content: the description section summarizes the bootstrap (source mode, identity, version, sync flavour, plugin setup) and repeats the S6 `NEXT:` lines; the related-issue section holds `Closes #N` on its own line; the type-of-change list ticks the build/chore box; the testing section holds this run's targets-run list. Write it with the Write tool to `target/rust-sdlc/tmp/new-service-pr.raw.md`, then:
 
    ```bash
@@ -339,7 +339,7 @@ GitHub mode: the title check, `HOOKS: active`, `git push -u origin HEAD`, then `
    ```
 
    `gh` prints the URL; `<n>` is its last path segment. A non-zero exit → `ESCALATED` (D10), never retried in a loop. The call carries no label, reviewer or draft flag.
-6. Print `PR_URL: <url>` and the summary below.
+6. Print `PR_URL: <url>` (the URL `gh pr create` printed, or the reused pull request's `url`) and the summary below.
 7. **Hand-off.** Read `${CLAUDE_PLUGIN_ROOT}/commands/rs-sdlc-finish-pr.md` with the Read tool and follow its procedure with `--pr <n>` and this hand-off: `ISSUE_NUMBER: <N>`, `SPECS_DIR: none` (the bootstrap has no planning bundle), QA verdict not recorded, this run's targets-run list, and the counters `finish-pr=A0.B0.C0.W0.R0`. From here the finish-pr counters and its exit rules apply; its report and its `## Status:` line end the run.
 
 ### Summary and handles

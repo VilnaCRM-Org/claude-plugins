@@ -458,27 +458,28 @@ function verifyPrompt(round, batch) {
 // is the issue number of this run, never the pull-request number.
 function publishPrompt(what, changes) {
   const listed = changes.map((c, i) => {
-    const own = c.files.length ? c.files.join(', ') : 'none of its own'
-    return `  ${i + 1}. subject '${withIssue(c.subject)}'; files: ${own}${c.rest ? '; plus every other path git status --porcelain lists, nothing under target/' : ''}`
+    const own = c.files.length ? c.files.map((f) => JSON.stringify(f)).join(', ') : 'none of its own'
+    return `  ${i + 1}. subject ${JSON.stringify(withIssue(c.subject))}; files: ${own}${c.rest ? '; plus every other path git status --porcelain lists, nothing under target/' : ''}`
   })
   return [
     PLUGIN_ROOT,
     '',
     `Publish step "${what}" of issue #${run.issueNo} on branch ${run.branch}: commit the working-tree changes listed below and push the branch, in the repository root. You are the workflow publish step, the single exception to the rule that agents never commit.`,
-    changes.length ? 'Changes, one commit each, in this order:' : 'Changes: none to commit; run steps 1, 2, 4 and 5, then push the branch (step 7).',
+    changes.length ? 'Changes, one commit each, in this order (each subject and path is written as a JSON string whose text is the value):' : 'Changes: none to commit; run steps 1, 2, 4 and 5, then push the branch (step 7).',
     ...listed,
     BACKGROUND,
     CONTAINER,
     'Container mode is capabilities.run_in_container: true in .claude/rust-sdlc.yml. Run one foreground mkdir -p target/rust-sdlc/logs first; every background call below runs once as { <command>; echo "RUST_SDLC_EXIT=$?"; } > target/rust-sdlc/logs/publish-<UTC>.log 2>&1 with a fresh <UTC> (YYYYMMDDTHHMMSSZ) and is polled with "$P/scripts/lib/common.sh" wait_log <log> at most every 30 s (called again after each WAITING: line), within 1,800 s per call; a call still running after that is a failed step, reported with its log tail.',
+    "Quoting (the Git rules): every value a call below takes from the change list (a subject or a path) is passed as one single-quoted argument with each ' inside it written '\\'', never unquoted and never in double quotes.",
     'Steps:',
     `1. Branch: git branch --show-current must print ${run.branch}; anything else → return pushed false with reason "on branch <name>, expected ${run.branch}", nothing committed or pushed.`,
     '2. Merge base: git rev-parse --verify <ci.base_ref>; when it fails run one git fetch origin <project.default_branch> and check again; still unavailable → <merge-base-sha> is HEAD with the degrade note "base ref <ci.base_ref> unavailable; protected_changes ran against HEAD (D24)"; otherwise <merge-base-sha> is git merge-base <ci.base_ref> HEAD.',
     '3. Format, only when a change is listed: make <make.format> in the background, in suffix form (RUN_IN_CONTAINER=1 after the target in container mode); make.format null → the note "format: not run (capability absent)".',
     '4. Branch guard: "$P/scripts/lib/common.sh" protected_changes <merge-base-sha>. A PROTECTED: <path> (<commit>) line → return pushed false with protected "<path> (<commit>)"; a PROFILE_CHANGED: line → return pushed false with profile_changed true; nothing is committed or pushed.',
     '5. Hooks: "$P/scripts/lib/common.sh" hooks_active must print HOOKS: active; HOOKS: unset → make <make.install_hooks> in the foreground, then check again; any other line → return pushed false with that line as reason.',
-    "6. Per change: stage exactly its paths that git status --porcelain lists as changed with git add -- <path> … (a change none of whose paths changed is skipped and its subject named in skipped); git diff --cached --name-only must list only those paths, else return pushed false. Pre-validate the subject: make <make.check_commit_message> COMMIT_TITLE='<subject>' in the foreground when that key is mapped and the subject has no space-hyphen sequence, else \"$P/scripts/lib/common.sh\" is_commit_subject '<subject>'. Write the message file with `\"$P/scripts/lib/common.sh\" commit_msg_file '<subject>'` (it prints <file>; a ' inside the subject is written '\\''), then commit in the background with `git commit -F <file>` (`RUN_IN_CONTAINER=1 git commit -F <file>` in container mode).",
+    "6. Per change: stage exactly its paths that git status --porcelain lists as changed with git add -- '<path>' … (a change none of whose paths changed is skipped and its subject named in skipped); git diff --cached --name-only must list only those paths, else return pushed false. Pre-validate the subject: make <make.check_commit_message> COMMIT_TITLE='<subject>' in the foreground when that key is mapped and the subject has no space-hyphen sequence, else \"$P/scripts/lib/common.sh\" is_commit_subject '<subject>'. Write the message file with `\"$P/scripts/lib/common.sh\" commit_msg_file '<subject>'` (it prints <file>; a ' inside the subject is written '\\''), then commit in the background with `git commit -F <file>` (`RUN_IN_CONTAINER=1 git commit -F <file>` in container mode).",
     '7. Push once, after the last commit and also when nothing was committed, in the background: `git push -u origin HEAD` (`RUN_IN_CONTAINER=1 git push -u origin HEAD` in container mode).',
-    '8. A failing hook (the log of step 6 or 7 shows a commit-msg, pre-commit or pre-push failure): run make <make.format> once, re-stage the same paths (after a failed push, commit the reformatted files first, with the subject of the last change, or style(#<N>): apply make format when no change was listed) and retry the failed call once; a second failure → return pushed false with the last 40 log lines as log_tail. Fix the cause, never the hook.',
+    "8. A failing hook (the log of step 6 or 7 shows a commit-msg, pre-commit or pre-push failure): run make <make.format> once, re-stage the same paths with git add -- '<path>' … (after a failed push, commit the reformatted files first, with the subject of the last change, or style(#<N>): apply make format when no change was listed) and retry the failed call once; a second failure → return pushed false with the last 40 log lines as log_tail. Fix the cause, never the hook.",
     'Never pass --no-verify or -n, never set core.hooksPath or use git -c core.hooksPath, never force-push (--force, --force-with-lease, -f), never amend, rebase or reset, never push to the default branch and never apply or remove a label.',
     'Return the structured output: pushed; head = git rev-parse HEAD after the push (null when nothing was pushed); commits = the subjects committed; skipped = the subjects of skipped changes; reason = null on success, else the failing step and its exit code; protected; profile_changed; log_tail; degrade_notes = one entry per note.',
   ].join('\n')
@@ -583,8 +584,12 @@ async function publishOrEscalate(at, what, changes) {
   return failed ? escalate(at.stage, at.ph, at.it, failed.finding, failed.action) : null
 }
 
-// The single change that publishes the fixes of a nested review run.
-const gateFixes = (iteration) => [{ subject: `fix(#<N>): address review gate iteration ${iteration} findings`, files: [], rest: true }]
+// The single change that publishes the fixes of a nested review run: exactly
+// `files` when given (a GATE hand-back, whose FR/NFR review names them), else
+// every other changed path of the review stage.
+const gateFixes = (iteration, files) => [{ subject: `fix(#<N>): address review gate iteration ${iteration} findings`, files: files || [], rest: !files }]
+const SAFE_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\u0000-\u001f\u007f]{1,300}$/
+const gateFiles = (v) => (Array.isArray(v) ? [...new Set(v.filter((p) => typeof p === 'string').map((p) => p.trim()).filter((p) => SAFE_PATH.test(p) && trackablePath(p)))] : [])
 
 // ---------------------------------------------------------------------------
 // Implementation rounds. A round dispatches the pending stories layer-first:
@@ -925,12 +930,20 @@ function handBackAdvisory(gate, head, ran) {
   return escalate('finish-pr', 'FR/NFR gate', gateCount(), `the FR/NFR gate ran advisory on head ${sha7(head)}: the local checkout is not the clean PR head, so no gate status was posted`, `check out the head branch of PR #${run.pr} at ${sha7(head)} with a clean tracked tree, then re-run /rs-sdlc-finish-pr --pr ${run.pr}`)
 }
 
+// The review's fixes are published exactly: the files it named, never every
+// path of the working tree, which may hold local changes the review does not
+// own. Fixes without a named file are never published.
 async function handBackFixes(gate, head, c, ran) {
   const fixed = fixedCount(gate)
+  const files = gateFiles(gate.changed_files)
   const summary = `${gate.result}, iterations ${Number.isInteger(gate.iterations) ? gate.iterations : '?'}, ${fixed} fixed`
+  if (fixed && !files.length) {
+    record(ran, `${summary}; no changed file named`)
+    return { halt: escalate('finish-pr', 'FR/NFR gate', gateCount(), `the FR/NFR review fixed ${fixed} finding(s) on head ${sha7(head)} but named no changed file, so its fixes cannot be told apart from other local changes`, `commit the FR/NFR fixes by hand, staging each fixed file by name (never every path git status lists), push, then re-run /rs-sdlc-finish-pr --pr ${run.pr}`) }
+  }
   record(ran, `${summary}${fixed ? '; publishing the fixes' : '; gate status on the head'}`)
   const iteration = Number.isInteger(c.gate) && c.gate >= 1 ? c.gate : counters.gate
-  const halt = fixed ? await publishOrEscalate({ stage: 'finish-pr', ph: 'FR/NFR gate', it: gateCount() }, `gate ${counters.gate}/${CAP.gate}`, gateFixes(iteration)) : null
+  const halt = fixed ? await publishOrEscalate({ stage: 'finish-pr', ph: 'FR/NFR gate', it: gateCount() }, `gate ${counters.gate}/${CAP.gate}`, gateFixes(iteration, files)) : null
   if (!halt) row('finish-pr', 'FR/NFR gate', gateCount(), 'no', `GATE hand-back on ${sha7(head)}: FR/NFR review ${summary}; re-entering pr-until-green with carry`)
   return { halt, ran, summary, fixed }
 }

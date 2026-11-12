@@ -177,7 +177,7 @@ Bash(make *CONFIG_CHANGE_APPROVED=true*)
 Bash(make * -i*)
 Bash(make * -k*)
 Bash(make * -n*)
-Bash(make * --*)
+Bash(make * -*)
 EOF
 }
 

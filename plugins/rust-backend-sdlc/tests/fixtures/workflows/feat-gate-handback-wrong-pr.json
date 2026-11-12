@@ -151,6 +151,7 @@
         "iterations": 1,
         "new_findings": 0,
         "fixed": [],
+        "changed_files": [],
         "requirement_source": "specs/12-invoice-due-date/ + NFR-BASE",
         "advisory": true,
         "degrade_notes": [
@@ -162,6 +163,7 @@
         "iterations": 1,
         "new_findings": 0,
         "fixed": [],
+        "changed_files": [],
         "requirement_source": "specs/12-invoice-due-date/ + PR #35 + NFR-BASE",
         "advisory": false,
         "degrade_notes": []

@@ -47,7 +47,7 @@ How the two rules apply here:
 
 ### Step 1 — Hooks
 
-Ralph's sessions commit every story through the template's hooks, so the hooks must be active before Ralph starts. "Active" means the read-only local check `git config --local --get core.hooksPath` (the local-scope form of the read-only `git config --get core.hooksPath`; a global value alone counts as unset) prints exactly `.githooks` and `.githooks/commit-msg`, `.githooks/pre-commit` and `.githooks/pre-push` are executable. The library checks all of it:
+Ralph's sessions commit every story through the template's hooks, so the hooks must be active before Ralph starts. "Active" means the read-only local check `git config --local --get core.hooksPath` (local scope only, unlike the unqualified read-only `git config --get core.hooksPath`, which also returns a global value; a global value alone counts as unset) prints exactly `.githooks` and `.githooks/commit-msg`, `.githooks/pre-commit` and `.githooks/pre-push` are executable. The library checks all of it:
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh" hooks_active
@@ -208,14 +208,14 @@ It prints `WROTE: <file>`; the stored iteration is the consumed count `<n-1>` ag
    ```
 
    Exit 0 → no hit. A `PROTECTED: <path> (<commit>|working tree)` line, or a hit of the make target, is D23 → `ESCALATED` with `blocking_finding: protected file <path> changed (<commit>)` (the commit from `git log --format=%h -1 <sha>..HEAD -- <path>`, else `working tree`) and `recommended_action: revert with git restore --source=<sha> -- <path> unless the plan intends it; otherwise approved-config-change`; the label is applied by a human, never by this command. A `PROFILE_CHANGED: .claude/rust-sdlc.yml` line → `ESCALATED` with `recommended_action: move the profile change to its own pull request from the default branch (/rs-sdlc-setup --refresh)`. Exit 2, exit 1 without either line (an unreadable `protected-config.toml`), or any other failure of the make target → `ESCALATED` with the error line or the last 40 log lines.
-5. Coverage (`make.tests_with_coverage`): `docker info` first, because the target starts the test database. It fails → `tests-with-coverage: not run (no Docker)` and `ESCALATED` (D2) with the `make doctor` output (foreground; `make.doctor: null` → `blocking_finding: docker info exit <n>`). Otherwise, in the background (`RUN_IN_CONTAINER=1` added in container mode):
+5. Coverage (`make.tests_with_coverage`): `make.tests_with_coverage: null` → `tests-with-coverage: not run (capability absent)` and `DEGRADED: make.tests_with_coverage absent: coverage not verified` (D1), and no Docker probe runs. Mapped → `docker info` first, because the target starts the test database. It fails → `tests-with-coverage: not run (no Docker)` and `ESCALATED` (D2) with the `make doctor` output (foreground; `make.doctor: null` → `blocking_finding: docker info exit <n>`). Otherwise, in the background (`RUN_IN_CONTAINER=1` added in container mode):
 
    ```bash
    mkdir -p target/rust-sdlc/logs
    { make tests-with-coverage; echo "RUST_SDLC_EXIT=$?"; } > target/rust-sdlc/logs/implement-<UTC>.log 2>&1  # Bash tool, run_in_background: true
    ```
 
-   `RUST_SDLC_EXIT=0` → `tests-with-coverage: passed` (the template enforces 100% lines and functions). The template's Docker message in the log → `tests-with-coverage: not run (no Docker)`, `ESCALATED` (D2) as above. Any other exit → `tests-with-coverage: failed`, `ESCALATED` with the last 40 log lines and `recommended_action: add a story for the failing or uncovered code to SPECS_DIR/epics.md (the next run archives with keep-progress), then run /rs-sdlc-implement again`. `make.tests_with_coverage: null` → `tests-with-coverage: not run (capability absent)` and `DEGRADED: make.tests_with_coverage absent: coverage not verified` (D1).
+   `RUST_SDLC_EXIT=0` → `tests-with-coverage: passed` (the template enforces 100% lines and functions). The template's Docker message in the log → `tests-with-coverage: not run (no Docker)`, `ESCALATED` (D2) as above. Any other exit → `tests-with-coverage: failed`, `ESCALATED` with the last 40 log lines and `recommended_action: add a story for the failing or uncovered code to SPECS_DIR/epics.md (the next run archives with keep-progress), then run /rs-sdlc-implement again`.
 
 ### Step 7 — Report and handles
 
@@ -237,7 +237,7 @@ RECOMMENDATION: <one line>
 
 Exit string (stage `implement`, byte-identical in /rs-sdlc and the loop documentation): all stories done with EXIT_SIGNAL true, every commit subject valid, coverage green
 
-The loop is the `bmalph run` attempt of steps 3–5; staging and the `bmalph implement` transition run once per invocation, before the first attempt, and the post-loop checks of step 6 run once, after the attempt that ends done. The stage ends `SUCCESS` when an attempt ends done (`EXIT_SIGNAL: true`, no open story) and every check of step 6 passes; `SUCCESS-WITH-REPORT` when it got there with a degrade note (D1 `make.check_commit_message` or `make.tests_with_coverage` null, D24 base ref); and `ESCALATED` on a breaker trip or a breaker that is not closed before a run (D22), Docker unreachable at the coverage target (D2), no host toolchain with container mode off (D3), a protected change (D23), the container stack not starting (D25), a rejected commit subject, any stop named above or an exhausted guard. Degrade paths never loop and never fake a pass: a target that did not run is reported `not run (<reason>)`.
+The loop is the `bmalph run` attempt of steps 3–5; staging and the `bmalph implement` transition run once per invocation, before the first attempt, and the post-loop checks of step 6 run once, after the attempt that ends done. The stage ends `SUCCESS` when an attempt ends done (`EXIT_SIGNAL: true`, no open story) and every check of step 6 passes; `SUCCESS-WITH-REPORT` when it got there with a degrade note (D1 `make.check_commit_message` or `make.tests_with_coverage` null, D24 base ref); and `ESCALATED` on a breaker trip or a breaker that is `OPEN` or `HALF_OPEN` or has `AUTO_RESET: true` before a run (D22), Docker unreachable at the coverage target (D2), no host toolchain with container mode off (D3), a protected change (D23), the container stack not starting (D25), a rejected commit subject, any stop named above or an exhausted guard. Degrade paths never loop and never fake a pass: a target that did not run is reported `not run (<reason>)`.
 
 ## Iteration guard
 

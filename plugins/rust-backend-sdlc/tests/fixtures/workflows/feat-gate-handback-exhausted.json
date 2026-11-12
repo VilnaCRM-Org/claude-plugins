@@ -215,6 +215,7 @@
         "iterations": 1,
         "new_findings": 0,
         "fixed": [],
+        "changed_files": [],
         "requirement_source": "specs/12-invoice-due-date/ + NFR-BASE",
         "advisory": true,
         "degrade_notes": [
@@ -228,16 +229,8 @@
         "fixed": [
           "FRN-1 FR-3 crates/billing/invoice/application/src/command/create_invoice.rs:17"
         ],
-        "requirement_source": "specs/12-invoice-due-date/ + PR #34 + NFR-BASE",
-        "advisory": false,
-        "degrade_notes": []
-      },
-      {
-        "result": "SUCCESS",
-        "iterations": 2,
-        "new_findings": 0,
-        "fixed": [
-          "FRN-1 FR-3 crates/billing/invoice/application/src/command/create_invoice.rs:17"
+        "changed_files": [
+          "crates/billing/invoice/application/src/command/create_invoice.rs"
         ],
         "requirement_source": "specs/12-invoice-due-date/ + PR #34 + NFR-BASE",
         "advisory": false,
@@ -249,6 +242,23 @@
         "new_findings": 0,
         "fixed": [
           "FRN-1 FR-3 crates/billing/invoice/application/src/command/create_invoice.rs:17"
+        ],
+        "changed_files": [
+          "crates/billing/invoice/application/src/command/create_invoice.rs"
+        ],
+        "requirement_source": "specs/12-invoice-due-date/ + PR #34 + NFR-BASE",
+        "advisory": false,
+        "degrade_notes": []
+      },
+      {
+        "result": "SUCCESS",
+        "iterations": 2,
+        "new_findings": 0,
+        "fixed": [
+          "FRN-1 FR-3 crates/billing/invoice/application/src/command/create_invoice.rs:17"
+        ],
+        "changed_files": [
+          "crates/billing/invoice/application/src/command/create_invoice.rs"
         ],
         "requirement_source": "specs/12-invoice-due-date/ + PR #34 + NFR-BASE",
         "advisory": false,

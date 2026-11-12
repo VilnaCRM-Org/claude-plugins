@@ -749,6 +749,17 @@ gp_workflows_without() {
   gp_same "$EXPECTED" "$PROFILE"
 }
 
+@test "generate-profile: an unreadable make/ or .github/workflows/ warns and its keys fall back, exit 0" {
+  skip_if_root
+  chmod 000 "$STUB/make" "$STUB/.github/workflows"
+  gp_detect
+  grep -q '^\[rust-sdlc\]\[WARN\] make is not readable (.*); the keys it feeds take their fallback$' "$ERR"
+  grep -q '^\[rust-sdlc\]\[WARN\] .github/workflows is not readable (.*); the keys it feeds take their fallback$' "$ERR"
+  grep -qx '  load_tests: null' "$OUT"
+  grep -qx '  provider: null' "$OUT"
+  grep -qx '  ci: ci' "$OUT"
+}
+
 # --- ci.* derivation (AC-6.5) ---------------------------------------------------------------
 
 @test "generate-profile: ci.required_checks is every Required yes check name in document order, no other row" {

@@ -144,7 +144,7 @@ The call is `merge-settings.sh [--with-qa-network] [--print]`: `--with-qa-networ
 "${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh" hooks_active
 ```
 
-`hooks_active` reads the hook state through the read-only `git config --local --get core.hooksPath`, the local-scope form of the read-only check `git config --get core.hooksPath` (a global value alone counts as unset), and checks that `.githooks/commit-msg`, `.githooks/pre-commit` and `.githooks/pre-push` are executable.
+`hooks_active` reads the hook state at local scope only, through the read-only `git config --local --get core.hooksPath`, never through the unqualified read-only check `git config --get core.hooksPath`, which also returns a global value. A local value of exactly `.githooks` with `.githooks/commit-msg`, `.githooks/pre-commit` and `.githooks/pre-push` executable is `HOOKS: active`; no local value is `HOOKS: unset`, also when a global value is set; any other local value is `HOOKS: foreign <value>`; a hook file that is missing or not executable is `HOOKS: missing <file>`.
 
 - `HOOKS: active` → `UNCHANGED: hooks (HOOKS: active)`.
 - `HOOKS: unset` and `make.install_hooks` mapped → `make install-hooks` in the foreground (it is on the foreground allowlist), then `hooks_active` again: `HOOKS: active` → `make install-hooks: passed` and `DONE: hooks activated with make install-hooks`; any other line, or a non-zero exit of the target → `ESCALATED` with that line or `make install-hooks exit <n>` as `blocking_finding`.

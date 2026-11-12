@@ -21,10 +21,10 @@
 # `git log --format=%s`. It never runs cargo, make, gh or the network and never
 # reads .env.local. Its only probes are `docker info` and `command -v cargo`,
 # run only when neither the flag nor an existing profile decides
-# capabilities.run_in_container. A missing source never fails generation: the
-# key takes its fallback. User-owned keys (kept when valid): run_in_container,
-# dynamic_security_testing, publish_pr_comments, review.reviewers,
-# review.ai_review_agents. The profile is written only through
+# capabilities.run_in_container. A missing or unreadable source never fails
+# generation: the key takes its fallback. User-owned keys (kept when valid):
+# run_in_container, dynamic_security_testing, publish_pr_comments,
+# review.reviewers, review.ai_review_agents. The profile is written only through
 # `mktemp .claude/.rust-sdlc.yml.XXXXXX` + `mv`.
 #
 # Stdout: `WROTE: .claude/rust-sdlc.yml` (no profile yet, or --refresh with a
@@ -131,6 +131,17 @@ def read_text(path):
         warn("%s is not readable (%s); the keys it feeds take their fallback"
              % (path, first_line(exc)))
         return None
+
+
+def list_dir(path):
+    if not os.path.isdir(path):
+        return []
+    try:
+        return os.listdir(path)
+    except OSError as exc:
+        warn("%s is not readable (%s); the keys it feeds take their fallback"
+             % (path, first_line(exc)))
+        return []
 
 
 def load_toml(path):
@@ -423,10 +434,8 @@ def detect(argv):
 
     # make map
     documented = set()
-    sources = ["Makefile"]
-    if os.path.isdir("make"):
-        sources += sorted("make/" + name for name in os.listdir("make")
-                          if name.endswith(".mk") and not name.startswith("."))
+    sources = ["Makefile"] + sorted("make/" + name for name in list_dir("make")
+                                    if name.endswith(".mk") and not name.startswith("."))
     makefile = read_text("Makefile") or ""
     for path in sources:
         for line in (read_text(path) or "").split("\n"):
@@ -439,13 +448,12 @@ def detect(argv):
 
     # ci
     stems = set()
-    if os.path.isdir(".github/workflows"):
-        for name in os.listdir(".github/workflows"):
-            if name.startswith(".") or not os.path.isfile(".github/workflows/" + name):
-                continue
-            for extension in (".yml", ".yaml"):
-                if name.endswith(extension) and clean(name[:-len(extension)]):
-                    stems.add(clean(name[:-len(extension)]))
+    for name in list_dir(".github/workflows"):
+        if name.startswith(".") or not os.path.isfile(".github/workflows/" + name):
+            continue
+        for extension in (".yml", ".yaml"):
+            if name.endswith(extension) and clean(name[:-len(extension)]):
+                stems.add(clean(name[:-len(extension)]))
     workflows = sorted(stems, key=lambda stem: stem.encode("utf-8", "replace"))
     required = []
     required_checks_of("docs/repository-settings.md", required)

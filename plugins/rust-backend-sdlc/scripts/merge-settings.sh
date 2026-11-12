@@ -149,7 +149,7 @@ deny_entries() {
     'Bash(make * -i*)' \
     'Bash(make * -k*)' \
     'Bash(make * -n*)' \
-    'Bash(make * --*)'
+    'Bash(make * -*)'
 }
 
 # merge_program — the python3 program that merges the entries.

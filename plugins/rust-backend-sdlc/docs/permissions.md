@@ -12,7 +12,7 @@ ADR-6 is "Permissions: acceptEdits, local allowlist, no bypass":
 - `.claude/settings.json` is protected in the template: `protected-config.toml` lists it. `merge-settings.sh --file shared` refuses that file while `protected-config.toml` lists it in `files` or below one of its `directories`, or exists and cannot be parsed, and prints the merged JSON after the `REFUSED:` line. Setup never passes `--file shared`.
 - `merge-settings.sh` never writes `ask`, `hooks`, `env` or `defaultMode`, never writes a `curl` entry and never sets `bypassPermissions`. The template's own allow, ask and deny rules and its guard hooks stay exactly as they are.
 
-The plugin's deny entries exist because the template's deny rules are prefix rules: without the plugin's own deny entries, the plugin's broad allow entries `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh:*)` and `Bash(make:*)` would also approve hook-bypass, force, label and gate-faking forms. "Why the plugin adds deny entries" below gives the details and the two residual gaps.
+The plugin's deny entries exist because the template's deny rules are prefix rules: without the plugin's own deny entries, the plugin's broad allow entries `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh:*)` and `Bash(make:*)` would also approve hook-bypass, force, label and gate-faking forms. "Why the plugin adds deny entries" below gives the details and the residual gaps.
 
 ## How Claude Code applies the rules
 
@@ -152,7 +152,7 @@ Bash(id -g)
 
 ## Deny entries
 
-`merge-settings.sh` appends these 29 plugin-owned entries to `permissions.deny`, in this order. Deny rules match past a leading assignment, so each one also refuses its form behind `RUN_IN_CONTAINER=1`. Existing deny entries, the template's included, are kept byte for byte.
+`merge-settings.sh` appends these 29 plugin-owned entries to `permissions.deny`, in this order. Deny rules match past a leading assignment, so each one also refuses its form behind `RUN_IN_CONTAINER=1`. Each entry refuses the spelling its pattern names; other spellings of the same action are a residual gap, described below. Existing deny entries, the template's included, are kept byte for byte.
 
 ### Git (G1–G9)
 
@@ -165,7 +165,7 @@ Bash(id -g)
 | G5 | `Bash(git push * -f*)` | short force in any later position |
 | G6 | `Bash(git push *--no-verify*)` | hook bypass |
 | G7 | `Bash(git push *--mirror*)` | mirror push |
-| G8 | `Bash(git push *--delete*)` | remote branch deletion |
+| G8 | `Bash(git push *--delete*)` | remote branch deletion with `--delete` |
 | G9 | `Bash(git push * +*)` | `+refspec` forced update |
 
 ### GitHub CLI (H1–H8)
@@ -174,7 +174,7 @@ Bash(id -g)
 | --- | --- | --- |
 | H1 | `Bash(gh *approved-config-change*)` | applying or removing the protected-config approval label |
 | H2 | `Bash(gh *approved-breaking-change*)` | applying or removing the breaking-change approval label |
-| H3 | `Bash(gh pr merge:*)` | merging |
+| H3 | `Bash(gh pr merge:*)` | merging with `gh pr merge` |
 | H4 | `Bash(gh secret:*)` | secrets |
 | H5 | `Bash(gh variable:*)` | variables |
 | H6 | `Bash(gh repo delete:*)` | repository deletion |
@@ -203,7 +203,7 @@ P5 is the NFR-5 forbidden pattern for a forced `bmalph implement`, which the plu
 | M7 | `Bash(make * -i*)` | ignore errors |
 | M8 | `Bash(make * -k*)` | keep going |
 | M9 | `Bash(make * -n*)` | dry run |
-| M10 | `Bash(make * --*)` | any long option after the target (`--eval`, `--file`, `--ignore-errors`) |
+| M10 | `Bash(make * -*)` | any other option after the target, short or long (`-f`, `-C`, `-t`, `-q`, `--eval`, `--file`) |
 
 The 29 entries exactly as `merge-settings.sh` writes them, in order:
 
@@ -236,19 +236,19 @@ Bash(make *CONFIG_CHANGE_APPROVED=true*)
 Bash(make * -i*)
 Bash(make * -k*)
 Bash(make * -n*)
-Bash(make * --*)
+Bash(make * -*)
 ```
 
 ## Why the plugin adds deny entries
 
 The template's git deny rules are prefix rules such as `Bash(git commit --no-verify:*)` and `Bash(git push --force:*)`. A prefix rule matches only when the forbidden option comes first, so it misses `git commit -m x --no-verify`, `git push --force-with-lease`, `git push origin HEAD --force` and `git push origin +HEAD:main` (checked against the template's `.claude/settings.json`). The plugin itself needs the broad allow entries `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh:*)` and `Bash(make:*)`, and those would approve exactly the forms the prefix rules miss:
 
-- **G1–G9** refuse a hook bypass or a force, mirror, delete or `+refspec` push wherever the option stands, so the two entries 9 and 10 cannot approve them. The template's prefix rules still catch the forms where the option comes first.
-- **H1–H8** keep `Bash(gh:*)` away from the two approval labels (any `gh` call that names one, whatever it does with it), merges, secrets, variables, repository deletion and settings, and branch protection. The plugin reads labels with `gh pr view --json labels` and looks for the label in the output; it never names an approval label in a `gh` call and never applies or removes one.
+- **G1–G9** refuse a hook bypass or a force, mirror, `--delete` or `+refspec` push wherever the option stands, so the two entries 9 and 10 cannot approve them. The template's prefix rules still catch the forms where the option comes first.
+- **H1–H8** keep `Bash(gh:*)` away from the two approval labels (any `gh` call that names one, whatever it does with it), from the subcommands `gh pr merge`, `gh secret`, `gh variable`, `gh repo delete` and `gh repo edit`, and from any `gh api` path that names `protection`. The plugin reads labels with `gh pr view --json labels` and looks for the label in the output; it never names an approval label in a `gh` call and never applies or removes one.
 - **B1–B2** keep bmalph state and the Ralph circuit breaker out of reach: entry 21 is exact, so `bmalph implement --force` never matches an allow entry, and B2 refuses it in any spelling; `bmalph reset` is refused outright.
-- **M1–M10** keep `Bash(make:*)` from faking a gate. GNU make command-line variables override every assignment of the template's gate makefile, so `make tests-with-coverage COVERAGE_GATE_CMD=true` or `make validate-configuration CONFIG_CHANGE_APPROVED=true` would pass a gate without running it, and `-i`, `-k`, `-n` or a long option would ignore, skip or redirect it. The plugin passes only the closed variable set `RUN_IN_CONTAINER COMMIT_TITLE base_ref BREAKING_CHANGE_APPROVED CONFIG_CHANGE_APPROVED group context name SCHEMATHESIS_URL`, `CONFIG_CHANGE_APPROVED` only with an empty value, and no option. A variable that M2–M6 do not name is the second residual gap below.
+- **M1–M10** keep `Bash(make:*)` from faking a gate. GNU make command-line variables override every assignment of the template's gate makefile, so `make tests-with-coverage COVERAGE_GATE_CMD=true` or `make validate-configuration CONFIG_CHANGE_APPROVED=true` would pass a gate without running it, and an option after the target (`-i`, `-k`, `-n`, `-t`, `-q`, `-f`, `-C` or a long option) would ignore, skip, fake or redirect it. The plugin passes only the closed variable set `RUN_IN_CONTAINER COMMIT_TITLE base_ref BREAKING_CHANGE_APPROVED CONFIG_CHANGE_APPROVED group context name SCHEMATHESIS_URL`, `CONFIG_CHANGE_APPROVED` only with an empty value, and no option. A variable that M2–M6 do not name is the second residual gap below.
 
-The plugin's own calls never match a deny entry: commits carry no message text (`git commit -F <file>`, the file written by `common.sh commit_msg_file`), pushes are always `git push -u origin HEAD`, label reads use `gh pr view --json labels`, and a commit subject that contains a space followed by a hyphen is pre-validated with `common.sh is_commit_subject` instead of `make check-commit-message COMMIT_TITLE='…'`, because M7–M10 can refuse that make call (a subject such as `fix(#7): support the -k option` matches M8).
+The plugin's own calls never match a deny entry: commits carry no message text (`git commit -F <file>`, the file written by `common.sh commit_msg_file`), pushes are always `git push -u origin HEAD`, label reads use `gh pr view --json labels`, and a commit subject that contains a space followed by a hyphen is pre-validated with `common.sh is_commit_subject` instead of `make check-commit-message COMMIT_TITLE='…'`, because M10 refuses that make call (a subject such as `fix(#7): support the -k option` matches M8 and M10).
 
 ### The residual gap: combined short options
 
@@ -257,6 +257,10 @@ Claude Code patterns have no character classes, so a short option folded into a 
 ### The residual gap: other make variables
 
 Claude Code patterns cannot say "every variable except these", so M2–M6 refuse only the names that override a gate of the template's `make/gates.mk`: every `*_CMD`, `*_FLAGS` and `*_ARGS` variable, `CI_STAGES` and `CONFIG_CHANGE_APPROVED=true`. Any other command-line variable matches no deny entry and still overrides its assignment in the template's `Makefile`: `make tests-with-coverage SHELL=true` runs no recipe line and exits 0, and `make ci-tests CI_TESTS_TARGETS=` runs no test target. The closed variable set is held by the plugin's own spelling, not by a rule: CC-36 rejects a make call in the commands, agents, skills and workflows that passes an option, a variable outside the set or `CONFIG_CHANGE_APPROVED` with a value. As with combined short options, a person typing in the session is not held by that check.
+
+### The residual gap: other spellings of a refused action
+
+G8 and H3–H7 each match one spelling of their action. A remote branch is also deleted by `git push -d origin <branch>` or `git push origin :<branch>`, which match entry 10 and no deny entry. H3–H7 match only when the subcommand follows `gh` directly, so a global option in front of it (`gh -R <owner>/<repo> pr merge <n>`, `gh --repo <owner>/<repo> secret set <name>`) passes them, and `gh api` reaches the same actions through REST paths (`gh api -X PUT repos/{owner}/{repo}/pulls/<n>/merge`, `repos/{owner}/{repo}/actions/secrets/<name>`, `repos/{owner}/{repo}/actions/variables`, `gh api -X DELETE repos/{owner}/{repo}`) that only H8 checks, and only for `protection`. A pattern broad enough for every spelling would also refuse the plugin's own `gh api` calls, which read the user, repositories, issues and review threads and write issue comments, thread replies and thread resolutions. These forms are held by the plugin's own spelling, not by a rule: every push is `git push -u origin HEAD` (CC-14), and no command, agent, skill or workflow merges a pull request, deletes a remote branch or a repository, or changes secrets, variables or repository settings. As with the other gaps, a person typing in the session is not held by that spelling.
 
 ## HTTP goes through `common.sh http_probe` only
 

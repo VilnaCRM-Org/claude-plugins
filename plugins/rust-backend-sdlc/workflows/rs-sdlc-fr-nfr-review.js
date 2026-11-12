@@ -18,7 +18,8 @@ export const meta = {
 const CAP_MAX = 5
 const MAX_GROUPS = 4
 const OPTS = { slug: null, pr: null, head: null, base: null, summary: null, maxIterations: CAP_MAX }
-const FLAGS = { '--slug': 'slug', '--base': 'base', '--summary': 'summary', '--pr': 'pr', '--head': 'head' }
+// A Map, so a token such as constructor or toString is never read as a flag.
+const FLAGS = new Map([['--slug', 'slug'], ['--base', 'base'], ['--summary', 'summary'], ['--pr', 'pr'], ['--head', 'head']])
 const ARG_KEYS = ['slug', 'pr', 'head', 'base', 'summary', 'maxIterations']
 const badArgs = []
 
@@ -34,7 +35,7 @@ function parseTokens(text) {
   let positional = null
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]
-    const key = FLAGS[token]
+    const key = FLAGS.get(token)
     if (key) {
       const value = tokens[i + 1]
       if (value === undefined || value.startsWith('--')) badArgs.push(`${token} needs a value`)
@@ -173,6 +174,7 @@ const FIX_SCHEMA = {
   properties: {
     status: { type: 'string', enum: ['COMPLETE', 'IN_PROGRESS', 'BLOCKED'] },
     files_modified: { type: 'integer' },
+    changed_files: { type: 'array', items: { type: 'string' } },
     tests_status: { type: 'string', enum: ['PASSING', 'FAILING', 'NOT_RUN'] },
     recommendation: { type: 'string' },
   },
@@ -192,6 +194,7 @@ const journal = new Map()
 const ledger = []
 const dispatched = new Map()
 const fixedList = []
+const fixFiles = new Set()
 let requirementSource = null
 let advisory = false
 let lastCount = null
@@ -225,6 +228,7 @@ function report(result, iteration) {
     iterations: iteration,
     new_findings: lastCount,
     fixed: [...fixedList],
+    changed_files: [...fixFiles],
     requirement_source: requirementSource,
     advisory,
     degrade_notes: degradeNotes,
@@ -357,6 +361,9 @@ const HANDLE = /^FR_NFR_REVIEWER: iteration=([1-9]\d*)\/([1-9]\d*) new_findings=
 const where = (f) => (f.file ? `${f.file}${Number.isInteger(f.line) ? `:${f.line}` : ''}` : '(requirement-level)')
 const labelOf = (f) => `${f.id} ${f.rule} ${where(f)}: ${clip(f.summary, 120)}`
 const exactKey = (f) => `${f.rule}|${f.file ?? ''}|${f.line ?? ''}|${clip(f.summary).toLowerCase()}`
+// One requirement in one file: a fix moves lines, so the line is left out and
+// a finding whose line moved still counts as open. Each finding keeps its own
+// id and label inside the key, so two findings of one key are never merged.
 const trackKey = (f) => `${f.rule}|${f.file ?? ''}`
 const groupKey = (f) => (f.file ? f.file.split('/').slice(0, 3).join('/') : 'requirement-level')
 
@@ -388,7 +395,8 @@ function gatePrompt(iteration) {
 }
 
 // The fields of a returned gate dispatch that the checks below read: the
-// runner as run, the non-blank degrade reasons and the blocking finding.
+// runner as run, the status line, the non-blank degrade reasons and the
+// blocking finding.
 function gateSignals(gate) {
   const degraded = (Array.isArray(gate.degraded) ? gate.degraded : []).map((d) => clip(d)).filter(Boolean)
   return {
@@ -396,6 +404,7 @@ function gateSignals(gate) {
     note: gate.note,
     handle: gate.handle,
     runner: clip(gate.gate_run || 'unknown runner', 120),
+    posted: clip(gate.status_posted, 120),
     degraded,
     reasons: degraded.join('; '),
     blocking: gate.blocking_finding ? clip(gate.blocking_finding) : null,
@@ -433,7 +442,9 @@ const GATE_HALTS = [
 
 // The failed-run checks of a dispatch that did not halt, first match wins.
 // m is the parsed FR_NFR_REVIEWER line; the checks after the malformed-line
-// check run only on a parsed line.
+// check run only on a parsed line. An authoritative PASS counts only with the
+// gate's own success status line: the gate prints its count only once that
+// status is posted, so a PASS without it never published the verdict.
 const RUN_FAILURES = [
   {
     applies: ({ blocking, reasons }) => Boolean(blocking) || /gate run failed/i.test(reasons),
@@ -442,6 +453,7 @@ const RUN_FAILURES = [
   { applies: ({ m }) => !m, failed: ({ handle }) => `malformed or missing FR_NFR_REVIEWER line "${clip(handle, 120)}"` },
   { applies: ({ m, iteration }) => Number(m[1]) !== iteration, failed: ({ m, iteration }) => `FR_NFR_REVIEWER line names iteration ${m[1]}, expected ${iteration}` },
   { applies: ({ m }) => (m[4] === 'PASS') !== (Number(m[3]) === 0), failed: ({ m }) => `contradictory FR_NFR_REVIEWER line (new_findings=${Number(m[3])} verdict=${m[4]})` },
+  { applies: ({ m, posted }) => m[4] === 'PASS' && !advisory && !/^STATUS_POSTED: success /.test(posted), failed: ({ posted }) => `authoritative PASS without the success ${GATE_STATUS} status line (status_posted: ${posted || 'none'})` },
 ]
 
 // A dispatch that did not halt: a failed run, or the completed run with its
@@ -475,9 +487,9 @@ function logConvergence(iteration, count) {
 // no longer reports it open (the gate decides, not the fixer's own report).
 function settle(open) {
   const still = new Set(open.map(trackKey))
-  for (const [key, label] of dispatched) {
+  for (const [key, labels] of dispatched) {
     if (!still.has(key)) {
-      fixedList.push(label)
+      fixedList.push(...labels.values())
       dispatched.delete(key)
     }
   }
@@ -508,7 +520,7 @@ function fixPrompt(group, iteration, mode) {
     CONTAINER,
     NO_SUPPRESS,
     NO_GIT,
-    'Report your changed files, targets run and self-review checklist, end with your ---RALPH_STATUS--- block, and return status (its STATUS value), files_modified, tests_status and recommendation.',
+    'Report your changed files, targets run and self-review checklist, end with your ---RALPH_STATUS--- block, and return status (its STATUS value), files_modified, changed_files (the paths of your changed-files part, [] for none), tests_status and recommendation.',
   ].join('\n')
 }
 
@@ -522,8 +534,19 @@ function verifyPrompt(keys, iteration) {
     CONTAINER,
     NO_SUPPRESS,
     NO_GIT,
-    'End with your ---RALPH_STATUS--- block and return status (its STATUS value), files_modified, tests_status and recommendation.',
+    'End with your ---RALPH_STATUS--- block and return status (its STATUS value), files_modified, changed_files (the paths of your changed-files part, [] for none), tests_status and recommendation.',
   ].join('\n')
+}
+
+// The paths a fix group or the verify step changed, repository-relative and
+// outside target/: rs-sdlc-pr-until-green publishes exactly these, never
+// every path of the working tree.
+const SAFE_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\u0000-\u001f\u007f]{1,300}$/
+function noteChanged(reply) {
+  const paths = reply && Array.isArray(reply.changed_files) ? reply.changed_files : []
+  for (const p of paths.filter((x) => typeof x === 'string').map((x) => x.trim())) {
+    if (SAFE_PATH.test(p) && !p.startsWith('target/')) fixFiles.add(p)
+  }
 }
 
 const BLOCKED_ACTION = 'resolve the blocker named above by hand (a protected configuration path needs approved-config-change and a session restarted with ALLOW_PROTECTED_CONFIG_EDIT=1), then re-run'
@@ -541,7 +564,12 @@ function fixGroups(open, iteration) {
 }
 
 function markDispatched(groups, keys) {
-  for (const key of keys) for (const f of groups.get(key)) dispatched.set(trackKey(f), labelOf(f))
+  for (const key of keys) {
+    for (const f of groups.get(key)) {
+      const labels = dispatched.get(trackKey(f)) || new Map()
+      dispatched.set(trackKey(f), labels.set(clip(f.id) || labelOf(f), labelOf(f)))
+    }
+  }
 }
 
 // Journals a blocked fix group or verify step and escalates with its recommendation.
@@ -553,6 +581,7 @@ function implementerBlocked(iteration, entry, step, reply) {
 // The end of a parallel round: the serialized verify step.
 async function verifyRoundEnd({ iteration, keys, ran, outcome }) {
   const verify = await agent(verifyPrompt(keys, iteration), { label: `verify ${iteration}/${CAP}`, phase: 'Fix', agentType: IMPLEMENTER, schema: FIX_SCHEMA })
+  noteChanged(verify)
   if (isBlocked(verify)) return { halt: implementerBlocked(iteration, `${ran}, verify -> ${outcome}, verify BLOCKED`, 'the serialized verify step', verify) }
   if (!isComplete(verify)) log(`iteration ${iteration}: the verify step did not complete; the next gate iteration re-detects what is still unmet`)
   return { journal: `${ran}, verify -> ${outcome}, verify ${verify ? verify.status : 'returned nothing'}` }
@@ -575,6 +604,7 @@ async function dispatchFixes(open, iteration) {
     keys.map((key) => () => agent(fixPrompt(groups.get(key), iteration, mode), { label: `fix:${key}`, phase: 'Fix', agentType: IMPLEMENTER, schema: FIX_SCHEMA })),
   )
   const ran = keys.map((k) => `fix:${k}`).join(', ')
+  fixes.forEach(noteChanged)
   const blockedAt = fixes.findIndex(isBlocked)
   if (blockedAt >= 0) return implementerBlocked(iteration, `${ran} -> BLOCKED on fix:${keys[blockedAt]}`, `fix:${keys[blockedAt]}`, fixes[blockedAt])
   markDispatched(groups, keys)

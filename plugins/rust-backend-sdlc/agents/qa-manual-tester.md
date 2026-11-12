@@ -84,10 +84,10 @@ One report, returned as the final message, in this order:
    | AC-<n>.<m> | <METHOD> | <base URL><PATH> | <headers and body sent, or none> | <status> | <content-type header> | <x-request-id header> | <first lines of the body> | <status, content type, type or fields> | <what came back> |
    ```
 
-4. The failures: for each FAIL check, its id, expected against observed, and one reproduction command line written as text, never executed by the agent. The reproduction keeps the placeholder `<service.base_url>` for the reader to fill from the profile and spells out the concrete path, headers and body:
+4. The failures: for each FAIL check, its id, expected against observed, and one reproduction command line written as text, never executed by the agent. The reproduction keeps the placeholder `<service.base_url>` for the reader to fill from the profile, spells out the concrete path and carries exactly what the check sent: one `-H` per header it sent (none when it sent none) and `--data-binary` only when it sent a body:
 
    ```text
-   curl '<service.base_url><PATH>' -sS -i -X <METHOD> -H 'Content-Type: application/json' --data-binary '<request body>'
+   curl '<service.base_url><PATH>' -sS -i -X <METHOD> [-H '<Name>: <value>']... [--data-binary '<request body>']
    ```
 
 5. The degrade notes: one `DEGRADED: <note>` line each, or `none`.
@@ -95,7 +95,7 @@ One report, returned as the final message, in this order:
 
 ## Allowed actions
 
-- **Probes.** Every HTTP request goes through `"<plugin root>/scripts/lib/common.sh" http_probe <METHOD> <PATH> …`, with the optional `--header '<Name>: <value>'` (at most 10), `--body '<text>'` (at most 16 KiB; a `'` inside it is written `'\''`) or `--body-file <file>` (only a file the dispatching command placed under `target/rust-sdlc/tmp/`; the agent writes none). `<METHOD>` is one of `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`; `<PATH>` starts with `/` and matches `^/[A-Za-z0-9._~%/?&=:,+-]*$`, other characters percent-encoded. Exit 0 is an HTTP response of any status, judged as evidence; exit 1 is a transport failure or an invalid `service.base_url`; exit 2 is an argument the function refused.
+- **Probes.** Every HTTP request goes through `"<plugin root>/scripts/lib/common.sh" http_probe <METHOD> '<PATH>' …` (the path is quoted because a path may hold `?` or `&`), with the optional `--header '<Name>: <value>'` (at most 10) and `--body '<text>'` (at most 16 KiB; a `'` inside it is written `'\''`); the agent never passes `--body-file`, because it writes no file and the stage places none. `<METHOD>` is one of `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`; `<PATH>` starts with `/` and matches `^/[A-Za-z0-9._~%/?&=:,+-]*$`, other characters percent-encoded. Exit 0 is an HTTP response of any status, judged as evidence; exit 1 is a transport failure or an invalid `service.base_url`; exit 2 is an argument the function refused.
 - **Network limits.** The probe function is the only way out (never `curl` directly, never a second URL, never a host other than `service.base_url`), and the agent never uses another network tool either.
 - **Log.** The only log read is `docker compose logs --no-log-prefix --tail 200 app`, taken after a 5xx answer, a transport failure or a readiness FAIL, at most three times per pass.
 - **Snapshot diff.** `git diff <ci.base_ref> HEAD -- <service.openapi_snapshot> <service.graphql_snapshot>`, with the pathspec limited to the two snapshot files; a diff over any other path is a forbidden read.
