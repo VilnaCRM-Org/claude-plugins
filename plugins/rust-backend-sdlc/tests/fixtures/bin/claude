@@ -39,11 +39,13 @@ case "${1:-}" in
     printf '  --tools <tools...>                Built-in tools the session may use\n'
     printf '  --disallowedTools <tools...>      Tools the session must not use\n'
     printf '  --strict-mcp-config               Only use MCP servers from --mcp-config\n'
+    printf '  -v, --version                     Output the version number\n'
+    printf '  -h, --help                        Display help for command\n'
+    # Last line on purpose: a `| grep -q -- --restricted` probe under pipefail can
+    # never close the pipe before the stub has finished writing.
     if [[ "${STUB_CLAUDE_RESTRICTED:-1}" == "1" ]]; then
       printf '  --restricted                      Restricted mode (no shell, no network tools)\n'
     fi
-    printf '  -v, --version                     Output the version number\n'
-    printf '  -h, --help                        Display help for command\n'
     exit 0
     ;;
 esac
