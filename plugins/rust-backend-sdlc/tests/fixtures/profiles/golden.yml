@@ -1,0 +1,192 @@
+# Project profile of the rust-backend-sdlc plugin (schema_version 1).
+# Written by generate-profile.sh; re-detect with /rs-sdlc-setup --refresh.
+schema_version: 1
+project:
+  name: 'billing-service'
+  repo: 'acme/billing-service'
+  default_branch: 'main'
+  description: 'Rust Template'
+rust:
+  toolchain: '1.99.1'
+  edition: '2024'
+  msrv: '1.99.1'
+template:
+  repository: 'acme/rust-template'
+  sync_flavour: both
+  source_commit: null
+framework:
+  http: axum
+  openapi: true
+  graphql: true
+persistence:
+  engine: postgresql
+  migrations_dir: 'migrations'
+  offline_metadata: true
+architecture:
+  crates_root: 'crates'
+  composition_root: 'crates/service'
+  layers:
+    - 'domain'
+    - 'application'
+    - 'infrastructure'
+    - 'composition-root'
+    - 'test-support'
+    - 'e2e'
+    - 'tooling'
+  bounded_contexts:
+    - 'billing/invoice'
+    - 'internal/health-check'
+  shared_crates:
+    - 'crates/shared/application'
+    - 'crates/shared/domain'
+    - 'crates/shared/infrastructure'
+service:
+  port: 8081
+  base_url: 'http://localhost:8081'
+  liveness_path: '/ping'
+  readiness_path: '/api/health'
+  graphql_path: '/api/graphql'
+  docs_path: '/api/docs'
+  openapi_snapshot: '.github/openapi-spec/spec.yaml'
+  graphql_snapshot: '.github/graphql-spec/spec'
+make:
+  ci: ci
+  ci_list: ci-list
+  ci_preflight: ci-preflight
+  ci_static_analysis: ci-static-analysis
+  ci_tests: ci-tests
+  ci_contracts: ci-contracts
+  ci_mutation: ci-mutation
+  ci_delivery: ci-delivery
+  ci_cli: ci-cli
+  doctor: doctor
+  bootstrap: bootstrap
+  install_hooks: install-hooks
+  bmalph_setup: bmalph-setup
+  start: start
+  format: format
+  format_check: format-check
+  lint_code: lint-code
+  static_analysis: static-analysis
+  complexity: complexity
+  architecture: architecture
+  check_crate_isolation: check-crate-isolation
+  validate_architecture_model: validate-architecture-model
+  check_security: check-security
+  unused_dependencies: unused-dependencies
+  docs_check: docs-check
+  validate_invariants: validate-invariants
+  validate_configuration: validate-configuration
+  secrets_scan: secrets-scan
+  unit_tests: unit-tests
+  integration_tests: integration-tests
+  tests_with_coverage: tests-with-coverage
+  e2e_tests: e2e-tests
+  mutation_tests_diff: mutation-tests-diff
+  setup_test_db: setup-test-db
+  create_migration: create-migration
+  migrate: migrate
+  migrate_rollback: migrate-rollback
+  sqlx_prepare: sqlx-prepare
+  validate_sqlx_metadata: validate-sqlx-metadata
+  generate_openapi_spec: generate-openapi-spec
+  generate_graphql_spec: generate-graphql-spec
+  validate_contract_snapshots: validate-contract-snapshots
+  validate_openapi_spec: validate-openapi-spec
+  openapi_diff: openapi-diff
+  graphql_diff: graphql-diff
+  schemathesis_validate: schemathesis-validate
+  image_scan: image-scan
+  smoke_load_tests: smoke-load-tests
+  load_tests: load-tests
+  new_context: new-context
+  check_commit_message: check-commit-message
+  ai_review_loop: null
+  pr_comments: null
+  fr_nfr_gate: null
+  post_review_findings: null
+quality:
+  coverage_lines: 100
+  coverage_functions: 100
+  max_surviving_mutants: 0
+  max_clippy_findings: 0
+  max_complexity_violations: 0
+  max_architecture_violations: 0
+  max_unused_dependencies: 0
+  max_dependency_policy_findings: 0
+  max_spectral_findings: 0
+  max_unapproved_breaking_changes: 0
+  max_image_vulnerabilities_high_critical: 0
+  max_smoke_budget_breaches: 0
+ci:
+  provider: github-actions
+  workflows:
+    - 'change-control'
+    - 'contracts'
+    - 'load-tests'
+    - 'quality'
+    - 'release'
+    - 'repository'
+    - 'security'
+    - 'template-sync-app'
+    - 'template-sync-pat'
+    - 'tests'
+  required_checks:
+    - 'Changes (Quality)'
+    - 'Formatting check'
+    - 'Static analysis'
+    - 'Complexity limits'
+    - 'Architecture boundaries'
+    - 'Manifest and lock validation'
+    - 'Crate isolation'
+    - 'Persistence query metadata'
+    - 'Configuration check'
+    - 'Dependency policy'
+    - 'Unused dependencies'
+    - 'Changes (Tests)'
+    - 'Tests and coverage'
+    - 'End-to-end tests'
+    - 'Mutation tests'
+    - 'Makefile tests (Bats)'
+    - 'Changes (Contracts)'
+    - 'Contract snapshots'
+    - 'OpenAPI lint'
+    - 'Schemathesis'
+    - 'Changes (Change control)'
+    - 'Pull-request title'
+    - 'Protected configuration'
+    - 'OpenAPI breaking changes'
+    - 'GraphQL breaking changes'
+    - 'Changes (Load tests)'
+    - 'Smoke load tests'
+    - 'Load-script lint'
+    - 'Changes (Security)'
+    - 'Secrets scan'
+    - 'Production-image scan'
+    - 'Changes (Repository)'
+    - 'Repository lint'
+    - 'Repository invariants'
+    - 'Documentation drift'
+    - 'Architecture model'
+  human_gated:
+    - 'Protected configuration'
+    - 'OpenAPI breaking changes'
+    - 'GraphQL breaking changes'
+  base_ref: 'origin/main'
+review:
+  coderabbit: true
+  reviewers:
+    - coderabbit
+  ai_review_agents:
+    - claude
+  request_changes_blocking: true
+capabilities:
+  template_derived: true
+  run_in_container: false
+  structurizr: true
+  load_testing: true
+  mutation_testing: true
+  dynamic_security_testing: false
+  publish_pr_comments: true
+  protected_config: true
+  template_sync: true

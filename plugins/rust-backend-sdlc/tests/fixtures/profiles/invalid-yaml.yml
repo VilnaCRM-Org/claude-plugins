@@ -1,0 +1,10 @@
+# Project profile of the rust-backend-sdlc plugin (schema_version 1).
+# Written by generate-profile.sh; re-detect with /rs-sdlc-setup --refresh.
+schema_version: 1
+project:
+  name: 'billing-service'
+  repo: 'acme/billing-service'
+  default_branch: 'main'
+  description: Rust Template: billing
+rust:
+  toolchain: '1.99.1'

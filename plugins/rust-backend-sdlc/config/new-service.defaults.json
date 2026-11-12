@@ -1,0 +1,7 @@
+{
+  "template_repository": "VilnaCRM-Org/rust-service-template",
+  "default_visibility": "private",
+  "default_version": "0.1.0",
+  "poll_attempts": 10,
+  "poll_interval_seconds": 3
+}

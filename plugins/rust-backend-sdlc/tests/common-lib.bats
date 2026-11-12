@@ -1297,3 +1297,982 @@ EOF
   [ "$status" -eq 1 ]
   grep -q '^claude --help' "$STUB_CLAUDE_LOG"
 }
+
+# section: command helpers
+
+# ch_repo — materializes the rust-repo fixture at
+# $BATS_TEST_TMPDIR/billing-service and sets CH_REPO to it.
+ch_repo() {
+  CH_REPO="$BATS_TEST_TMPDIR/billing-service"
+  rr_materialize "$CH_REPO"
+}
+
+# ch_profile DIR [BASE_URL] — the minimal inline profile of the http_probe and
+# protected_changes cases (never the golden profile): `schema_version: 1`,
+# then `service:` with `base_url:` indented two spaces below it. BASE_URL is
+# written verbatim (default 'http://127.0.0.1:8081', quoted).
+ch_profile() {
+  mkdir -p "$1/.claude"
+  printf '%s\n' 'schema_version: 1' 'service:' "  base_url: ${2:-"'http://127.0.0.1:8081'"}" \
+    >"$1/.claude/rust-sdlc.yml"
+}
+
+# ch_commit DIR MESSAGE — commits every change of DIR.
+ch_commit() {
+  git -C "$1" add -A
+  git -C "$1" commit -q -m "$2"
+}
+
+# ch_hooks DIR — DIR/.githooks/{commit-msg,pre-commit,pre-push}, executable.
+ch_hooks() {
+  local hook
+  mkdir -p "$1/.githooks"
+  for hook in commit-msg pre-commit pre-push; do
+    printf '#!/bin/sh\nexit 0\n' >"$1/.githooks/$hook"
+    chmod 755 "$1/.githooks/$hook"
+  done
+}
+
+# ch_sleep_stub [CODE] — a `sleep` first on PATH that appends its arguments to
+# $BATS_TEST_TMPDIR/sleep.log, runs CODE and returns at once.
+ch_sleep_stub() {
+  make_stub "$BATS_TEST_TMPDIR/ch-bin" sleep "printf '%s\\n' \"\$*\" >>'$BATS_TEST_TMPDIR/sleep.log'
+${1-}"
+  : >"$BATS_TEST_TMPDIR/sleep.log"
+  PATH="$BATS_TEST_TMPDIR/ch-bin:$PATH"
+}
+
+# ch_service — cd into $BATS_TEST_TMPDIR/svc (CH_SVC), a working directory
+# with target/rust-sdlc/logs, tmp and new-service.
+ch_service() {
+  CH_SVC="$BATS_TEST_TMPDIR/svc"
+  mkdir -p "$CH_SVC/target/rust-sdlc/logs" "$CH_SVC/target/rust-sdlc/tmp" \
+    "$CH_SVC/target/rust-sdlc/new-service"
+  cd "$CH_SVC"
+}
+
+# ch_capture_curl — a `curl` first on PATH that writes one argument per line
+# to $CH_ARGV and its stdin to $CH_STDIN, then answers 204.
+ch_capture_curl() {
+  export CH_ARGV="$BATS_TEST_TMPDIR/curl.argv" CH_STDIN="$BATS_TEST_TMPDIR/curl.stdin"
+  make_stub "$BATS_TEST_TMPDIR/ch-curl" curl \
+    'printf "%s\n" "$@" >"$CH_ARGV"; cat >"$CH_STDIN"; printf "HTTP/1.1 204 No Content\r\n\r\n"'
+  PATH="$BATS_TEST_TMPDIR/ch-curl:$PATH"
+}
+
+# ch_rejects ARG... — `common.sh http_probe ARG...` exits 2 with no stdout.
+ch_rejects() {
+  run --separate-stderr "$LIB" http_probe "$@"
+  if [ "$status" -ne 2 ] || [ -n "$output" ]; then
+    printf 'http_probe %q: status %s, stdout %s\n' "$*" "$status" "$output"
+    return 1
+  fi
+}
+
+# ch_add_member DIR MEMBER PACKAGE — registers MEMBER first in DIR/Cargo.toml's
+# [workspace].members and writes DIR/MEMBER/Cargo.toml naming PACKAGE.
+ch_add_member() {
+  python3 -I - "$1/Cargo.toml" "$2" <<'PY'
+import sys
+
+path, member = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    text = handle.read()
+with open(path, "w", encoding="utf-8") as handle:
+    handle.write(text.replace("members = [\n", 'members = [\n    "%s",\n' % member, 1))
+PY
+  mkdir -p "$1/$2"
+  printf '[package]\nname = "%s"\nversion = "0.1.0"\n' "$3" >"$1/$2/Cargo.toml"
+}
+
+# --- layout and dispatch of the command helpers -------------------------------
+
+@test "common-lib: layout: the command helpers section follows core and holds the seven helpers" {
+  local core ch next line fn
+  core="$(grep -nxF '# section: core' "$LIB" | cut -d: -f1)"
+  ch="$(grep -nxF '# section: command helpers' "$LIB" | cut -d: -f1)"
+  [ -n "$ch" ]
+  [ "$ch" -gt "$core" ]
+  # A3 order: core, then command helpers; the dispatch trailer stays last.
+  [ "$(grep '^# section: ' "$LIB" | sed -n 2p)" = '# section: command helpers' ]
+  [ "$(grep '^# section: ' "$LIB" | tail -n 1)" = '# section: dispatch (keep last)' ]
+  next="$(awk -v from="$ch" 'NR > from && /^# section: / { print NR; exit }' "$LIB")"
+  for fn in derive_issue_number commit_msg_file hooks_active wait_log http_probe \
+    protected_changes validate_context_name; do
+    line="$(grep -nxF "$fn() {" "$LIB" | cut -d: -f1)"
+    [ -n "$line" ]
+    [ "$line" -gt "$ch" ]
+    [ "$line" -lt "$next" ]
+  done
+  # Private helpers of the section carry its _ch_ prefix.
+  run awk -v from="$ch" -v to="$next" 'NR > from && NR < to && /^[A-Za-z_][A-Za-z0-9_]*\(\) \{$/' "$LIB"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -vE '^(_ch_[a-z_]+|derive_issue_number|commit_msg_file|hooks_active|wait_log|http_probe|protected_changes|validate_context_name)\(\) \{$' && return 1
+  true
+}
+
+@test "common-lib: _sdlc_dispatch: each of the seven command helpers runs executed with its contract status" {
+  local base
+  ch_repo
+  cd "$CH_REPO"
+  ch_profile "$CH_REPO"
+  ch_hooks "$CH_REPO"
+  ch_commit "$CH_REPO" 'chore: add profile and hooks'
+  base="$(git rev-parse HEAD)"
+  git config --local core.hooksPath .githooks
+  mkdir -p target/rust-sdlc/logs
+  printf 'done\nRUST_SDLC_EXIT=0\n' >target/rust-sdlc/logs/qa.log
+  run "$LIB" derive_issue_number --branch feat/12-add-x
+  [ "$status" -eq 0 ]
+  [ "$output" = 12 ]
+  SDLC_NOW_EPOCH=1794477300 run "$LIB" commit_msg_file 'feat(#12): add x'
+  [ "$status" -eq 0 ]
+  [ "$output" = target/rust-sdlc/tmp/commit-20261112T095500Z.txt ]
+  run "$LIB" hooks_active
+  [ "$status" -eq 0 ]
+  [ "$output" = 'HOOKS: active' ]
+  run "$LIB" wait_log target/rust-sdlc/logs/qa.log
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = 'RUST_SDLC_EXIT=0' ]
+  run "$LIB" http_probe GET /health
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = 'HTTP_STATUS: 200' ]
+  run "$LIB" protected_changes "$base"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run "$LIB" validate_context_name service ledger
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# --- derive_issue_number (AC-2.1) ----------------------------------------------
+
+@test "common-lib: derive_issue_number: the first source in the order handle, title, branch, body wins" {
+  run "$LIB" derive_issue_number --handle 7 --title 'feat(#12): add x' --branch feat/13-add-x --body 'Closes #14'
+  [ "$status" -eq 0 ]
+  [ "$output" = 7 ]
+  run "$LIB" derive_issue_number --title 'feat(#12): add x' --branch feat/13-add-x --body 'Closes #14'
+  [ "$output" = 12 ]
+  run "$LIB" derive_issue_number --title 'Add x' --branch feat/13-add-x --body 'Closes #14'
+  [ "$output" = 13 ]
+  run "$LIB" derive_issue_number --title 'Add x' --branch main --body $'Summary\n\nCloses #14'
+  [ "$output" = 14 ]
+  # The flag order never changes the priority.
+  run "$LIB" derive_issue_number --body 'Closes #14' --branch fix/13-y --title 'fix(#12): y' --handle 7
+  [ "$output" = 7 ]
+  run derive_issue_number --body 'Closes #14' --title 'docs(#12): add planning bundle 12-add-x'
+  [ "$status" -eq 0 ]
+  [ "$output" = 12 ]
+}
+
+@test "common-lib: derive_issue_number: ignores a PR number that differs from every source" {
+  # PR 99 appears as GitHub's squash suffix and as a bare reference; the issue is 12.
+  run "$LIB" derive_issue_number --title 'feat(#12): add x (#99)' --branch feat/12-add-x --body 'Implements #99. Closes #12'
+  [ "$status" -eq 0 ]
+  [ "$output" = 12 ]
+  run "$LIB" derive_issue_number --title 'Merge pull request #99 from acme/feat' --branch acme/feat --body $'See #99\nCloses #12'
+  [ "$output" = 12 ]
+  run --separate-stderr "$LIB" derive_issue_number --title 'Add x (#99)' --branch 99-add-x --body 'Fixes #99'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  # There is no way to pass a PR number.
+  run --separate-stderr "$LIB" derive_issue_number --pr 99 --branch feat/12-add-x
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+}
+
+@test "common-lib: derive_issue_number: no source returns 1 with no output; zero and leading zeros" {
+  local args
+  run --separate-stderr "$LIB" derive_issue_number
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ -z "$stderr" ]
+  for args in "--handle ''" '--handle 0' '--handle 012' '--handle abc' "--title 'feat: x'" \
+    "--title 'Feat(#3): x'" "--title 'feat (#3): x'" "--title 'feat(#): x'" "--title 'feat(#0): x'" \
+    '--branch main' '--branch feat/12' '--branch 12-add-x' '--branch Feat/12-x' \
+    "--body 'closes #5'" "--body 'XCloses #5'" "--body 'Closes 5'" "--body ''"; do
+    # shellcheck disable=SC2086 # each case is a flag and a quoted value
+    run --separate-stderr bash -c "\"\$0\" derive_issue_number $args" "$LIB"
+    if [ "$status" -ne 1 ] || [ -n "$output" ] || [ -n "$stderr" ]; then
+      printf '%s: status %s, output %s\n' "$args" "$status" "$output"
+      return 1
+    fi
+  done
+  run "$LIB" derive_issue_number --handle 0 --title 'feat(#0): x' --branch feat/0042-x
+  [ "$status" -eq 0 ]
+  [ "$output" = 42 ]
+  run "$LIB" derive_issue_number --body $'line one\n(Closes #8)'
+  [ "$output" = 8 ]
+}
+
+@test "common-lib: derive_issue_number: a missing value or an unknown argument exits 2" {
+  run --separate-stderr "$LIB" derive_issue_number --title
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *'derive_issue_number: --title needs a value'* ]]
+  run --separate-stderr "$LIB" derive_issue_number 12
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *'unknown argument: 12'* ]]
+  run --separate-stderr "$LIB" derive_issue_number --issue 12
+  [ "$status" -eq 2 ]
+  # A value that starts with -- is still a value (a PR body may start so).
+  run "$LIB" derive_issue_number --body '-- Closes #8'
+  [ "$status" -eq 0 ]
+  [ "$output" = 8 ]
+}
+
+# --- commit_msg_file (ADR-27) ------------------------------------------------------
+
+@test "common-lib: commit_msg_file: writes the subject and a newline to target/rust-sdlc/tmp/commit-<utc_stamp>.txt and prints the path" {
+  ch_repo
+  cd "$CH_REPO"
+  SDLC_NOW_EPOCH=1794477300 run --separate-stderr "$LIB" commit_msg_file 'feat(#12): add the invoice export'
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  [ "$output" = target/rust-sdlc/tmp/commit-20261112T095500Z.txt ]
+  printf 'feat(#12): add the invoice export\n' | cmp - "$output"
+  # No temporary file is left behind and the ignored target/ keeps git clean.
+  [ "$(ls -A target/rust-sdlc/tmp)" = commit-20261112T095500Z.txt ]
+  [ -z "$(git status --porcelain)" ]
+  git commit -q --allow-empty -F "$output"
+  [ "$(git log -1 --format=%B)" = 'feat(#12): add the invoice export' ]
+  # A quote in the subject is kept byte for byte; the sourced form behaves alike.
+  SDLC_NOW_EPOCH=1794477301 run commit_msg_file "fix(#3): handle the customer's name"
+  [ "$status" -eq 0 ]
+  [ "$output" = target/rust-sdlc/tmp/commit-20261112T095501Z.txt ]
+  printf "fix(#3): handle the customer's name\n" | cmp - "$output"
+}
+
+@test "common-lib: commit_msg_file: an invalid subject exits 1 and writes nothing" {
+  local s
+  mkdir -p "$BATS_TEST_TMPDIR/svc"
+  cd "$BATS_TEST_TMPDIR/svc"
+  for s in 'feat: x' 'feat(#0): x' 'Feat(#1): x' 'feat (#1): x' 'review: gate iteration 2 remediation' \
+    $'feat(#1): x\nsecond line' 'feat(#1): ' ''; do
+    run --separate-stderr "$LIB" commit_msg_file "$s"
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    [[ "$stderr" == *'commit_msg_file: not a commit subject'* ]]
+  done
+  run --separate-stderr "$LIB" commit_msg_file
+  [ "$status" -eq 1 ]
+  run --separate-stderr "$LIB" commit_msg_file 'feat(#1): a' 'feat(#1): b'
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  [ ! -e target ]
+}
+
+@test "common-lib: commit_msg_file: refuses a linked target/rust-sdlc/tmp" {
+  mkdir -p "$BATS_TEST_TMPDIR/svc/target/rust-sdlc" "$BATS_TEST_TMPDIR/elsewhere"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" "$BATS_TEST_TMPDIR/svc/target/rust-sdlc/tmp"
+  cd "$BATS_TEST_TMPDIR/svc"
+  run --separate-stderr "$LIB" commit_msg_file 'feat(#1): add x'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *'symbolic link'* ]]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/elsewhere")" ]
+}
+
+# --- hooks_active (Git rules) --------------------------------------------------------
+
+@test "common-lib: hooks_active: active only for a local .githooks with the three executable hooks; never writes config" {
+  local sum
+  ch_repo
+  ch_hooks "$CH_REPO"
+  git -C "$CH_REPO" config --local core.hooksPath .githooks
+  sum="$(cksum <"$CH_REPO/.git/config")"
+  run --separate-stderr "$LIB" hooks_active "$CH_REPO"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'HOOKS: active' ]
+  [ -z "$stderr" ]
+  # DIR defaults to the working directory, which may be below the root.
+  cd "$CH_REPO/crates/service"
+  run "$LIB" hooks_active
+  [ "$status" -eq 0 ]
+  [ "$output" = 'HOOKS: active' ]
+  run hooks_active "$CH_REPO"
+  [ "$output" = 'HOOKS: active' ]
+  [ "$(cksum <"$CH_REPO/.git/config")" = "$sum" ]
+}
+
+@test "common-lib: hooks_active: unset without a local value, a global-only value included" {
+  local sum gsum
+  ch_repo
+  ch_hooks "$CH_REPO"
+  sum="$(cksum <"$CH_REPO/.git/config")"
+  run "$LIB" hooks_active "$CH_REPO"
+  [ "$status" -eq 1 ]
+  [ "$output" = 'HOOKS: unset' ]
+  git config --file "$BATS_TEST_TMPDIR/global.gitconfig" core.hooksPath .githooks
+  export GIT_CONFIG_GLOBAL="$BATS_TEST_TMPDIR/global.gitconfig"
+  gsum="$(cksum <"$GIT_CONFIG_GLOBAL")"
+  # git itself sees the global value; the check reads only the local one.
+  [ "$(git -C "$CH_REPO" config --get core.hooksPath)" = .githooks ]
+  run "$LIB" hooks_active "$CH_REPO"
+  [ "$status" -eq 1 ]
+  [ "$output" = 'HOOKS: unset' ]
+  [ "$(cksum <"$CH_REPO/.git/config")" = "$sum" ]
+  [ "$(cksum <"$GIT_CONFIG_GLOBAL")" = "$gsum" ]
+}
+
+@test "common-lib: hooks_active: foreign for any other local value" {
+  local value
+  ch_repo
+  ch_hooks "$CH_REPO"
+  for value in .husky .githooks/ ./.githooks .GITHOOKS "$CH_REPO/.githooks"; do
+    git -C "$CH_REPO" config --local core.hooksPath "$value"
+    run "$LIB" hooks_active "$CH_REPO"
+    [ "$status" -eq 1 ]
+    [ "$output" = "HOOKS: foreign $value" ]
+  done
+  git -C "$CH_REPO" config --local core.hooksPath ''
+  run "$LIB" hooks_active "$CH_REPO"
+  [ "$status" -eq 1 ]
+  [ "$output" = "HOOKS: foreign ''" ]
+}
+
+@test "common-lib: hooks_active: missing names the first absent or non-executable hook" {
+  ch_repo
+  ch_hooks "$CH_REPO"
+  git -C "$CH_REPO" config --local core.hooksPath .githooks
+  rm "$CH_REPO/.githooks/pre-push"
+  run "$LIB" hooks_active "$CH_REPO"
+  [ "$status" -eq 1 ]
+  [ "$output" = 'HOOKS: missing .githooks/pre-push' ]
+  chmod 644 "$CH_REPO/.githooks/pre-commit"
+  run "$LIB" hooks_active "$CH_REPO"
+  [ "$output" = 'HOOKS: missing .githooks/pre-commit' ]
+  rm "$CH_REPO/.githooks/commit-msg"
+  mkdir "$CH_REPO/.githooks/commit-msg"
+  run "$LIB" hooks_active "$CH_REPO"
+  [ "$output" = 'HOOKS: missing .githooks/commit-msg' ]
+  rm -r "$CH_REPO/.githooks"
+  run "$LIB" hooks_active "$CH_REPO"
+  [ "$status" -eq 1 ]
+  [ "$output" = 'HOOKS: missing .githooks/commit-msg' ]
+}
+
+@test "common-lib: hooks_active: a DIR that is not a directory or not a work tree exits 2" {
+  mkdir -p "$BATS_TEST_TMPDIR/plain"
+  run --separate-stderr "$LIB" hooks_active "$BATS_TEST_TMPDIR/nope"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" run --separate-stderr "$LIB" hooks_active "$BATS_TEST_TMPDIR/plain"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *'not inside a git work tree'* ]]
+  run --separate-stderr "$LIB" hooks_active a b
+  [ "$status" -eq 2 ]
+}
+
+# --- wait_log (ADR-13) ------------------------------------------------------------------
+
+@test "common-lib: wait_log: a finished log prints its last 40 lines ending RUST_SDLC_EXIT=<n> and exits 0 without sleeping" {
+  local i log=target/rust-sdlc/logs/review-20261112T101500Z.log
+  ch_service
+  ch_sleep_stub
+  {
+    for i in $(seq 1 50); do
+      printf 'line %s\n' "$i"
+    done
+    printf 'RUST_SDLC_EXIT=0\n'
+  } >"$log"
+  run --separate-stderr "$LIB" wait_log "$log"
+  [ "$status" -eq 0 ]
+  {
+    for i in $(seq 12 50); do
+      printf 'line %s\n' "$i"
+    done
+    printf 'RUST_SDLC_EXIT=0\n'
+  } >"$BATS_TEST_TMPDIR/want"
+  printf '%s\n' "$output" | cmp - "$BATS_TEST_TMPDIR/want"
+  [ ! -s "$BATS_TEST_TMPDIR/sleep.log" ]
+}
+
+@test "common-lib: wait_log: strips control characters, keeps a non-zero exit code and splits a marker after a partial line" {
+  ch_service
+  ch_sleep_stub
+  printf 'ok \033[31mred\033[0m\r\ntab\there\nRUST_SDLC_EXIT=2\n' >target/rust-sdlc/logs/qa.log
+  run "$LIB" wait_log target/rust-sdlc/logs/qa.log
+  [ "$status" -eq 0 ]
+  [ "$output" = $'ok [31mred[0m\ntabhere\nRUST_SDLC_EXIT=2' ]
+  printf 'compiling\nno newlineRUST_SDLC_EXIT=101\n' >target/rust-sdlc/logs/plan.log
+  run "$LIB" wait_log target/rust-sdlc/logs/plan.log
+  [ "$status" -eq 0 ]
+  [ "$output" = $'compiling\nno newline\nRUST_SDLC_EXIT=101' ]
+  [ ! -s "$BATS_TEST_TMPDIR/sleep.log" ]
+}
+
+@test "common-lib: wait_log: a still-running log with MAX 30 checks again after 30 s and prints WAITING (exit 1)" {
+  ch_service
+  ch_sleep_stub
+  printf 'Compiling invoice-domain\n' >target/rust-sdlc/logs/implement.log
+  run --separate-stderr "$LIB" wait_log target/rust-sdlc/logs/implement.log 30
+  [ "$status" -eq 1 ]
+  [ "$output" = $'Compiling invoice-domain\nWAITING: target/rust-sdlc/logs/implement.log (30s)' ]
+  [ "$(cat "$BATS_TEST_TMPDIR/sleep.log")" = 30 ]
+}
+
+@test "common-lib: wait_log: the default MAX is 110 s, checked every 30 s with a shortened last wait" {
+  ch_service
+  ch_sleep_stub
+  printf 'running\n' >target/rust-sdlc/logs/qa.log
+  run "$LIB" wait_log target/rust-sdlc/logs/qa.log
+  [ "$status" -eq 1 ]
+  [ "${lines[1]}" = 'WAITING: target/rust-sdlc/logs/qa.log (110s)' ]
+  [ "$(paste -sd ' ' "$BATS_TEST_TMPDIR/sleep.log")" = '30 30 30 20' ]
+  : >"$BATS_TEST_TMPDIR/sleep.log"
+  run "$LIB" wait_log target/rust-sdlc/logs/qa.log 45
+  [ "${lines[1]}" = 'WAITING: target/rust-sdlc/logs/qa.log (45s)' ]
+  [ "$(paste -sd ' ' "$BATS_TEST_TMPDIR/sleep.log")" = '30 15' ]
+  : >"$BATS_TEST_TMPDIR/sleep.log"
+  run "$LIB" wait_log target/rust-sdlc/logs/qa.log 060
+  [ "${lines[1]}" = 'WAITING: target/rust-sdlc/logs/qa.log (60s)' ]
+  [ "$(paste -sd ' ' "$BATS_TEST_TMPDIR/sleep.log")" = '30 30' ]
+  : >"$BATS_TEST_TMPDIR/sleep.log"
+  run "$LIB" wait_log target/rust-sdlc/logs/qa.log 540
+  [ "${lines[1]}" = 'WAITING: target/rust-sdlc/logs/qa.log (540s)' ]
+  [ "$(grep -c . "$BATS_TEST_TMPDIR/sleep.log")" -eq 18 ]
+}
+
+@test "common-lib: wait_log: a log that finishes during the wait exits 0 at the next check" {
+  ch_service
+  ch_sleep_stub "printf 'RUST_SDLC_EXIT=0\\n' >>'$CH_SVC/target/rust-sdlc/logs/implement.log'"
+  printf 'running\n' >target/rust-sdlc/logs/implement.log
+  run "$LIB" wait_log target/rust-sdlc/logs/implement.log
+  [ "$status" -eq 0 ]
+  [ "$output" = $'running\nRUST_SDLC_EXIT=0' ]
+  [ "$(cat "$BATS_TEST_TMPDIR/sleep.log")" = 30 ]
+}
+
+@test "common-lib: wait_log: a log not written yet counts as running; new-service logs and absolute paths are accepted" {
+  ch_service
+  ch_sleep_stub
+  run "$LIB" wait_log target/rust-sdlc/logs/absent.log 30
+  [ "$status" -eq 1 ]
+  [ "$output" = 'WAITING: target/rust-sdlc/logs/absent.log (30s)' ]
+  printf 'bootstrap done\nRUST_SDLC_EXIT=0\n' >target/rust-sdlc/new-service/bootstrap.log
+  run "$LIB" wait_log target/rust-sdlc/new-service/bootstrap.log
+  [ "$status" -eq 0 ]
+  [ "$output" = $'bootstrap done\nRUST_SDLC_EXIT=0' ]
+  mkdir -p target/rust-sdlc/logs/nested
+  printf 'RUST_SDLC_EXIT=0\n' >target/rust-sdlc/logs/nested/a.log
+  run wait_log "$CH_SVC/target/rust-sdlc/logs/nested/a.log"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'RUST_SDLC_EXIT=0' ]
+}
+
+@test "common-lib: wait_log: a log outside target/rust-sdlc/logs/ and target/rust-sdlc/new-service/ exits 2" {
+  local log
+  ch_service
+  ch_sleep_stub
+  printf 'secret\nRUST_SDLC_EXIT=0\n' >"$BATS_TEST_TMPDIR/outside.log"
+  cp "$BATS_TEST_TMPDIR/outside.log" target/rust-sdlc/tmp/x.log
+  cp "$BATS_TEST_TMPDIR/outside.log" target/rust-sdlc/x.log
+  ln -s "$BATS_TEST_TMPDIR/outside.log" target/rust-sdlc/logs/link.log
+  mkdir target/rust-sdlc/logs/dir.log
+  for log in "$BATS_TEST_TMPDIR/outside.log" /etc/hostname target/rust-sdlc/tmp/x.log \
+    target/rust-sdlc/x.log target/rust-sdlc/logs/../tmp/x.log target/rust-sdlc/logs/link.log \
+    target/rust-sdlc/logs target/rust-sdlc/logs/ target/rust-sdlc/logs/dir.log logs/x.log ''; do
+    run --separate-stderr "$LIB" wait_log "$log"
+    if [ "$status" -ne 2 ] || [ -n "$output" ]; then
+      printf '%s: status %s, output %s\n' "$log" "$status" "$output"
+      return 1
+    fi
+  done
+  # A linked logs directory leads outside as well.
+  rm -r target/rust-sdlc/logs
+  ln -s "$BATS_TEST_TMPDIR" target/rust-sdlc/logs
+  run --separate-stderr "$LIB" wait_log target/rust-sdlc/logs/outside.log
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  [ ! -s "$BATS_TEST_TMPDIR/sleep.log" ]
+}
+
+@test "common-lib: wait_log: MAX outside 30 to 540, a missing LOG and extra arguments exit 2" {
+  local max
+  ch_service
+  ch_sleep_stub
+  printf 'RUST_SDLC_EXIT=0\n' >target/rust-sdlc/logs/qa.log
+  for max in 29 541 0 abc '' -30 1e2 99999999999999999999; do
+    run --separate-stderr "$LIB" wait_log target/rust-sdlc/logs/qa.log "$max"
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+  done
+  run --separate-stderr "$LIB" wait_log
+  [ "$status" -eq 2 ]
+  run --separate-stderr "$LIB" wait_log target/rust-sdlc/logs/qa.log 30 extra
+  [ "$status" -eq 2 ]
+  [ ! -s "$BATS_TEST_TMPDIR/sleep.log" ]
+}
+
+# --- http_probe -----------------------------------------------------------------------------
+
+@test "common-lib: http_probe: GET goes to the profile's service.base_url with the exact curl argv" {
+  ch_repo
+  ch_profile "$CH_REPO"
+  cd "$CH_REPO"
+  run --separate-stderr "$LIB" http_probe GET /health
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  printf '%s\n' 'HTTP_STATUS: 200' 'HTTP/1.1 200 OK' 'content-type: application/json' \
+    'content-length: 16' '' '{"status":"ok"}' >"$BATS_TEST_TMPDIR/want"
+  printf '%s\n' "$output" | cmp - "$BATS_TEST_TMPDIR/want"
+  [ "$(cat "$STUB_CURL_LOG")" = 'curl --noproxy * --proto =http --max-time 10 -sS -i -X GET -- http://127.0.0.1:8081/health' ]
+  # Nothing is written: no temporary file, no file in the repository.
+  mkdir -p "$BATS_TEST_TMPDIR/tmpdir"
+  ch_capture_curl
+  TMPDIR="$BATS_TEST_TMPDIR/tmpdir" run "$LIB" http_probe GET /health
+  [ "$status" -eq 0 ]
+  printf '%s\n' --noproxy '*' --proto =http --max-time 10 -sS -i -X GET -- \
+    http://127.0.0.1:8081/health | cmp - "$CH_ARGV"
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/tmpdir")" ]
+  [ "$(git status --porcelain)" = '?? .claude/rust-sdlc.yml' ]
+  # The localhost form of service.base_url is accepted too.
+  ch_profile "$CH_REPO" "'http://localhost:18081'"
+  run "$LIB" http_probe OPTIONS /
+  [ "$status" -eq 0 ]
+  [ "$(tail -n 1 "$CH_ARGV")" = http://localhost:18081/ ]
+}
+
+@test "common-lib: http_probe: headers, --body on stdin and --body-file each take one argv slot" {
+  local m body i
+  ch_repo
+  ch_profile "$CH_REPO"
+  cd "$CH_REPO"
+  ch_capture_curl
+  body='{"number":"INV-1","note":"--output /etc/passwd -K x http://evil.example/"}'
+  run "$LIB" http_probe POST '/api/invoices?period=2026-11&fields=a,b' \
+    --header 'Content-Type: application/json' --header 'X-Request-Id: qa-1 -o /tmp/x' --body "$body"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'HTTP_STATUS: 204\nHTTP/1.1 204 No Content' ]
+  printf '%s\n' --noproxy '*' --proto =http --max-time 10 -sS -i -X POST \
+    -H 'Content-Type: application/json' -H 'X-Request-Id: qa-1 -o /tmp/x' --data-binary @- -- \
+    'http://127.0.0.1:8081/api/invoices?period=2026-11&fields=a,b' | cmp - "$CH_ARGV"
+  printf '%s' "$body" | cmp - "$CH_STDIN"
+  mkdir -p target/rust-sdlc/tmp
+  printf '{"a":1}' >target/rust-sdlc/tmp/body.json
+  run "$LIB" http_probe PUT /api/x --body-file target/rust-sdlc/tmp/body.json
+  [ "$status" -eq 0 ]
+  printf '%s\n' --noproxy '*' --proto =http --max-time 10 -sS -i -X PUT \
+    --data-binary @target/rust-sdlc/tmp/body.json -- http://127.0.0.1:8081/api/x | cmp - "$CH_ARGV"
+  [ ! -s "$CH_STDIN" ]
+  # A 16 KiB body and 10 headers are the limits, both accepted.
+  run "$LIB" http_probe PATCH /api/x --body "$(head -c 16384 /dev/zero | tr '\0' a)"
+  [ "$status" -eq 0 ]
+  [ "$(wc -c <"$CH_STDIN")" -eq 16384 ]
+  set --
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    set -- "$@" --header "X-H$i: $i"
+  done
+  run "$LIB" http_probe GET /health "$@"
+  [ "$status" -eq 0 ]
+  [ "$(grep -cx -- -H "$CH_ARGV")" -eq 10 ]
+  for m in GET HEAD POST PUT PATCH DELETE OPTIONS; do
+    run "$LIB" http_probe "$m" /
+    [ "$status" -eq 0 ]
+    [ "$(sed -n 10p "$CH_ARGV")" = "$m" ]
+  done
+}
+
+@test "common-lib: http_probe: prints HTTP_STATUS, the headers and at most 64 KiB of body; 1xx skipped, any status exits 0" {
+  local out="$BATS_TEST_TMPDIR/out" err="$BATS_TEST_TMPDIR/err" big head
+  ch_repo
+  ch_profile "$CH_REPO"
+  cd "$CH_REPO"
+  STUB_CURL_OUTPUT=$'HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 422 Unprocessable Entity\r\ncontent-type: application/problem+json\r\nx-request-id: r-1\r\n\r\n{"title":"invalid"}' \
+    run "$LIB" http_probe POST /api/invoices --body '{}'
+  [ "$status" -eq 0 ]
+  [ "$output" = $'HTTP_STATUS: 422\nHTTP/1.1 422 Unprocessable Entity\ncontent-type: application/problem+json\nx-request-id: r-1\n\n{"title":"invalid"}' ]
+  STUB_CURL_OUTPUT=$'HTTP/1.1 500 Internal Server Error\nx-a: \033b\n\nboom\x01\ttab' run "$LIB" http_probe GET /boom
+  [ "$status" -eq 0 ]
+  [ "$output" = $'HTTP_STATUS: 500\nHTTP/1.1 500 Internal Server Error\nx-a: b\n\nboom\ttab' ]
+  big="$(head -c 71680 /dev/zero | tr '\0' a)"
+  STUB_CURL_OUTPUT=$'HTTP/1.1 200 OK\r\n\r\n'"$big" "$LIB" http_probe GET /big >"$out" 2>"$err"
+  head=$'HTTP_STATUS: 200\nHTTP/1.1 200 OK\n\n'
+  [ "$(wc -c <"$out")" -eq $((${#head} + 65536 + 1)) ]
+  [ "$(head -c "${#head}" "$out")" = "${head%$'\n\n'}" ]
+  grep -qF '[rust-sdlc][WARN] http_probe: body truncated to 65536 of 71681 bytes' "$err"
+}
+
+@test "common-lib: http_probe: a transport failure exits 1 with no output; HEAD keeps a complete header block" {
+  ch_repo
+  ch_profile "$CH_REPO"
+  cd "$CH_REPO"
+  STUB_CURL_EXIT=7 run --separate-stderr "$LIB" http_probe GET /health
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *'http_probe: transport failure for GET http://127.0.0.1:8081/health (curl exit 7): curl: (7)'* ]]
+  STUB_CURL_OUTPUT='not http' run --separate-stderr "$LIB" http_probe GET /health
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  # curl -X HEAD keeps waiting for a body after the headers (exit 18 or 28):
+  # a complete header block is the response for HEAD, never for another method.
+  STUB_CURL_EXIT=28 STUB_CURL_OUTPUT=$'HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\n' \
+    run --separate-stderr "$LIB" http_probe HEAD /health
+  [ "$status" -eq 0 ]
+  [ "$output" = $'HTTP_STATUS: 200\nHTTP/1.1 200 OK\ncontent-length: 5' ]
+  STUB_CURL_EXIT=18 STUB_CURL_OUTPUT=$'HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\n' \
+    run --separate-stderr "$LIB" http_probe HEAD /health
+  [ "$status" -eq 0 ]
+  STUB_CURL_EXIT=28 STUB_CURL_OUTPUT=$'HTTP/1.1 200 OK\r\ncontent-length: 5\r\n\r\n' \
+    run --separate-stderr "$LIB" http_probe GET /health
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  STUB_CURL_EXIT=28 STUB_CURL_OUTPUT=$'HTTP/1.1 200 OK\r\ncontent-' \
+    run --separate-stderr "$LIB" http_probe HEAD /health
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "common-lib: http_probe: a rejected METHOD, PATH, header, body or argument exits 2 and never calls curl" {
+  local i m p
+  ch_repo
+  ch_profile "$CH_REPO"
+  cd "$CH_REPO"
+  mkdir -p target/rust-sdlc/tmp target/rust-sdlc/logs
+  printf 'x' >target/rust-sdlc/logs/body.json
+  printf 'x' >"$BATS_TEST_TMPDIR/secret"
+  ln -s "$BATS_TEST_TMPDIR/secret" target/rust-sdlc/tmp/link.json
+  mkdir target/rust-sdlc/tmp/dir.json
+  for m in get TRACE CONNECT 'GET ' ''; do
+    ch_rejects "$m" /health
+  done
+  for p in health '/a b' '/x#frag' '/x@evil.example' 'http://evil.example/' $'/x\n' $'/x\r' \
+    $'/caf\xc3\xa9' '/[a]' '/{a,b}' '/x"' "/x'" '/x\y' ''; do
+    ch_rejects GET "$p"
+  done
+  set --
+  for i in 1 2 3 4 5 6 7 8 9 10 11; do
+    set -- "$@" --header "X-H$i: $i"
+  done
+  ch_rejects GET /health "$@"
+  ch_rejects GET /health --header $'X-A: b\r'
+  ch_rejects GET /health --header $'X-A: b\r\nX-B: c'
+  ch_rejects GET /health --header $'X-A: b\nHost: evil.example'
+  ch_rejects GET /health --header NoColon
+  ch_rejects GET /health --header ': no-name'
+  ch_rejects GET /health --header 'X A: b'
+  ch_rejects GET /health --header '@/etc/passwd'
+  ch_rejects GET /health --header $'X-A: caf\xc3\xa9'
+  ch_rejects GET /health --header $'X-A: tab\there'
+  ch_rejects POST /health --body "$(head -c 16385 /dev/zero | tr '\0' a)"
+  ch_rejects POST /health --body a --body b
+  ch_rejects POST /health --body a --body-file target/rust-sdlc/tmp/dir.json
+  ch_rejects POST /health --body-file /etc/hostname
+  ch_rejects POST /health --body-file "$BATS_TEST_TMPDIR/secret"
+  ch_rejects POST /health --body-file target/rust-sdlc/logs/body.json
+  ch_rejects POST /health --body-file target/rust-sdlc/tmp/../logs/body.json
+  ch_rejects POST /health --body-file target/rust-sdlc/tmp/link.json
+  ch_rejects POST /health --body-file target/rust-sdlc/tmp/absent.json
+  ch_rejects POST /health --body-file target/rust-sdlc/tmp/dir.json
+  ch_rejects POST /health --body-file -
+  ch_rejects GET /health http://evil.example/
+  ch_rejects GET /health -- http://evil.example/
+  ch_rejects GET /health --output /tmp/x
+  ch_rejects GET /health -o /tmp/x
+  ch_rejects GET /health -K /tmp/config
+  ch_rejects GET /health --url http://evil.example/
+  ch_rejects GET /health --header
+  ch_rejects GET /health --body
+  ch_rejects GET /health --body-file
+  ch_rejects GET
+  ch_rejects
+  [ ! -s "$STUB_CURL_LOG" ]
+}
+
+@test "common-lib: http_probe: only a loopback service.base_url is accepted; the profile holds no other key" {
+  local v
+  ch_repo
+  cd "$CH_REPO"
+  run --separate-stderr "$LIB" http_probe GET /health
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *'no profile'* ]]
+  for v in "'https://127.0.0.1:8081'" "'http://example.com:80'" "'http://127.0.0.1'" \
+    "'http://127.0.0.1:8081/'" "'http://127.0.0.1:0'" "'http://127.0.0.1:65536'" \
+    "'http://user@127.0.0.1:8081'" "'http://127.0.0.1:8081 http://evil.example'" "'http://127.0.0.2:8081'" \
+    null "[a, b]" "{a: b}"; do
+    ch_profile "$CH_REPO" "$v"
+    run --separate-stderr "$LIB" http_probe GET /health
+    if [ "$status" -ne 1 ] || [ -n "$output" ]; then
+      printf '%s: status %s, output %s\n' "$v" "$status" "$output"
+      return 1
+    fi
+  done
+  printf 'schema_version: 1\nservice:\n  port: 8081\n' >"$CH_REPO/.claude/rust-sdlc.yml"
+  run --separate-stderr "$LIB" http_probe GET /health
+  [ "$status" -eq 1 ]
+  [ ! -s "$STUB_CURL_LOG" ]
+  # The minimal profile has none of the keys validate-profile.sh requires,
+  # and http_probe never runs it.
+  ch_profile "$CH_REPO" "'http://127.0.0.1:65535'"
+  run "$LIB" http_probe GET /health
+  [ "$status" -eq 0 ]
+  grep -qF -- '-- http://127.0.0.1:65535/health' "$STUB_CURL_LOG"
+  run bash -c 'source "$1"; declare -f http_probe _ch_http_exchange' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *validate-profile* ]]
+}
+
+# --- protected_changes (ADR-25) ---------------------------------------------------------------
+
+@test "common-lib: protected_changes: no change since the base exits 0 with no output" {
+  local base
+  ch_repo
+  cd "$CH_REPO"
+  base="$(git rev-parse HEAD)"
+  run --separate-stderr "$LIB" protected_changes "$base"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ -z "$stderr" ]
+  # Unprotected changes (committed, staged, untracked) and ignored files do not count.
+  printf '\nmore\n' >>README.md
+  ch_commit "$CH_REPO" 'docs: more'
+  printf 'x\n' >crates/service/notes.txt
+  printf 'y\n' >>docs/make-targets.md
+  git add docs/make-targets.md
+  mkdir -p target/rust-sdlc/tmp
+  printf 'feat(#1): x\n' >target/rust-sdlc/tmp/commit-1.txt
+  run --separate-stderr "$LIB" protected_changes "$base"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  run protected_changes HEAD
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "common-lib: protected_changes: a protected file changed in a commit, in the working tree or untracked below a protected directory" {
+  local base sha
+  ch_repo
+  cd "$CH_REPO"
+  base="$(git rev-parse HEAD)"
+  printf '# relaxed\n' >>clippy.toml
+  ch_commit "$CH_REPO" 'chore: relax clippy'
+  sha="$(git log -1 --format=%h --abbrev=7)"
+  printf 'docs\n' >>README.md
+  ch_commit "$CH_REPO" 'docs: later commit'
+  printf '# x\n' >>deny.toml
+  mkdir -p xtask/tests
+  printf 'fn main() {}\n' >xtask/tests/arch_fixture.rs
+  run --separate-stderr "$LIB" protected_changes "$base"
+  [ "$status" -eq 1 ]
+  [ -z "$stderr" ]
+  printf '%s\n' "PROTECTED: clippy.toml ($sha)" 'PROTECTED: deny.toml (working tree)' \
+    'PROTECTED: xtask/tests/arch_fixture.rs (working tree)' >"$BATS_TEST_TMPDIR/want"
+  printf '%s\n' "$output" | cmp - "$BATS_TEST_TMPDIR/want"
+  # A deletion, a rename (both paths) and a change that is only staged count too.
+  git checkout -q -- deny.toml
+  rm xtask/tests/arch_fixture.rs
+  git mv architecture.toml architecture.old.toml
+  git rm -q -- rust-toolchain.toml
+  run "$LIB" protected_changes "$base"
+  [ "$status" -eq 1 ]
+  printf '%s\n' 'PROTECTED: architecture.toml (working tree)' "PROTECTED: clippy.toml ($sha)" \
+    'PROTECTED: rust-toolchain.toml (working tree)' >"$BATS_TEST_TMPDIR/want"
+  printf '%s\n' "$output" | cmp - "$BATS_TEST_TMPDIR/want"
+  # A committed change that the working tree reverts is no change.
+  git reset -q --hard
+  git show "$base:clippy.toml" >clippy.toml
+  run "$LIB" protected_changes "$base"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "common-lib: protected_changes: the list is read at the base, so a dropped entry is still reported" {
+  local base sha
+  ch_repo
+  cd "$CH_REPO"
+  base="$(git rev-parse HEAD)"
+  grep -vxF '    "clippy.toml",' protected-config.toml >"$BATS_TEST_TMPDIR/list"
+  cat "$BATS_TEST_TMPDIR/list" >protected-config.toml
+  printf '# relaxed\n' >>clippy.toml
+  ch_commit "$CH_REPO" 'chore: unprotect clippy'
+  sha="$(git log -1 --format=%h --abbrev=7)"
+  run "$LIB" protected_changes "$base"
+  [ "$status" -eq 1 ]
+  [ "$output" = "PROTECTED: clippy.toml ($sha)"$'\n'"PROTECTED: protected-config.toml ($sha)" ]
+}
+
+@test "common-lib: protected_changes: a profile present at the base that differs now prints PROFILE_CHANGED" {
+  local base
+  ch_repo
+  ch_profile "$CH_REPO"
+  ch_commit "$CH_REPO" 'chore: add profile'
+  cd "$CH_REPO"
+  base="$(git rev-parse HEAD)"
+  printf 'make:\n  complexity: format\n' >>.claude/rust-sdlc.yml
+  run --separate-stderr "$LIB" protected_changes "$base"
+  [ "$status" -eq 1 ]
+  [ "$output" = 'PROFILE_CHANGED: .claude/rust-sdlc.yml' ]
+  ch_commit "$CH_REPO" 'chore: remap a gate key'
+  run "$LIB" protected_changes "$base"
+  [ "$status" -eq 1 ]
+  [ "$output" = 'PROFILE_CHANGED: .claude/rust-sdlc.yml' ]
+  git rm -q .claude/rust-sdlc.yml
+  run "$LIB" protected_changes "$base"
+  [ "$status" -eq 1 ]
+  [ "$output" = 'PROFILE_CHANGED: .claude/rust-sdlc.yml' ]
+  ch_profile "$CH_REPO"
+  run "$LIB" protected_changes "$base"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "common-lib: protected_changes: a profile absent at the base is exempt" {
+  local base
+  ch_repo
+  cd "$CH_REPO"
+  base="$(git rev-parse HEAD)"
+  ch_profile "$CH_REPO"
+  run --separate-stderr "$LIB" protected_changes "$base"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  ch_commit "$CH_REPO" 'chore(#1): add rust-backend-sdlc profile and governance'
+  run --separate-stderr "$LIB" protected_changes "$base"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "common-lib: protected_changes: without protected-config.toml prints INFO and checks the profile only" {
+  local base
+  ch_repo
+  cd "$CH_REPO"
+  git rm -q protected-config.toml
+  ch_profile "$CH_REPO"
+  ch_commit "$CH_REPO" 'chore: drop the protected list'
+  base="$(git rev-parse HEAD)"
+  printf '# relaxed\n' >>clippy.toml
+  run --separate-stderr "$LIB" protected_changes "$base"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'INFO: no protected-config.toml' ]
+  printf 'review:\n  reviewers: []\n' >>.claude/rust-sdlc.yml
+  run --separate-stderr "$LIB" protected_changes "$base"
+  [ "$status" -eq 1 ]
+  [ "$output" = $'INFO: no protected-config.toml\nPROFILE_CHANGED: .claude/rust-sdlc.yml' ]
+}
+
+@test "common-lib: protected_changes: a missing, extra, option-like or unknown BASE_SHA exits 2" {
+  local arg
+  ch_repo
+  cd "$CH_REPO"
+  run --separate-stderr "$LIB" protected_changes
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  run --separate-stderr "$LIB" protected_changes HEAD HEAD
+  [ "$status" -eq 2 ]
+  for arg in "--output=$BATS_TEST_TMPDIR/diff.out" -p '' not-a-ref \
+    0000000000000000000000000000000000000000 "$(git rev-parse 'HEAD^{tree}')"; do
+    run --separate-stderr "$LIB" protected_changes "$arg"
+    [ "$status" -eq 2 ]
+    [ -z "$output" ]
+  done
+  [ ! -e "$BATS_TEST_TMPDIR/diff.out" ]
+  mkdir -p "$BATS_TEST_TMPDIR/plain"
+  cd "$BATS_TEST_TMPDIR/plain"
+  GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" run --separate-stderr "$LIB" protected_changes HEAD
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *'not inside a git work tree'* ]]
+}
+
+# --- validate_context_name (FR-14, AC-14.1) ---------------------------------------------------
+
+@test "common-lib: validate_context_name: refuses every name of the AC-14.1 list with exactly one REFUSED line" {
+  local entry group context rule
+  ch_repo
+  for entry in 'Billing ledger name-format' 'billing Ledger name-format' '1billing ledger name-format' \
+    'billing 2ledger name-format' 'billing- ledger name-format' 'billing ledger- name-format' \
+    'bill--ing ledger name-format' 'billing led--ger name-format' 'billing shared reserved-context' \
+    'billing service reserved-context' 'billing xtask reserved-context' \
+    'billing test-support reserved-context' 'billing e2e-tests reserved-context' \
+    'billing invoice context-exists' 'sales invoice context-exists' 'sales internal context-exists' \
+    'billing health-check context-exists' 'sales billing context-exists'; do
+    read -r group context rule <<<"$entry"
+    run --separate-stderr "$LIB" validate_context_name "$group" "$context" "$CH_REPO"
+    if [ "$status" -ne 1 ] || [ "${#lines[@]}" -ne 1 ] || [[ "${lines[0]}" != "REFUSED: $rule "* ]]; then
+      printf '%s/%s: status %s, output %s\n' "$group" "$context" "$status" "$output"
+      return 1
+    fi
+  done
+  run "$LIB" validate_context_name Billing ledger "$CH_REPO"
+  [ "$output" = "REFUSED: name-format group 'Billing' does not match ^[a-z][a-z0-9]*(-[a-z0-9]+)*\$" ]
+  run "$LIB" validate_context_name billing led--ger "$CH_REPO"
+  [ "$output" = "REFUSED: name-format context 'led--ger' does not match ^[a-z][a-z0-9]*(-[a-z0-9]+)*\$" ]
+  run "$LIB" validate_context_name billing shared "$CH_REPO"
+  [ "$output" = "REFUSED: reserved-context 'shared' is reserved (shared service xtask test-support e2e-tests)" ]
+  run "$LIB" validate_context_name sales invoice "$CH_REPO"
+  [ "$output" = "REFUSED: context-exists 'invoice' already exists at crates/billing/invoice" ]
+  run "$LIB" validate_context_name sales internal "$CH_REPO"
+  [ "$output" = "REFUSED: context-exists 'internal' already exists at crates/internal" ]
+  run "$LIB" validate_context_name billing health-check "$CH_REPO"
+  [ "$output" = "REFUSED: context-exists 'health-check' already exists at crates/internal/health-check" ]
+}
+
+@test "common-lib: validate_context_name: accepts valid names, including the reserved word service as a group" {
+  local pair
+  ch_repo
+  for pair in service/ledger sales/ledger billing/invoice-export payments/refund-request a1/b2 \
+    shared/ledger-v2 xtask/audit; do
+    run --separate-stderr "$LIB" validate_context_name "${pair%/*}" "${pair#*/}" "$CH_REPO"
+    if [ "$status" -ne 0 ] || [ -n "$output" ] || [ -n "$stderr" ]; then
+      printf '%s: status %s, output %s %s\n' "$pair" "$status" "$output" "$stderr"
+      return 1
+    fi
+  done
+  cd "$CH_REPO"
+  run validate_context_name service ledger
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "common-lib: validate_context_name: a member package <c>-domain at a non-standard path and a member ending <c>/<layer> are refused" {
+  ch_repo
+  ch_add_member "$CH_REPO" libs/payments-core payments-domain
+  run --separate-stderr "$LIB" validate_context_name sales payments "$CH_REPO"
+  [ "$status" -eq 1 ]
+  [ "$output" = "REFUSED: member-exists 'payments' is already a workspace member: libs/payments-core (package payments-domain)" ]
+  ch_add_member "$CH_REPO" modules/ledger/infrastructure ledger-store
+  run --separate-stderr "$LIB" validate_context_name sales ledger "$CH_REPO"
+  [ "$status" -eq 1 ]
+  [ "$output" = "REFUSED: member-exists 'ledger' is already a workspace member: modules/ledger/infrastructure" ]
+  # Only whole path components and exact package names match.
+  ch_add_member "$CH_REPO" modules/myrefund/domain refund-domains
+  run --separate-stderr "$LIB" validate_context_name sales refund "$CH_REPO"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "common-lib: validate_context_name: reads the live tree, never a stale profile" {
+  ch_repo
+  ch_profile "$CH_REPO"
+  printf '%s\n' 'architecture:' '  bounded_contexts:' '    - billing/ghost' >>"$CH_REPO/.claude/rust-sdlc.yml"
+  # A context added after the profile was generated, and one the profile never listed.
+  ch_add_member "$CH_REPO" crates/sales/ledger/domain ledger-domain
+  run --separate-stderr "$LIB" validate_context_name sales ledger "$CH_REPO"
+  [ "$status" -eq 1 ]
+  [ "$output" = "REFUSED: context-exists 'ledger' already exists at crates/sales/ledger" ]
+  run --separate-stderr "$LIB" validate_context_name billing invoice "$CH_REPO"
+  [ "$status" -eq 1 ]
+  [[ "$output" == "REFUSED: context-exists 'invoice' "* ]]
+  # A context only the stale profile names is free.
+  run --separate-stderr "$LIB" validate_context_name billing ghost "$CH_REPO"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "common-lib: validate_context_name: usage errors and a ROOT without Cargo.toml exit 2" {
+  mkdir -p "$BATS_TEST_TMPDIR/empty"
+  run --separate-stderr "$LIB" validate_context_name billing
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  run --separate-stderr "$LIB" validate_context_name a b c d
+  [ "$status" -eq 2 ]
+  run --separate-stderr "$LIB" validate_context_name sales ledger "$BATS_TEST_TMPDIR/empty"
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *'no readable Cargo.toml'* ]]
+  # The name rules come first and need no tree.
+  run --separate-stderr "$LIB" validate_context_name Sales ledger "$BATS_TEST_TMPDIR/empty"
+  [ "$status" -eq 1 ]
+  [[ "$output" == 'REFUSED: name-format '* ]]
+}

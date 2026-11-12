@@ -1205,6 +1205,676 @@ _sdlc_dispatch() {
   exit "$?"
 }
 
+# section: command helpers
+
+# Dispatcher functions that commands and agents call through the plugin-root
+# allow entry (ADR-15): issue derivation and commit message files (FR-2,
+# ADR-27), hook status (Git rules), log polling (ADR-13), loopback HTTP probes,
+# protected-change detection (ADR-25) and context-name validation (FR-14).
+# Each validates its arguments (exit 2 on a malformed one, ADR-23), writes only
+# under target/rust-sdlc/ and never writes git configuration.
+
+# --- private helpers -----------------------------------------------------------------
+
+# _ch_clean TEXT — TEXT without ASCII control characters (no newline added).
+_ch_clean() {
+  printf '%s' "${1-}" | LC_ALL=C tr -d '\000-\037\177'
+}
+
+# _ch_printable TEXT — 0 when TEXT holds printable ASCII only (0x20 to 0x7e),
+# counted in bytes, so a CR, a newline or a non-ASCII byte never passes.
+_ch_printable() {
+  local rest
+  rest="$(printf '%s' "${1-}" | LC_ALL=C tr -d ' -~' | LC_ALL=C wc -c)" || return 1
+  [[ "${rest//[[:space:]]/}" == 0 ]]
+}
+
+# _ch_bytes TEXT — the byte length of TEXT.
+_ch_bytes() {
+  local n
+  n="$(printf '%s' "${1-}" | LC_ALL=C wc -c)" || return 1
+  printf '%s\n' "${n//[[:space:]]/}"
+}
+
+# _ch_resolved_under PATH DIR... — 0 when the real path of PATH lies below
+# <real working directory>/DIR for one DIR. The DIRs are joined to the working
+# directory without following links, so a link inside them (or a linked
+# `target`) never leads outside; PATH need not exist.
+_ch_resolved_under() {
+  _sdlc_py -c '
+import os
+import sys
+
+real = os.path.realpath(sys.argv[1])
+cwd = os.path.realpath(os.getcwd())
+for name in sys.argv[2:]:
+    if real.startswith(os.path.join(cwd, name).rstrip(os.sep) + os.sep):
+        sys.exit(0)
+sys.exit(1)
+' "$@"
+}
+
+# _ch_issue N — print N without leading zeros; 1 (no output) when N is 0.
+_ch_issue() {
+  local n
+  n="$(strip_zeros "${1-}")"
+  [[ "$n" != 0 ]] || return 1
+  printf '%s\n' "$n"
+}
+
+# --- issue number and commit message file (FR-2, ADR-27) -------------------------------
+
+# derive_issue_number [--handle N] [--title T] [--branch B] [--body TEXT] —
+# the issue number of the first source that yields one, in this order: the
+# handle (^[1-9][0-9]*$), the PR title (^[a-z]+\(#([0-9]+)\):), the branch
+# (^[a-z]+/([0-9]+)-) and the PR body ((^|[^A-Za-z])Closes #([0-9]+)). An
+# empty or non-matching source yields nothing; a captured number is printed
+# without leading zeros and a captured 0 yields nothing. A PR number is never
+# an input (Git rules). Returns 1 with no output when no source yields a
+# number, 2 on a usage error.
+derive_issue_number() {
+  local handle="" title="" branch="" body=""
+  local re_title='^[a-z]+\(#([0-9]+)\):' re_branch='^[a-z]+/([0-9]+)-'
+  local re_body='(^|[^A-Za-z])Closes #([0-9]+)'
+  while (($#)); do
+    case "$1" in
+      --handle | --title | --branch | --body)
+        if (($# < 2)); then
+          log_error "derive_issue_number: $1 needs a value"
+          return 2
+        fi
+        case "$1" in
+          --handle) handle="$2" ;;
+          --title) title="$2" ;;
+          --branch) branch="$2" ;;
+          *) body="$2" ;;
+        esac
+        shift 2
+        ;;
+      *)
+        log_error "derive_issue_number: unknown argument: $(_ch_clean "$1") (usage: derive_issue_number [--handle N] [--title T] [--branch B] [--body TEXT])"
+        return 2
+        ;;
+    esac
+  done
+  if [[ "$handle" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "$handle"
+    return 0
+  fi
+  if [[ "$title" =~ $re_title ]] && _ch_issue "${BASH_REMATCH[1]}"; then
+    return 0
+  fi
+  if [[ "$branch" =~ $re_branch ]] && _ch_issue "${BASH_REMATCH[1]}"; then
+    return 0
+  fi
+  if [[ "$body" =~ $re_body ]] && _ch_issue "${BASH_REMATCH[2]}"; then
+    return 0
+  fi
+  return 1
+}
+
+# commit_msg_file SUBJECT — validates SUBJECT with is_commit_subject (else exit
+# 1, nothing written), writes SUBJECT plus a newline atomically to
+# target/rust-sdlc/tmp/commit-<utc_stamp>.txt below the working directory (the
+# repository root) and prints that relative path for `git commit -F <path>`.
+# More than one argument exits 2.
+commit_msg_file() {
+  local subject="${1-}" path stamp
+  if (($# > 1)); then
+    log_error "commit_msg_file: expected one SUBJECT argument, got $# (usage: commit_msg_file SUBJECT)"
+    return 2
+  fi
+  if ! is_commit_subject "$subject"; then
+    log_error "commit_msg_file: not a commit subject of the form <type>(#<N>): <subject>: $(_ch_clean "$subject")"
+    return 1
+  fi
+  stamp="$(utc_stamp)" || return 1
+  path="target/rust-sdlc/tmp/commit-$stamp.txt"
+  safe_write_target "$path" "$PWD" || return 1
+  printf '%s\n' "$subject" | atomic_write "$path" || return 1
+  printf '%s\n' "$path"
+}
+
+# --- hook status (Git rules) -----------------------------------------------------------
+
+# hooks_active [DIR] — reads `git config --local --get core.hooksPath` in DIR
+# (default .) and prints one line: `HOOKS: active` (exit 0) when the value is
+# exactly `.githooks` and .githooks/commit-msg, .githooks/pre-commit and
+# .githooks/pre-push of the work tree root are executable files; otherwise
+# `HOOKS: unset` (no local value; a global-only value is unset), `HOOKS:
+# foreign <value>` or `HOOKS: missing <file>`, each exit 1. Reads only; DIR
+# that is not a directory or not in a git work tree exits 2.
+hooks_active() {
+  local dir="${1:-.}" top value="" rc=0 hook shown
+  if (($# > 1)); then
+    log_error "hooks_active: too many arguments (usage: hooks_active [DIR])"
+    return 2
+  fi
+  if [[ ! -d "$dir" ]]; then
+    log_error "hooks_active: no such directory: $(_ch_clean "$dir")"
+    return 2
+  fi
+  if ! top="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || [[ -z "$top" ]]; then
+    log_error "hooks_active: not inside a git work tree: $(_ch_clean "$dir")"
+    return 2
+  fi
+  value="$(git -C "$dir" config --local --get core.hooksPath 2>/dev/null)" || rc=$?
+  if ((rc != 0)); then
+    printf 'HOOKS: unset\n'
+    return 1
+  fi
+  if [[ "$value" != .githooks ]]; then
+    shown="$(_ch_clean "$value")"
+    printf 'HOOKS: foreign %s\n' "${shown:-"''"}"
+    return 1
+  fi
+  for hook in commit-msg pre-commit pre-push; do
+    if [[ ! -f "$top/.githooks/$hook" || ! -x "$top/.githooks/$hook" ]]; then
+      printf 'HOOKS: missing .githooks/%s\n' "$hook"
+      return 1
+    fi
+  done
+  printf 'HOOKS: active\n'
+}
+
+# --- background log polling (ADR-13) ---------------------------------------------------
+
+# _ch_log_finished LOG — 0 when the last line of LOG ends with
+# RUST_SDLC_EXIT=<n> (control characters ignored).
+_ch_log_finished() {
+  local last
+  [[ -f "$1" ]] || return 1
+  last="$(tail -n 1 -- "$1" 2>/dev/null | LC_ALL=C tr -d '\000-\011\013-\037\177')" || return 1
+  [[ "$last" =~ RUST_SDLC_EXIT=[0-9]+$ ]]
+}
+
+# _ch_log_report LOG ELAPSED — the last 40 lines of LOG without control
+# characters, then the status line: RUST_SDLC_EXIT=<n> (return 0; the log's own
+# last line, split off when the command's output lacked a final newline) or
+# `WAITING: <log> (<elapsed>s)` (return 1).
+_ch_log_report() {
+  local log="$1" elapsed="$2" text="" last body code
+  if [[ -f "$log" ]]; then
+    text="$(tail -n 40 -- "$log" 2>/dev/null | LC_ALL=C tr -d '\000-\011\013-\037\177')" || text=""
+  fi
+  last="${text##*$'\n'}"
+  if [[ "$last" =~ RUST_SDLC_EXIT=([0-9]+)$ ]]; then
+    code="${BASH_REMATCH[1]}"
+    body="${text%"RUST_SDLC_EXIT=$code"}"
+    body="${body%$'\n'}"
+    if [[ -n "$body" ]]; then
+      printf '%s\n' "$body"
+    fi
+    printf 'RUST_SDLC_EXIT=%s\n' "$code"
+    return 0
+  fi
+  if [[ -n "$text" ]]; then
+    printf '%s\n' "$text"
+  fi
+  printf 'WAITING: %s (%ss)\n' "$(_ch_clean "$log")" "$elapsed"
+  return 1
+}
+
+# wait_log LOG [MAX_SECONDS] — waits for a background command's log (the
+# ADR-13 wrapper ends it with RUST_SDLC_EXIT=<n>). LOG must resolve below
+# target/rust-sdlc/logs/ or target/rust-sdlc/new-service/ of the working
+# directory and MAX_SECONDS must be 30 to 540 (default 110), else exit 2. The
+# last line is checked at once and then every 30 s (the final wait is
+# shortened to end at MAX); the output is the last 40 lines (control
+# characters stripped) ending with RUST_SDLC_EXIT=<n> (exit 0) or followed by
+# `WAITING: <log> (<elapsed>s)` (exit 1). A LOG not written yet counts as
+# running.
+wait_log() {
+  local log="${1-}" max="${2-110}" elapsed=0 step
+  if (($# < 1 || $# > 2)) || [[ -z "$log" ]]; then
+    log_error "wait_log: needs LOG (usage: wait_log LOG [MAX_SECONDS])"
+    return 2
+  fi
+  if ! is_uint "$max" || num_lt "$max" 30 || num_gt "$max" 540; then
+    log_error "wait_log: MAX_SECONDS must be an integer from 30 to 540: $(_ch_clean "$max")"
+    return 2
+  fi
+  max="$(strip_zeros "$max")"
+  if ! _ch_resolved_under "$log" target/rust-sdlc/logs target/rust-sdlc/new-service; then
+    log_error "wait_log: $(_ch_clean "$log") is not below target/rust-sdlc/logs/ or target/rust-sdlc/new-service/"
+    return 2
+  fi
+  if [[ -e "$log" && ! -f "$log" ]]; then
+    log_error "wait_log: $(_ch_clean "$log") is not a regular file"
+    return 2
+  fi
+  while ! _ch_log_finished "$log" && num_lt "$elapsed" "$max"; do
+    step=30
+    if ((max - elapsed < step)); then
+      step=$((max - elapsed))
+    fi
+    sleep "$step"
+    elapsed=$((elapsed + step))
+  done
+  _ch_log_report "$log" "$elapsed"
+}
+
+# --- loopback HTTP probe ---------------------------------------------------------------
+
+# _ch_http_exchange METHOD FEED CURL_ARGV... — runs CURL_ARGV (stdin passed
+# through when FEED is `stdin`, else /dev/null) and renders its `-i` output
+# from the pipe, so nothing is written to disk: `HTTP_STATUS: <code>`, the
+# header lines of the final (non-1xx) response without control characters, a
+# blank line and at most 65536 bytes of body (control characters other than
+# tab and newline stripped; a truncation is logged). Without a response (a
+# non-zero curl status, or no status line) it logs the transport failure with
+# curl's first stderr line and exits 1. For HEAD a complete header block is
+# the response even when curl then waits for a body that never comes
+# (statuses 18 and 28: `-X HEAD` keeps curl reading).
+_ch_http_exchange() {
+  _sdlc_py -c '
+import re
+import subprocess
+import sys
+
+method, feed, argv = sys.argv[1], sys.argv[2], sys.argv[3:]
+LIMIT = 65536
+CTRL = re.compile(rb"[\x00-\x1f\x7f]")
+
+
+def failure(status, detail):
+    detail = CTRL.sub(b"", detail.strip().split(b"\n")[0]).decode("utf-8", "replace")
+    sys.stderr.write("[rust-sdlc][ERROR] http_probe: transport failure for %s %s (curl exit %s)%s\n"
+                     % (method, argv[-1], status, ": " + detail if detail else ""))
+    sys.exit(1)
+
+
+try:
+    proc = subprocess.run(argv, stdin=sys.stdin if feed == "stdin" else subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+except OSError as exc:
+    failure("-", str(exc).encode())
+data, status = proc.stdout, proc.returncode
+STATUS = re.compile(rb"HTTP/[0-9.]+ ([0-9]{3})(?:[ \t]|\Z)")
+BLANK = re.compile(rb"\r?\n\r?\n")
+pos = 0
+while True:
+    end = BLANK.search(data, pos)
+    head = data[pos:end.start()] if end else data[pos:]
+    lines = [line.rstrip(b"\r") for line in head.split(b"\n")]
+    match = STATUS.match(lines[0])
+    if not match:
+        failure(status, proc.stderr or b"no HTTP status line in the reply")
+    code = int(match.group(1))
+    if end and 100 <= code < 200 and code != 101:
+        pos = end.end()
+        continue
+    break
+if status != 0 and not (method == "HEAD" and status in (18, 28) and end is not None):
+    failure(status, proc.stderr)
+body = data[end.end():] if end else b""
+if len(body) > LIMIT:
+    sys.stderr.write("[rust-sdlc][WARN] http_probe: body truncated to %d of %d bytes\n"
+                     % (LIMIT, len(body)))
+    body = body[:LIMIT]
+body = re.sub(rb"[\x00-\x08\x0b-\x1f\x7f]", b"", body)
+out = sys.stdout.buffer
+out.write(b"HTTP_STATUS: %d\n" % code)
+for line in lines:
+    out.write(CTRL.sub(b"", line) + b"\n")
+out.write(b"\n")
+out.write(body)
+if body and not body.endswith(b"\n"):
+    out.write(b"\n")
+' "$@"
+}
+
+# http_probe METHOD PATH [--header 'K: V']... [--body TEXT | --body-file F] —
+# one HTTP request to the profile's service.base_url (validated here, the
+# only profile key read: ^http://(localhost|127\.0\.0\.1):<port>$, port 1 to
+# 65535) plus PATH, through exactly
+#   curl --noproxy '*' --proto =http --max-time 10 -sS -i -X <METHOD> [-H …]
+#        [--data-binary @-|@F] -- <url>
+# METHOD ∈ GET HEAD POST PUT PATCH DELETE OPTIONS; PATH must match
+# ^/[A-Za-z0-9._~%/?&=:,+-]*$; at most 10 headers, each printable ASCII
+# matching ^[A-Za-z0-9-]+: ?[ -~]*$; --body at most 16 KiB (sent on stdin);
+# F must resolve below target/rust-sdlc/tmp/. Every value lands in one argv
+# slot after its flag and the URL follows `--`, so no argument adds a curl
+# option or a second URL. Prints HTTP_STATUS: <code>, the response headers
+# and at most 64 KiB of body. Exit 0 on any HTTP response, 1 on a transport
+# failure or a missing or invalid service.base_url, 2 on a rejected argument.
+http_probe() {
+  local method="${1-}" path="${2-}" body="" body_file="" body_mode="" headers_n=0
+  local re_path='^/[A-Za-z0-9._~%/?&=:,+-]*$' re_header='^[A-Za-z0-9-]+: ?[ -~]*$'
+  local usage="(usage: http_probe METHOD PATH [--header 'K: V']... [--body TEXT | --body-file F])"
+  local profile base port url
+  local -a headers=() argv=()
+  if (($# < 2)); then
+    log_error "http_probe: needs METHOD and PATH $usage"
+    return 2
+  fi
+  shift 2
+  case "$method" in
+    GET | HEAD | POST | PUT | PATCH | DELETE | OPTIONS) ;;
+    *)
+      log_error "http_probe: method not allowed: $(_ch_clean "$method") (GET HEAD POST PUT PATCH DELETE OPTIONS)"
+      return 2
+      ;;
+  esac
+  if ! _ch_printable "$path" || [[ ! "$path" =~ $re_path ]]; then
+    log_error "http_probe: PATH must match $re_path: $(_ch_clean "$path")"
+    return 2
+  fi
+  while (($#)); do
+    case "$1" in
+      --header | --body | --body-file)
+        if (($# < 2)); then
+          log_error "http_probe: $1 needs a value $usage"
+          return 2
+        fi
+        ;;
+      *)
+        log_error "http_probe: unknown argument: $(_ch_clean "$1") $usage"
+        return 2
+        ;;
+    esac
+    case "$1" in
+      --header)
+        if ! _ch_printable "$2" || [[ ! "$2" =~ $re_header ]]; then
+          log_error "http_probe: header must be printable ASCII matching $re_header: $(_ch_clean "$2")"
+          return 2
+        fi
+        headers_n=$((headers_n + 1))
+        if ((headers_n > 10)); then
+          log_error "http_probe: at most 10 headers"
+          return 2
+        fi
+        headers+=(-H "$2")
+        ;;
+      *)
+        if [[ -n "$body_mode" ]]; then
+          log_error "http_probe: give one --body or one --body-file $usage"
+          return 2
+        fi
+        if [[ "$1" == --body ]]; then
+          body_mode='text'
+          body="$2"
+          if num_gt "$(_ch_bytes "$body")" 16384; then
+            log_error "http_probe: --body is larger than 16 KiB"
+            return 2
+          fi
+        else
+          body_mode='file'
+          body_file="$2"
+          if ! _ch_resolved_under "$body_file" target/rust-sdlc/tmp || [[ ! -f "$body_file" || ! -r "$body_file" ]]; then
+            log_error "http_probe: --body-file must be a readable file below target/rust-sdlc/tmp/: $(_ch_clean "$body_file")"
+            return 2
+          fi
+        fi
+        ;;
+    esac
+    shift 2
+  done
+  profile="$(profile_path)"
+  if [[ ! -f "$profile" ]]; then
+    log_error "http_probe: no profile at .claude/rust-sdlc.yml"
+    return 1
+  fi
+  base="$(yaml_get "$profile" service.base_url)" || return 1
+  port=""
+  if [[ "$base" =~ ^http://(localhost|127\.0\.0\.1):([0-9]+)$ ]]; then
+    port="${BASH_REMATCH[2]}"
+  fi
+  if [[ -z "$port" ]] || num_lt "$port" 1 || num_gt "$port" 65535; then
+    log_error "http_probe: service.base_url must match ^http://(localhost|127\\.0\\.0\\.1):<port>$: $(_ch_clean "$base")"
+    return 1
+  fi
+  url="$base$path"
+  argv=(--noproxy '*' --proto '=http' --max-time 10 -sS -i -X "$method" "${headers[@]}")
+  case "$body_mode" in
+    text) argv+=(--data-binary @-) ;;
+    file) argv+=(--data-binary "@$body_file") ;;
+    *) ;;
+  esac
+  argv+=(-- "$url")
+  if [[ "$body_mode" == text ]]; then
+    _ch_http_exchange "$method" stdin curl "${argv[@]}" < <(printf '%s' "$body")
+  else
+    _ch_http_exchange "$method" none curl "${argv[@]}"
+  fi
+}
+
+# --- branch guard (ADR-25) ---------------------------------------------------------------
+
+# protected_changes BASE_SHA — run inside the repository. Reads the `files`
+# and `directories` lists of protected-config.toml (python3 tomllib; the
+# BASE_SHA version when it exists there, so a branch cannot drop an entry,
+# else the working tree's) and matches them against `git diff --name-only
+# --no-renames BASE_SHA` plus the untracked files: one `PROTECTED: <path>
+# (<commit>|working tree)` line per changed protected path (<commit> = the
+# newest commit since BASE_SHA that touched it, when the change is
+# committed). Then `PROFILE_CHANGED: .claude/rust-sdlc.yml` when the profile
+# exists at BASE_SHA and the working tree differs (a profile absent at
+# BASE_SHA is exempt). `INFO: no protected-config.toml` when the list exists
+# nowhere (profile check only). Exit 0 none, 1 any (or the list cannot be
+# read), 2 usage (no single argument, a leading `-`, not a commit, not in a
+# work tree).
+protected_changes() {
+  local base="${1-}" top sha rc=0
+  if (($# != 1)) || [[ -z "$base" || "$base" == -* ]]; then
+    log_error "protected_changes: needs one BASE_SHA argument (usage: protected_changes BASE_SHA)"
+    return 2
+  fi
+  if ! top="$(git rev-parse --show-toplevel 2>/dev/null)" || [[ -z "$top" ]]; then
+    log_error "protected_changes: not inside a git work tree"
+    return 2
+  fi
+  if ! sha="$(git -C "$top" rev-parse --verify --quiet "$base^{commit}" 2>/dev/null)" || [[ -z "$sha" ]]; then
+    log_error "protected_changes: not a commit: $(_ch_clean "$base")"
+    return 2
+  fi
+  command -v python3 >/dev/null 2>&1 || die "python3 3.11+ with tomllib is required"
+  _sdlc_py - "$top" "$sha" <<'PY' || rc=$?
+import os
+import re
+import subprocess
+import sys
+
+try:
+    import tomllib
+except ImportError:
+    sys.exit(3)
+
+top, sha = sys.argv[1], sys.argv[2]
+LIST = "protected-config.toml"
+PROFILE = ".claude/rust-sdlc.yml"
+CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def git(*args, check=True):
+    proc = subprocess.run(["git", "-C", top, *args], capture_output=True)
+    if check and proc.returncode != 0:
+        first = proc.stderr.decode("utf-8", "replace").strip().splitlines() or ["exit %d" % proc.returncode]
+        sys.stderr.write("[rust-sdlc][ERROR] protected_changes: git %s failed: %s\n" % (args[0], first[0]))
+        sys.exit(4)
+    return proc
+
+
+def names(raw):
+    return {item.decode("utf-8", "surrogateescape") for item in raw.split(b"\0") if item}
+
+
+def base_blob(path):
+    proc = git("cat-file", "blob", "%s:%s" % (sha, path), check=False)
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def work_file(path):
+    try:
+        with open(os.path.join(top, path), "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def shown(path):
+    return CTRL.sub("", path.encode("utf-8", "surrogateescape").decode("utf-8", "replace"))
+
+
+listing = base_blob(LIST)
+if listing is None:
+    listing = work_file(LIST)
+files, prefixes = set(), []
+if listing is None:
+    print("INFO: no protected-config.toml")
+else:
+    try:
+        doc = tomllib.loads(listing.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        sys.stderr.write("[rust-sdlc][ERROR] protected_changes: cannot parse %s: %s\n" % (LIST, exc))
+        sys.exit(4)
+    for entry in doc.get("files", []):
+        if isinstance(entry, str) and entry.strip("/"):
+            files.add(entry.removeprefix("./").rstrip("/"))
+    for entry in doc.get("directories", []):
+        if isinstance(entry, str) and entry.strip("/"):
+            prefixes.append(entry.removeprefix("./").rstrip("/"))
+
+changed = names(git("diff", "--name-only", "--no-renames", "-z", sha, "--").stdout)
+changed |= names(git("ls-files", "--others", "--exclude-standard", "-z").stdout)
+committed = names(git("diff", "--name-only", "--no-renames", "-z", sha, "HEAD", "--").stdout)
+hits = 0
+for path in sorted(changed):
+    if not (path in files or any(path == p or path.startswith(p + "/") for p in prefixes)):
+        continue
+    where = "working tree"
+    if path in committed:
+        where = git("log", "-1", "--format=%h", "--abbrev=7", "%s..HEAD" % sha, "--", path).stdout.decode().strip()
+        where = where or git("rev-parse", "--short=7", "HEAD").stdout.decode().strip()
+    print("PROTECTED: %s (%s)" % (shown(path), where))
+    hits += 1
+before = base_blob(PROFILE)
+if before is not None and work_file(PROFILE) != before:
+    print("PROFILE_CHANGED: %s" % PROFILE)
+    hits += 1
+sys.exit(1 if hits else 0)
+PY
+  case "$rc" in
+    0 | 1) return "$rc" ;;
+    3) die "python3 3.11+ with tomllib is required" ;;
+    *) return 1 ;;
+  esac
+}
+
+# --- bounded-context names (FR-14) ---------------------------------------------------------
+
+# _ch_package_names ROOT MEMBER... — one line per MEMBER: the `package.name`
+# of ROOT/MEMBER/Cargo.toml (python3 tomllib), empty when it is unreadable.
+# Exit 3 without tomllib.
+_ch_package_names() {
+  _sdlc_py -c '
+import os
+import sys
+
+try:
+    import tomllib
+except ImportError:
+    sys.exit(3)
+root = sys.argv[1]
+for member in sys.argv[2:]:
+    name = ""
+    try:
+        with open(os.path.join(root, member, "Cargo.toml"), "rb") as handle:
+            package = tomllib.load(handle).get("package")
+        if isinstance(package, dict) and isinstance(package.get("name"), str):
+            name = package["name"]
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        pass
+    print(" ".join(name.split()))
+' "$@"
+}
+
+# validate_context_name GROUP CONTEXT [ROOT] — the four FR-14 rules over the
+# live tree of ROOT (default .), mirroring `cargo xtask new-context`; the
+# profile is never read. In order: name-format (both names match
+# ^[a-z][a-z0-9]*(-[a-z0-9]+)*$), reserved-context (CONTEXT is one of shared
+# service xtask test-support e2e-tests; a reserved word is a legal group),
+# context-exists (crates/<CONTEXT> or any crates/*/<CONTEXT> is a directory)
+# and member-exists (a `[workspace].members` entry ends in
+# <CONTEXT>/{domain,application,infrastructure}, or a member's package.name is
+# <CONTEXT>-{domain,application,infrastructure}). Prints nothing and returns 0
+# for a valid name, else exactly one `REFUSED: <rule> <detail>` line and
+# returns 1. Exit 2 on a usage error or a ROOT without a readable Cargo.toml.
+validate_context_name() {
+  local group="${1-}" context="${2-}" root="${3:-.}" re='^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+  local found="" dir list names rc=0 i member package
+  local -a members=() packages=()
+  if (($# < 2 || $# > 3)); then
+    log_error "validate_context_name: needs GROUP and CONTEXT (usage: validate_context_name GROUP CONTEXT [ROOT])"
+    return 2
+  fi
+  if [[ ! "$group" =~ $re ]]; then
+    printf "REFUSED: name-format group '%s' does not match %s\n" "$(_ch_clean "$group")" "$re"
+    return 1
+  fi
+  if [[ ! "$context" =~ $re ]]; then
+    printf "REFUSED: name-format context '%s' does not match %s\n" "$(_ch_clean "$context")" "$re"
+    return 1
+  fi
+  case "$context" in
+    shared | service | xtask | test-support | e2e-tests)
+      printf "REFUSED: reserved-context '%s' is reserved (shared service xtask test-support e2e-tests)\n" "$context"
+      return 1
+      ;;
+    *) ;;
+  esac
+  if [[ ! -f "$root/Cargo.toml" || ! -r "$root/Cargo.toml" ]]; then
+    log_error "validate_context_name: no readable Cargo.toml in $(_ch_clean "$root")"
+    return 2
+  fi
+  if [[ -d "$root/crates/$context" ]]; then
+    found="crates/$context"
+  else
+    for dir in "$root"/crates/*/"$context"; do
+      if [[ -d "$dir" ]]; then
+        found="crates/${dir#"$root/crates/"}"
+        break
+      fi
+    done
+  fi
+  if [[ -n "$found" ]]; then
+    printf "REFUSED: context-exists '%s' already exists at %s\n" "$context" "$(_ch_clean "$found")"
+    return 1
+  fi
+  list="$(toml_get_list "$root/Cargo.toml" workspace.members)" || return 2
+  if [[ -n "$list" ]]; then
+    mapfile -t members <<<"$list"
+    names="$(_ch_package_names "$root" "${members[@]}")" || rc=$?
+    if ((rc == 3)); then
+      die "python3 3.11+ with tomllib is required"
+    elif ((rc != 0)); then
+      return 2
+    fi
+    mapfile -t packages <<<"$names"
+  fi
+  for i in "${!members[@]}"; do
+    member="${members[$i]%/}"
+    package="${packages[$i]-}"
+    case "$package" in
+      "$context-domain" | "$context-application" | "$context-infrastructure")
+        printf "REFUSED: member-exists '%s' is already a workspace member: %s (package %s)\n" \
+          "$context" "$(_ch_clean "$member")" "$package"
+        return 1
+        ;;
+      *) ;;
+    esac
+    case "/$member" in
+      */"$context"/domain | */"$context"/application | */"$context"/infrastructure)
+        printf "REFUSED: member-exists '%s' is already a workspace member: %s\n" \
+          "$context" "$(_ch_clean "$member")"
+        return 1
+        ;;
+      *) ;;
+    esac
+  done
+  return 0
+}
+
 # section: dispatch (keep last)
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   _sdlc_dispatch "$@"
