@@ -1,0 +1,75 @@
+{
+  "args": {
+    "issue": "https://github.com/acme/billing-service/issues/12"
+  },
+  "replies": [
+    {
+      "match": "^setup-check$",
+      "reply": {
+        "ok": true,
+        "message": "ok",
+        "failures": [],
+        "warnings": []
+      }
+    },
+    {
+      "match": "^resolve-plan$",
+      "reply": {
+        "issue_url": "https://github.com/acme/billing-service/issues/12",
+        "issue_number": 12,
+        "branch": "feat/12-invoice-due-date",
+        "slug": "12-invoice-due-date",
+        "readiness_ready": true,
+        "bundle_uncommitted": false,
+        "blocked": null,
+        "blocked_stage": null,
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^stage$",
+      "reply": {
+        "prepare": "FIX_PLAN: absent",
+        "steps": [
+          "ralph_fix_plan_prepare: FIX_PLAN: absent",
+          "stage-planning-artifacts.sh: STAGED: specs/12-invoice-due-date/prd.md -> _bmad-output/planning-artifacts/prd.md (7 STAGED: lines, 0 REMOVED:)",
+          "bmalph implement: exit 0 (.ralph/@fix_plan.md, .ralph/@AGENT.md and .ralph/PROJECT_CONTEXT.md written)",
+          "state_cache_update: WROTE: target/rust-sdlc/state/12-invoice-due-date.json",
+          "ralph_agent_md_patch: UPDATED: .ralph/@AGENT.md",
+          "PROJECT_CONTEXT.md check: part (a) (#12) and part (b) (all ten make.* keys) present"
+        ],
+        "agent_md": "UPDATED: .ralph/@AGENT.md",
+        "context": {
+          "part_a": true,
+          "part_b": true,
+          "missing": []
+        },
+        "stories": [
+          {
+            "id": "1.1",
+            "title": "Add the due date to the Invoice aggregate",
+            "done": false,
+            "layer": "domain",
+            "independent": false
+          }
+        ],
+        "blocked": null
+      }
+    },
+    {
+      "match": "^story ",
+      "reply": {
+        "status": "COMPLETE",
+        "exit_signal": false,
+        "tests_status": "PASSING",
+        "files_modified": 2,
+        "files": [
+          "crates/billing/invoice/domain/src/invoice.rs",
+          "crates/billing/invoice/domain/src/invoice/tests.rs"
+        ],
+        "recommendation": "the self-review checklist has an unchecked line"
+      }
+    }
+  ],
+  "workflows": {}
+}

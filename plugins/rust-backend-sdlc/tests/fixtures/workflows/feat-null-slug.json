@@ -1,0 +1,29 @@
+{
+  "args": "Add a due date to invoices so that overdue invoices can be listed over REST and GraphQL",
+  "replies": [
+    {
+      "match": "^setup-check$",
+      "reply": {
+        "ok": true,
+        "message": "ok",
+        "failures": [],
+        "warnings": []
+      }
+    },
+    {
+      "match": "^resolve-plan$",
+      "reply": {
+        "issue_url": "https://github.com/acme/billing-service/issues/12",
+        "issue_number": 12,
+        "branch": "feat/12-invoice-due-date",
+        "slug": null,
+        "readiness_ready": false,
+        "bundle_uncommitted": false,
+        "blocked": null,
+        "blocked_stage": null,
+        "degrade_notes": []
+      }
+    }
+  ],
+  "workflows": {}
+}

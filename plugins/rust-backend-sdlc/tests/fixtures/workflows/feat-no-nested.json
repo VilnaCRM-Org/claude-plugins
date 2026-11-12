@@ -1,0 +1,56 @@
+{
+  "args": "https://github.com/acme/billing-service/issues/12",
+  "replies": [
+    {
+      "match": "^setup-check$",
+      "reply": {
+        "ok": true,
+        "message": "ok",
+        "failures": [],
+        "warnings": []
+      }
+    },
+    {
+      "match": "^resolve-plan$",
+      "reply": {
+        "issue_url": "https://github.com/acme/billing-service/issues/12",
+        "issue_number": 12,
+        "branch": "feat/12-invoice-due-date",
+        "slug": "12-invoice-due-date",
+        "readiness_ready": true,
+        "bundle_uncommitted": false,
+        "blocked": null,
+        "blocked_stage": null,
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^stage$",
+      "reply": {
+        "prepare": "FIX_PLAN: current",
+        "steps": [
+          "ralph_fix_plan_prepare: FIX_PLAN: current",
+          "ralph_agent_md_patch: UNCHANGED: .ralph/@AGENT.md",
+          "PROJECT_CONTEXT.md check: part (a) (#12) and part (b) (all ten make.* keys) present"
+        ],
+        "agent_md": "UNCHANGED: .ralph/@AGENT.md",
+        "context": {
+          "part_a": true,
+          "part_b": true,
+          "missing": []
+        },
+        "stories": [
+          {
+            "id": "1.1",
+            "title": "Add the due date to the Invoice aggregate",
+            "done": true,
+            "layer": "domain",
+            "independent": false
+          }
+        ],
+        "blocked": null
+      }
+    }
+  ],
+  "workflows": {}
+}
