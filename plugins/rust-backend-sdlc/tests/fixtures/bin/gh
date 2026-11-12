@@ -11,8 +11,10 @@
 #                         stdout file resolves against the routes file's directory,
 #                         an empty field or `-` prints nothing; blank lines and
 #                         `#` lines are skipped                          (default: off)
-#   STUB_GH_STRICT        1 → a call that no route matches exits 9, except the
-#                         built-ins --version, `auth status`, `repo clone` (default: 0)
+#   STUB_GH_STRICT        1 → any call that no route matches exits 9, built-ins
+#                         included (route --version, `auth status` or `repo clone`
+#                         under strict; a route with exit 0 on `repo clone` still
+#                         performs the copy)                             (default: 0)
 #   STUB_GH_CLONE_SOURCE  directory that `repo clone <src> [<dir>] [-- <gitflags>…]`
 #                         copies into <dir> (default: basename of <src>) as a
 #                         one-commit repository on `main` whose `origin` is <src>
@@ -84,7 +86,7 @@ clone_repo() {
     export GIT_AUTHOR_DATE=2026-01-01T00:00:00Z GIT_COMMITTER_DATE=2026-01-01T00:00:00Z
     git -C "$dest" init -q -b main
     git -C "$dest" add -A
-    git -C "$dest" -c commit.gpgsign=false commit -q -m 'Initial commit'
+    git -C "$dest" -c commit.gpgsign=false commit -q --allow-empty -m 'Initial commit'
     git -C "$dest" remote add origin "$url"
   )
 }
@@ -143,6 +145,11 @@ if [[ -n "$routes" ]]; then
   done <"$routes"
 fi
 
+if [[ "${STUB_GH_STRICT:-0}" == 1 ]]; then
+  printf 'stub gh: no route for: gh %s\n' "$argv" >&2
+  exit 9
+fi
+
 if [[ "${1:-}" == "--version" ]]; then
   printf 'gh version %s\n' "${STUB_GH_VERSION:-2.62.0}"
   exit "${STUB_GH_EXIT:-0}"
@@ -156,10 +163,6 @@ if [[ "$is_clone" == 1 ]]; then
   fi
   clone_repo "$@"
   exit 0
-fi
-if [[ "${STUB_GH_STRICT:-0}" == 1 ]]; then
-  printf 'stub gh: no route for: gh %s\n' "$argv" >&2
-  exit 9
 fi
 if [[ -n "${STUB_GH_OUTPUT:-}" ]]; then
   printf '%s\n' "$STUB_GH_OUTPUT"
