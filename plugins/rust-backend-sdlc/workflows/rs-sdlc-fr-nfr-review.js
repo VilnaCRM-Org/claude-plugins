@@ -86,8 +86,10 @@ if (OPTS.slug != null) {
 }
 if (OPTS.base != null && !REF_ARG.test(String(OPTS.base))) badArgs.push(`malformed --base value "${clip(OPTS.base, 80)}" (a git ref)`)
 OPTS.summary = OPTS.summary == null ? null : clip(OPTS.summary, 300).replace(/"/g, "'") || null
-const asked = Number(OPTS.maxIterations)
-const CAP = Math.min(CAP_MAX, Math.max(1, Number.isInteger(asked) ? asked : CAP_MAX))
+const asked = OPTS.maxIterations
+const askedOk = Number.isInteger(asked) && asked >= 1
+if (!askedOk) badArgs.push(`malformed maxIterations ${clip(JSON.stringify(asked), 80)} (a whole number of at least 1; it only lowers the cap of ${CAP_MAX})`)
+const CAP = askedOk ? Math.min(CAP_MAX, asked) : CAP_MAX
 
 // ---------------------------------------------------------------------------
 // Shared prompt blocks. The two sentences below are the plugin's verbatim

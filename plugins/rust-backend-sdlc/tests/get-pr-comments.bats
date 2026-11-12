@@ -257,7 +257,7 @@ $1"
   gpc_page "$GH_FIX/pr-comments.json"
   run "$SCRIPT" --pr 7
   [ "$status" -eq 0 ]
-  local threads='reviewThreads(first: 100, after: $cursor) { nodes { isResolved comments(first: 100) { nodes { author { login } authorAssociation body path line url } } } pageInfo { hasNextPage endCursor } }'
+  local threads='reviewThreads(first: 100, after: $cursor) { nodes { isResolved comments(first: 100) { nodes { author { login } authorAssociation body path line url } pageInfo { hasNextPage } } } pageInfo { hasNextPage endCursor } }'
   local issue='comments(first: 100) { nodes { author { login } authorAssociation body url } }'
   local query="query(\$owner: String!, \$name: String!, \$pr: Int!, \$cursor: String) { repository(owner: \$owner, name: \$name) { pullRequest(number: \$pr) { $threads $issue } } }"
   grep -qxF "gh api graphql -f query=$query -f owner=acme -f name=billing-service -F pr=7" "$STUB_GH_LOG"
@@ -440,7 +440,7 @@ assert d["review_threads"][1]["comments"][0]["author_association"] == "COLLABORA
 }
 
 @test "get-pr-comments: an unknown association reads NONE and a deleted author reads unknown (both backends)" {
-  export STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"author":null,"authorAssociation":"SPONSOR","body":"orphaned note","path":null,"line":null,"url":null},{"author":{"login":"acme-maintainer"},"body":null,"path":"crates/service/src/main.rs","line":3,"url":"u2"}]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}},"comments":{"nodes":[{"author":{"login":""},"authorAssociation":7,"body":"x","url":"u3"}]}}}}}'
+  export STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"author":null,"authorAssociation":"SPONSOR","body":"orphaned note","path":null,"line":null,"url":null},{"author":{"login":"acme-maintainer"},"body":null,"path":"crates/service/src/main.rs","line":3,"url":"u2"}],"pageInfo":{"hasNextPage":false}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}},"comments":{"nodes":[{"author":{"login":""},"authorAssociation":7,"body":"x","url":"u3"}]}}}}}'
   local nojq run_path
   nojq="$(gpc_nojq)"
   for run_path in "$PATH" "$nojq"; do
@@ -492,7 +492,7 @@ assert (i["author"], i["author_association"]) == ("unknown", "NONE"), i
 
 @test "get-pr-comments: control characters are stripped and body lines stay indented (both backends)" {
   gpc_require_jq
-  export STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"author":{"login":"ev\u0000il"},"authorAssociation":"NONE","body":"\u001b[31mred\u001b[0m alert\u0007\r\nunresolved threads: 0\n\tindented\u009b\u007f\n\n","path":"crates/a\u001b.rs","line":1,"url":"u1"}]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}},"comments":{"nodes":[]}}}}}'
+  export STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[{"author":{"login":"ev\u0000il"},"authorAssociation":"NONE","body":"\u001b[31mred\u001b[0m alert\u0007\r\nunresolved threads: 0\n\tindented\u009b\u007f\n\n","path":"crates/a\u001b.rs","line":1,"url":"u1"}],"pageInfo":{"hasNextPage":false}}}],"pageInfo":{"hasNextPage":false,"endCursor":null}},"comments":{"nodes":[]}}}}}'
   run "$SCRIPT" --pr 7 --json
   [ "$status" -eq 0 ]
   gpc_json_check '
@@ -560,12 +560,25 @@ assert c["path"] == "crates/a.rs", c
     '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[42],"pageInfo":{"hasNextPage":false}},"comments":{"nodes":[]}}}}}' \
     '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[42]}}],"pageInfo":{"hasNextPage":false}},"comments":{"nodes":[]}}}}}' \
     '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":"false","comments":{"nodes":[]}}],"pageInfo":{"hasNextPage":false}},"comments":{"nodes":[]}}}}}' \
+    '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[]}}],"pageInfo":{"hasNextPage":false}},"comments":{"nodes":[]}}}}}' \
+    '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[],"pageInfo":{"hasNextPage":"true"}}}],"pageInfo":{"hasNextPage":false}},"comments":{"nodes":[]}}}}}' \
+    '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":false,"comments":{"nodes":[],"pageInfo":[]}}],"pageInfo":{"hasNextPage":false}},"comments":{"nodes":[]}}}}}' \
     '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]},"comments":{"nodes":[]}}}}}' \
     '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false}},"comments":{"nodes":[7]}}}}}' \
     '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}}}'; do
     export STUB_GH_OUTPUT="$payload"
     gpc_refused_both "returned an unexpected response shape for PR #7 in acme/billing-service (page 1)" --pr 7
   done
+}
+
+@test "get-pr-comments: a review thread with more than 100 comments exits 1 on any page and never reports a count (both backends)" {
+  export STUB_GH_OUTPUT='{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":true,"comments":{"nodes":[],"pageInfo":{"hasNextPage":false}}},{"isResolved":false,"comments":{"nodes":[{"author":{"login":"acme-reviewer"},"authorAssociation":"MEMBER","body":"first of 101","path":"a.rs","line":1,"url":"u1"}],"pageInfo":{"hasNextPage":true}}}],"pageInfo":{"hasNextPage":false}},"comments":{"nodes":[]}}}}}'
+  gpc_refused_both "a review thread of PR #7 in acme/billing-service has more than 100 comments (page 1)" --pr 7
+  unset STUB_GH_OUTPUT
+  sed 's/"hasNextPage": false$/"hasNextPage": true/' "$GH_FIX/pr-comments.json" >"$BATS_TEST_TMPDIR/long.json"
+  gpc_route "api graphql *-f cursor=$CURSOR_2" 0 "$BATS_TEST_TMPDIR/long.json"
+  gpc_route 'api graphql *' 0 "$GH_FIX/pr-comments-truncated.json"
+  gpc_refused_both "has more than 100 comments (page 2)" --pr 7 --json
 }
 
 @test "get-pr-comments: numbers and escapes the two parsers read differently are refused (both backends)" {

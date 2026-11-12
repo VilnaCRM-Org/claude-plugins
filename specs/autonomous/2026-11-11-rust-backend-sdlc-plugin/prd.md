@@ -844,7 +844,7 @@ Usage `request-ai-reviews.sh [--pr N] [--reviewers LIST] [--full] [--min-interva
 
 ### NFR-3 — Degrade matrix (G2)
 
-Rules: a degrade path never loops and never fakes a pass. The Outcome column uses only the stage-level status vocabulary of the FR conventions — `SUCCESS` (designed path, no degrade note), `SUCCESS-WITH-REPORT` (exit string met, exactly one degrade note emitted, shown in the Behaviour column) and `ESCALATED` (7-field block) — and maps to the run report as stated there (`SUCCESS-WITH-REPORT` → `result: SUCCESS` + a `degrade_notes` entry + `met: yes (degraded)`). An **absent** capability ends `SUCCESS-WITH-REPORT`; a **mapped capability that cannot run** or a safety block ends `ESCALATED`. Where one condition hits several stages, the outcome is given per stage.
+Rules: a degrade path never loops and never fakes a pass. The Outcome column uses only the stage-level status vocabulary of the FR conventions — `SUCCESS` (designed path, no degrade note), `SUCCESS-WITH-REPORT` (exit string met, exactly one degrade note emitted, shown in the Behaviour column) and `ESCALATED` (7-field block) — and maps to the run report as stated there (`SUCCESS-WITH-REPORT` → `result: SUCCESS` + a `degrade_notes` entry + `met: yes (degraded)`). An **absent** capability ends `SUCCESS-WITH-REPORT`; a **mapped capability that cannot run** or a safety block ends `ESCALATED`, unless its row names `SUCCESS-WITH-REPORT` for the stage (D13, whose `ask` targets are lifecycle and `-fix` targets and never a gate, and the setup and new-service cells of D2, D3, D5 and D25). Where one condition hits several stages, the outcome is given per stage.
 
 | # | Condition | Detection | Behaviour (degrade note in quotes) | Outcome |
 | --- | --- | --- | --- | --- |
@@ -1223,3 +1223,5 @@ Reviser pass of 2026-11-12 over 41 findings (in the order received). Each was ve
   - `rs-sdlc-review-panel`: a lens finding that quotes `BLOCKED: protected configuration <path>` was refuted or fixed instead of escalating; it now ends `ESCALATED` with that line verbatim (`commands/rs-sdlc-review.md` decision rule 1).
   - `rs-sdlc-fr-nfr-review`: `EXIT_CONDITION` was not the review stage's exit string; it is now `zero new gate findings AND every quality row PASS` verbatim (architecture, the canonical escalation block).
   - `rs-sdlc-fr-nfr-review`: after the D24 fallback (`base_ref=HEAD`) an empty file list returned `SUCCESS-WITH-REPORT` without a gate run; the empty-change-set exit now requires a base other than `HEAD` (`docs/workflows.md`: never passes without a real gate run).
+
+- 2026-11-12 (PR #17 review): NFR-3 rules. "A mapped capability that cannot run ends `ESCALATED`" contradicted D13 and the setup and new-service outcomes of D2, D3, D5 and D25, which end `SUCCESS-WITH-REPORT`; the rule now names those rows as its exceptions, and no row changed (architecture PR-D3).

@@ -8,7 +8,24 @@ A repository created from the template receives later changes of the template as
 
 The workflow needs one secret, `PERSONAL_ACCESS_TOKEN`. Without it the job succeeds with a notice and nothing is synchronised. It is also skipped, with a notice, when the secrets of the App flavour exist: a repository that has both flavours would open two sync pull requests, so the App wins.
 
-Create a fine-grained personal access token for a user that may write to the repository (a dedicated machine user is better than a person), select the repository as the only resource, set an expiry and add the secret `PERSONAL_ACCESS_TOKEN` to the repository with the token as its value.
+Create a fine-grained personal access token for a user that may write to the repository (a dedicated machine user is better than a person):
+
+1. Open the settings of the account, Developer settings, Personal access tokens, Fine-grained tokens, Generate new token.
+2. Select the repository as the only resource and set an expiry. Write the expiry in your calendar: an expired token makes the job fail until it is replaced.
+3. Add the secret `PERSONAL_ACCESS_TOKEN` to the repository with the token as its value.
+
+The token also reads the template repository. When the template is private, the token's owner must be allowed to read it; a fine-grained token limited to one repository cannot, so use a classic token with the `repo` and `workflow` scopes in that case.
+
+## Permissions
+
+Give the token exactly these repository permissions:
+
+| Permission | Access | Why |
+| --- | --- | --- |
+| Contents | read and write | the action pushes its sync branch |
+| Pull requests | read and write | the action opens and updates the pull request |
+| Workflows | read and write | a sync may change files under `.github/workflows/` |
+| Metadata | read | mandatory |
 
 ## Schedule
 

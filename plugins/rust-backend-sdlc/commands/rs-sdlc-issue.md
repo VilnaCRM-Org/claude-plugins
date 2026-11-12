@@ -55,10 +55,10 @@ Classify the argument as described under "Inputs". An issue URL must have the ho
 2. **Duplicate guard.** A re-run whose earlier `ISSUE_URL:` line was lost must not open a second issue:
 
    ```bash
-   gh issue list --state open --label rust-backend-sdlc --json number,url,title --limit 100
+   gh api --paginate 'repos/{owner}/{repo}/issues?labels=rust-backend-sdlc&state=open&sort=created&direction=desc&per_page=100' --jq '.[] | select(.pull_request == null) | {number, url: .html_url, title}'
    ```
 
-   An open issue whose title equals the drafted title (ignoring letter case and surrounding spaces) is adopted through step 3 instead of creating a new one.
+   The call reads the repository's issue list, never the search index (which lags behind an issue created moments earlier and which `gh issue list --label` queries), newest first, and pages through every open managed issue; the pull requests the endpoint also returns are dropped. An open issue whose title equals the drafted title (ignoring letter case and surrounding spaces) is adopted through step 3 instead of creating a new one; when several match, the newest (the first listed) is adopted.
 3. **Body headings.** When `.github/ISSUE_TEMPLATE/feature_request.md` exists, the body uses its level-2 headings in their order; the template's frontmatter and placeholder lines (`...`, guidance sentences) are dropped and its checkbox lists are kept, with the boxes that apply ticked. Without the template the body uses the fallback headings, in this order: `## Problem statement`, `## Proposed change`, `## Affected area`, `## Tasks`, `## Acceptance criteria`. Every heading gets real content drawn from the task text; a heading the task text cannot fill states the assumption made (`Assumption: <decision>`).
 4. **Acceptance criteria.** At least 3 bullets under `## Acceptance criteria` (≥ 3 testable acceptance criteria), each phrased as observable HTTP status or GraphQL result, so that the QA stage can prove it with one request:
    - REST: `POST /<resource>` with a valid body returns `201` and a `Location` header naming the new `<Entity>`; `GET /<resource>/<id>` for an unknown id returns `404` with an `application/problem+json` body;
@@ -122,7 +122,7 @@ ISSUE_NUMBER: <N>
 
 ### Step 9 — `gh` failures (D10)
 
-Every `gh` call above (`gh issue view`, `gh issue list`, `gh label list`, `gh label create`, `gh issue create`, `gh issue edit`) runs once. A non-zero exit ends the stage `ESCALATED` (D10) at once, with the command and its exit code as `blocking_finding` (for example `blocking_finding: gh issue create exit 1`) and the first line of its stderr, redacted, in `iteration_log`. It is never retried in a loop, never replaced by another spelling of the call, and never answered with a guessed issue: no `ISSUE_URL:` or `ISSUE_NUMBER:` line is printed unless `gh` returned that issue. `recommended_action` names the human fix (`gh auth login`, network access to github.com, or the repository permission the token lacks), then a re-run of /rs-sdlc-issue.
+Every `gh` call above (`gh issue view`, `gh api`, `gh label list`, `gh label create`, `gh issue create`, `gh issue edit`) runs once. A non-zero exit ends the stage `ESCALATED` (D10) at once, with the command and its exit code as `blocking_finding` (for example `blocking_finding: gh issue create exit 1`) and the first line of its stderr, redacted, in `iteration_log`. It is never retried in a loop, never replaced by another spelling of the call, and never answered with a guessed issue: no `ISSUE_URL:` or `ISSUE_NUMBER:` line is printed unless `gh` returned that issue. `recommended_action` names the human fix (`gh auth login`, network access to github.com, or the repository permission the token lacks), then a re-run of /rs-sdlc-issue.
 
 ## Loop & exit condition
 

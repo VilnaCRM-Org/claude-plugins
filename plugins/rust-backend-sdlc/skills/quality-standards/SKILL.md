@@ -128,8 +128,8 @@ quality:
 
 An exit-based bar measures 0 on exit 0 and `≥ 1 (exit <n>)` otherwise. The others read the target's log or report:
 
-1. `quality.coverage_lines` — from `target/coverage/lcov.info`, sum the `LH:` and `LF:` records; PASS iff 100 × ΣLH ≥ `quality.coverage_lines` × ΣLF, in integer arithmetic (no rounding).
-2. `quality.coverage_functions` — the same with the `FNH:` and `FNF:` records: PASS iff 100 × ΣFNH ≥ `quality.coverage_functions` × ΣFNF.
+1. `quality.coverage_lines` — from `target/coverage/lcov.info`, sum the `LH:` and `LF:` records; PASS iff ΣLF > 0 and 100 × ΣLH ≥ `quality.coverage_lines` × ΣLF, in integer arithmetic (no rounding). A missing report, or one without any `LF:` record, is a failure, never a pass.
+2. `quality.coverage_functions` — the same with the `FNH:` and `FNF:` records: PASS iff ΣFNF > 0 and 100 × ΣFNH ≥ `quality.coverage_functions` × ΣFNF.
 3. `quality.max_surviving_mutants` — the number of lines of `mutants.out/missed.txt` plus `mutants.out/timeout.txt`; a missing file counts 0.
 4. `quality.max_clippy_findings` — log lines matching `^(error|warning)(\[[A-Za-z0-9_]+\])?:[[:space:]]`, minus the `^error: (could not compile|aborting due to)` lines and the `generated [0-9]+ (warning|error)` summaries.
 5. `quality.max_complexity_violations` — one per `^error:[[:space:]]` diagnostic naming `clippy::cognitive_complexity`, `clippy::too_many_lines`, `clippy::excessive_nesting` or `clippy::too_many_arguments`; the row also quotes the four limits read from `clippy.toml`.
@@ -144,7 +144,7 @@ An exit-based bar measures 0 on exit 0 and `≥ 1 (exit <n>)` otherwise. The oth
 The coverage and static-analysis counts as commands, where `<floor>` is the bar's profile value and `<log>` the target's log file:
 
 ```bash
-awk -F: -v floor="<floor>" '/^LH:/ {h += $2} /^LF:/ {f += $2} END {exit !(100 * h >= floor * f)}' target/coverage/lcov.info
+awk -F: -v floor="<floor>" '/^LH:/ {h += $2} /^LF:/ {f += $2} END {exit !(f > 0 && 100 * h >= floor * f)}' target/coverage/lcov.info
 grep -E '^(error|warning)(\[[A-Za-z0-9_]+\])?:[[:space:]]' "<log>" | grep -vE '^error: (could not compile|aborting due to)' | grep -vcE 'generated [0-9]+ (warning|error)'
 ```
 

@@ -101,7 +101,7 @@ A keyed row is PASS when its target exits 0 **and** its measured value is within
 | `make.architecture` (Q4) | the `<n>` of the log line `architecture: FAILED. <n> violation(s) …`, `0` on exit 0; bound `quality.max_architecture_violations` |
 | `make.check_crate_isolation` (Q5) | the `error: could not compile` lines, at least 1 on a non-zero exit; bound `quality.max_architecture_violations`, held on its own |
 | `make.check_security` (Q7) | the log lines starting with `error[`; bound `quality.max_dependency_policy_findings` |
-| `make.tests_with_coverage` (Q9) | from `target/coverage/lcov.info`: PASS only when 100 × ΣLH ≥ `quality.coverage_lines` × ΣLF and 100 × ΣFNH ≥ `quality.coverage_functions` × ΣFNF, in integer arithmetic (no rounding) |
+| `make.tests_with_coverage` (Q9) | from `target/coverage/lcov.info`: PASS only when ΣLF > 0, ΣFNF > 0, 100 × ΣLH ≥ `quality.coverage_lines` × ΣLF and 100 × ΣFNH ≥ `quality.coverage_functions` × ΣFNF, in integer arithmetic (no rounding); a missing report, or one whose ΣLF or ΣFNF is 0, is output that cannot be parsed |
 | `make.mutation_tests_diff` (Q10) | the lines of `mutants.out/missed.txt` plus `mutants.out/timeout.txt`, a missing file counting 0; bound `quality.max_surviving_mutants` |
 | `make.openapi_diff` and `make.graphql_diff` (Q14) | exit-based, the two targets summed; bound `quality.max_unapproved_breaking_changes` |
 
@@ -195,7 +195,7 @@ This agent runs none of the foreground allowlist, so every quality target is bac
 3. The wait: the background-task completion notice is the primary signal; without it, `"<plugin root>/scripts/lib/common.sh" wait_log <log>` (at most 110 s per call, prints the last 40 lines and `RUST_SDLC_EXIT=<n>`, or `WAITING: <log> (<elapsed>s)`), called again on `WAITING:` until the line appears or the stage budget (30 calls when the prompt names none) is spent. A target still running at the budget is FAIL, measured `still running at the stage budget`, with the log tail; it yields no finding and is named on the `blocked rows:` line, so the stage escalates instead of remediating.
 4. The result: `RUST_SDLC_EXIT=0` is the exit status 0 of the row; any other value is a non-zero exit, unless the log shows the template's no-engine message or `docker info` fails, which is `NOT RUN (no Docker)`.
 
-Besides the reads above, the raw calls this agent may make, and no others, are the probes `docker info` and `docker compose ps --status running --quiet app`. It never calls `cargo`, a linter, a coverage tool or a mutation tool directly; every count comes from a row target run through `make`.
+Besides the reads above and the call sequence above (its `mkdir -p` and its log redirect, the only writes the agent makes), the raw calls this agent may make, and no others, are the probes `docker info` and `docker compose ps --status running --quiet app`. It never calls `cargo`, a linter, a coverage tool or a mutation tool directly; every count comes from a row target run through `make`.
 
 ## Degrade paths
 
@@ -231,7 +231,7 @@ Degrades never loop and never fake a pass: each one ends in a recorded `NOT RUN 
 
 > Review the branch of issue #`<N>`. Plugin root: `<plugin root>`. base: `<merge-base sha>`. review iteration 1/5. PR: none. Executed skills: `code-review`, `quality-standards`, `api-resource-development`, `rust-error-handling`, `testing-workflow`.
 
-Expected: the agent reads the profile and `clippy.toml`, probes `docker info`, runs the fifteen targets one at a time in the background (Q10 because production `*.rs` changed; Q14 without approval because there is no PR), reads the coverage and mutant counts, reviews the diff against the executed skills, and returns the fifteen-row table with every row PASS and the Q3 limits quoted, the targets-run list, findings `none`, degrade notes `none`, `## Verdict: PASS` and last the block `[]`; it writes no file and runs no git write.
+Expected: the agent reads the profile and `clippy.toml`, probes `docker info`, runs the fifteen targets one at a time in the background (Q10 because production `*.rs` changed; Q14 without approval because there is no PR), reads the coverage and mutant counts, reviews the diff against the executed skills, and returns the fifteen-row table with every row PASS and the Q3 limits quoted, the targets-run list, findings `none`, degrade notes `none`, `## Verdict: PASS` and last the block `[]`; it writes no file besides its lane logs and runs no git write.
 
 **Degrade path.** Host mode, Docker unreachable:
 

@@ -55,6 +55,7 @@ model: sonnet
 - `make.sqlx_prepare`
 - `make.create_migration`
 - `make.migrate`
+- `make.migrate_rollback`
 - `make.generate_openapi_spec`
 - `make.generate_graphql_spec`
 - `make.start`
@@ -86,7 +87,7 @@ Apply every rule below to each file the story touches; the self-review checklist
 9. **Lints.** Never write `#[allow(...)]`; a suppression is `#[expect(<lint>, reason = "<why the code is right>")]`, and only where the repository's lint policy permits it: never in a crate root and never for a complexity lint (`clippy::cognitive_complexity`, `clippy::too_many_lines`, `clippy::too_many_arguments`, `clippy::excessive_nesting`), which is fixed by splitting the function.
 10. **Async traits.** A method of an `#[async_trait]` impl delegates to an inherent `async fn` of the same type, so its body is one call.
 11. **Tests.** Unit tests live in the sibling `tests.rs` of the module they test (`<name>/tests.rs`, declared from `<name>.rs` with `#[cfg(test)] mod tests;`); integration tests live in `<crate>/tests/integration/main.rs` and the modules it declares. Randomised and property tests take their seed from `TEST_SEED` and `PROPTEST_RNG_SEED`, so every failure replays.
-12. **Co-changes in the same story.** A schema change is a new reversible migration pair under `persistence.migrations_dir` created with `make create-migration name=<snake_case>`, applied with `make migrate`, and the offline query metadata in `.sqlx/` regenerated with `make sqlx-prepare` (when `persistence.offline_metadata` is true); a changed REST or GraphQL contract regenerates its committed snapshot with `make generate-openapi-spec` (`framework.openapi` true, file `service.openapi_snapshot`) or `make generate-graphql-spec` (`framework.graphql` true, file `service.graphql_snapshot`); adding, removing or relating a crate updates `workspace.dsl` in the same story when `capabilities.structurizr` is true (false: the note `SKIPPED: capabilities.structurizr is false`).
+12. **Co-changes in the same story.** A schema change is a new reversible migration pair under `persistence.migrations_dir` created with `make create-migration name=<snake_case>`, applied with `make migrate`, rolled back and re-applied once with `make migrate-rollback` and `make migrate`, and the offline query metadata in `.sqlx/` regenerated with `make sqlx-prepare` (when `persistence.offline_metadata` is true); a changed REST or GraphQL contract regenerates its committed snapshot with `make generate-openapi-spec` (`framework.openapi` true, file `service.openapi_snapshot`) or `make generate-graphql-spec` (`framework.graphql` true, file `service.graphql_snapshot`); adding, removing or relating a crate updates `workspace.dsl` in the same story when `capabilities.structurizr` is true (false: the note `SKIPPED: capabilities.structurizr is false`).
 13. **Applied migrations.** The agent never edits an applied migration: every migration file that `git ls-files -- <persistence.migrations_dir>` lists is applied, and a change to its schema is a new migration pair. Only a pair created in this dispatch may still be edited. When `persistence.engine` is null the service has no database, and the migration half of rule 12 and this rule do not apply.
 
 ### The DB rule
@@ -101,12 +102,12 @@ The template's DB-backed targets share one test database, so implementers that r
 
 The full sequence runs one target at a time, in this order:
 
-1. `make.migrate`, then `make.sqlx_prepare`, when a migration or an `sqlx` query changed (the offline metadata must match before anything compiles);
+1. `make.migrate`, then `make.sqlx_prepare`, when a migration or an `sqlx` query changed (the offline metadata must match before anything compiles); a new migration pair (one that `git ls-files` does not list yet) takes the rollback round trip of rule 12 between the two, `make.migrate_rollback` and then `make.migrate` once more (an `ask` rule of the template: a headless run records `not run (ask rule)`, D13);
 2. the five DB-free keys `make.format`, `make.lint_code`, `make.unit_tests`, `make.architecture`, `make.complexity`;
 3. `make.generate_openapi_spec` and `make.generate_graphql_spec`, when the contract changed (they rewrite shared snapshot files);
 4. the DB-backed test keys `make.setup_test_db`, `make.integration_tests`, `make.tests_with_coverage`, `make.e2e_tests`.
 
-Steps 1, 3 and 4 are the serialized verify step: the five DB-backed keys (`make.setup_test_db`, `make.integration_tests`, `make.tests_with_coverage`, `make.e2e_tests`, `make.sqlx_prepare`), `make.migrate` (it migrates the development database the running stack uses) and the snapshot targets run only there. Parallel stories run only the DB-free keys, one serialized verify step runs the DB-backed keys, and an agent in `parallel` mode never runs `make.setup_test_db`, `make.integration_tests`, `make.tests_with_coverage`, `make.e2e_tests`, `make.sqlx_prepare`, `make.migrate` or a snapshot target. A `parallel` story whose change needs the offline metadata regenerated (a new migration, a new or changed query) cannot compile before the serialized verify step: it writes the code and the migration, runs `make.format` only, and reports `STATUS: IN_PROGRESS` with the verify step as its recommendation.
+Steps 1, 3 and 4 are the serialized verify step: the five DB-backed keys (`make.setup_test_db`, `make.integration_tests`, `make.tests_with_coverage`, `make.e2e_tests`, `make.sqlx_prepare`), `make.migrate` and `make.migrate_rollback` (they migrate the development database the running stack uses) and the snapshot targets run only there. Parallel stories run only the DB-free keys, one serialized verify step runs the DB-backed keys, and an agent in `parallel` mode never runs `make.setup_test_db`, `make.integration_tests`, `make.tests_with_coverage`, `make.e2e_tests`, `make.sqlx_prepare`, `make.migrate`, `make.migrate_rollback` or a snapshot target. A `parallel` story whose change needs the offline metadata regenerated (a new migration, a new or changed query) cannot compile before the serialized verify step: it writes the code and the migration, runs `make.format` only, and reports `STATUS: IN_PROGRESS` with the verify step as its recommendation.
 
 ## Inputs
 
@@ -143,7 +144,7 @@ The final message holds four parts, in this order, and nothing after the status 
    - [ ] no mod.rs; unit tests in the sibling tests.rs; integration tests under <crate>/tests/integration/main.rs; seeds from TEST_SEED and PROPTEST_RNG_SEED
    - [ ] no new allow attribute; every #[expect(<lint>, reason = "...")] permitted by the lint policy, none in a crate root, none for a complexity lint
    - [ ] #[async_trait] methods delegate to an inherent async fn
-   - [ ] co-changes: migration via create-migration, migrate and sqlx-prepare; snapshots via generate-openapi-spec / generate-graphql-spec; workspace.dsl for every crate or crate-dependency edge change
+   - [ ] co-changes: migration via create-migration, migrate, the migrate-rollback and migrate round trip for a new pair, and sqlx-prepare; snapshots via generate-openapi-spec / generate-graphql-spec; workspace.dsl for every crate or crate-dependency edge change
    - [ ] no applied migration edited; no protected path and no .claude/rust-sdlc.yml changed (protected_changes printed nothing)
    - [ ] no TODO, FIXME or HACK left without a story reference; no debug output left
    ```
@@ -162,7 +163,7 @@ The final message holds four parts, in this order, and nothing after the status 
    ---END_RALPH_STATUS---
    ```
 
-   `STATUS: COMPLETE` means every acceptance criterion is met and every target the mode made due passed or is `not run (capability absent)`; `TASKS_COMPLETED_THIS_LOOP` is 1 only then. `TESTS_STATUS` is `PASSING` when every test target that ran passed and at least one ran, `FAILING` when one failed, `NOT_RUN` when none ran. `EXIT_SIGNAL: true` only when the story is complete and nothing remains for it, which in `parallel` mode is never (the serialized verify step remains). A block is reported as `STATUS: BLOCKED` with the blocker in `RECOMMENDATION`; the agent never asks the user a question.
+   `STATUS: COMPLETE` means every acceptance criterion is met and every target the mode made due passed or is `not run (capability absent)`; the rollback round trip of step 1 recorded `not run (ask rule)` (`make.migrate_rollback` and its re-apply, D13) counts the same way, a degrade note and never a blocker; `TASKS_COMPLETED_THIS_LOOP` is 1 only then. `TESTS_STATUS` is `PASSING` when every test target that ran passed and at least one ran, `FAILING` when one failed, `NOT_RUN` when none ran. `EXIT_SIGNAL: true` only when the story is complete and nothing remains for it, which in `parallel` mode is never (the serialized verify step remains). A block is reported as `STATUS: BLOCKED` with the blocker in `RECOMMENDATION`; the agent never asks the user a question.
 
 ## Allowed actions
 
@@ -203,9 +204,9 @@ Degrades never loop and never fake a pass: each one ends in a recorded `not run 
 | Docker unreachable (`docker info` fails, or a log holds the template's no-engine message) | the Docker-dependent targets are `not run (no Docker)`, never `failed` and never remediated (D2); the code is still written; `STATUS: BLOCKED` with the targets left to run |
 | Container mode and `app` not running | `make.start` once in the background (≤ 900 s, one restart attempt); `make.start` null, or `app` still not running → every target `not run (no Docker)`, `STATUS: BLOCKED` (D25) |
 | Host mode without a Rust toolchain (a log shows the toolchain command not found) | the targets are `not run (no toolchain)`, `STATUS: BLOCKED`, `RECOMMENDATION` naming `rust.toolchain` and container mode (D3) |
-| A call is denied by a permission rule (an `ask` rule in a headless run) | that target is `not run (ask rule)` and is never retried under another spelling (D13) |
+| A call is denied by a permission rule (an `ask` rule in a headless run) | that target is `not run (ask rule)` and is never retried under another spelling (D13); for the rollback round trip of step 1 the story still completes |
 | A protected path must change, or the guard hook denies an edit | the `BLOCKED: protected configuration <path> …` line, the denial quoted verbatim, `STATUS: BLOCKED` (D23) |
-| `parallel` story needs the offline metadata regenerated | code and migration written, `make.format` run, `STATUS: IN_PROGRESS`, `EXIT_SIGNAL: false`, `RECOMMENDATION: serialized verify step: make.migrate, make.sqlx_prepare, then the DB-backed keys` |
+| `parallel` story needs the offline metadata regenerated | code and migration written, `make.format` run, `STATUS: IN_PROGRESS`, `EXIT_SIGNAL: false`, `RECOMMENDATION: serialized verify step: make.migrate, the make.migrate_rollback round trip, make.sqlx_prepare, then the DB-backed keys` |
 | No plugin root in the prompt | background targets are awaited through their completion notice and read with the Read tool; the `protected_changes` self-check is skipped and noted |
 | `git merge-base <ci.base_ref> HEAD` fails (base ref not fetched) | the self-check runs as `protected_changes HEAD`, which sees the uncommitted changes only, and a note says so; the agent never fetches (D24) |
 | An external dependency the story needs is absent (a service, a credential, an upstream story) | `STATUS: BLOCKED`, `TASKS_COMPLETED_THIS_LOOP: 0`, the dependency named in `RECOMMENDATION` |

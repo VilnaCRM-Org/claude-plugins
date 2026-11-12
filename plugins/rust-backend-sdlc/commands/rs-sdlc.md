@@ -174,7 +174,7 @@ The QA procedure holds no `Edit` or `Write` and changes no file, so this command
    "${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh" protected_changes <merge-base-sha>
    ```
 
-   Exit 0 → continue. `PROTECTED: <path> (<commit>|working tree)` → `ESCALATED` (D23) with `blocking_finding: protected file <path> changed (<commit>)` and `recommended_action: revert with git restore --source=<merge-base-sha> -- <path> unless the plan intends it; otherwise approved-config-change` (applied by a maintainer, with a session restarted with `ALLOW_PROTECTED_CONFIG_EDIT=1`). `PROFILE_CHANGED: .claude/rust-sdlc.yml` → `ESCALATED` with `recommended_action: move the profile change to its own pull request from the default branch (/rs-sdlc-setup --refresh)`. Exit 2 → `ESCALATED`.
+   Exit 0 → continue. `PROTECTED: <path> (<commit>|working tree)` → `ESCALATED` (D23) with `blocking_finding: protected file <path> changed (<commit>)` and `recommended_action: revert with git restore --source=<merge-base-sha> -- <path> unless the plan intends it; otherwise approved-config-change` (applied by a maintainer, with a session restarted with `ALLOW_PROTECTED_CONFIG_EDIT=1`). `PROFILE_CHANGED: .claude/rust-sdlc.yml` → `ESCALATED` with `recommended_action: move the profile change to its own pull request from the default branch (/rs-sdlc-setup --refresh)`. Exit 2, or exit 1 without either line (an unreadable `protected-config.toml`) → `ESCALATED`.
 7. **Stage** the file and nothing else: `git add -- <SPECS_DIR>/epics.md`; `git diff --cached --name-only` must list exactly that path, else `ESCALATED` with nothing committed.
 8. **Subject** `docs(#N): add QA fix story <n>` (FR-2 fixed subject; the issue number fills `#N`), pre-validated in the foreground, then the message file:
 
@@ -362,7 +362,7 @@ escalation: none
 
 Exit string of the run: every stage meets its exit string, in stage-table order, the last being finish-pr's "CI green + FR/NFR gate green on the head SHA + 0 unresolved review threads"; the run then ends `result: SUCCESS`.
 
-Each stage's own guard; a `SUCCESS-WITH-REPORT` stage records `met: yes (degraded)` and keeps `result: SUCCESS`; an `ESCALATED` stage records `met: no` and ends the run. The only loop this command adds is the QA loop-back: a QA `FAIL` appends `### Story <E>.<k>: Fix QA findings <n>`, commits it and runs stages 3, 4, 5 and 6 again, each on its own continuing counter. Degrade paths never loop and never fake a pass: an absent capability ends a stage `SUCCESS-WITH-REPORT` with its note, a mapped capability that cannot run or a safety block ends it `ESCALATED`, and a skipped QA is never reported as a QA pass.
+Each stage's own guard; a `SUCCESS-WITH-REPORT` stage records `met: yes (degraded)` and keeps `result: SUCCESS`; an `ESCALATED` stage records `met: no` and ends the run. The only loop this command adds is the QA loop-back: a QA `FAIL` appends `### Story <E>.<k>: Fix QA findings <n>`, commits it and runs stages 3, 4, 5 and 6 again, each on its own continuing counter. Degrade paths never loop and never fake a pass: an absent capability ends a stage `SUCCESS-WITH-REPORT` with its note, a mapped capability that cannot run or a safety block ends it `ESCALATED` unless its degrade-matrix row names `SUCCESS-WITH-REPORT` for the stage (for the loop stages only D13, whose `ask` targets are lifecycle and `-fix` targets and never a gate), and a skipped QA is never reported as a QA pass.
 
 ## Iteration guard
 

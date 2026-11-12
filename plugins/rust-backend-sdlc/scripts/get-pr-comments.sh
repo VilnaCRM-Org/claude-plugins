@@ -19,7 +19,9 @@
 # Owner and name come from resolve_repo_slug. One paginated `gh api graphql`
 # query reads the review threads 100 per page (`after: $cursor`), following
 # pageInfo.endCursor until hasNextPage is false, so threads beyond the first
-# 100 are listed and counted; issue comments come from the first page. A
+# 100 are listed and counted; issue comments come from the first page. Each
+# thread's comments are read 100 at a time with their pageInfo.hasNextPage: a
+# thread with more than 100 comments exits 1 instead of losing the rest. A
 # GraphQL error, a missing pull request or a malformed page exits 1: the
 # unresolved count is never reported from incomplete data. `author` is the
 # login (`unknown` for a deleted account) and `author_association` is
@@ -30,7 +32,7 @@
 # else python3, byte for byte the same. The listing ends with the line
 # `unresolved threads: N`. Nothing is written to disk.
 #
-# Exit: 0 comments printed; 1 gh absent, no pull request, invalid PR number from gh, unresolvable repository, gh failure or malformed response; 2 usage error (unknown flag, missing value, invalid --pr)
+# Exit: 0 comments printed; 1 gh absent, no pull request, invalid PR number from gh, unresolvable repository, gh failure, malformed response or a review thread with more than 100 comments; 2 usage error (unknown flag, missing value, invalid --pr)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,7 +48,7 @@ GPC_MAX_PAGES=1000
 
 # The one query (FR-36), field set exactly as the script contract states.
 # shellcheck disable=SC2016 # $cursor, $owner, $name and $pr are GraphQL variables
-GPC_THREADS='reviewThreads(first: 100, after: $cursor) { nodes { isResolved comments(first: 100) { nodes { author { login } authorAssociation body path line url } } } pageInfo { hasNextPage endCursor } }'
+GPC_THREADS='reviewThreads(first: 100, after: $cursor) { nodes { isResolved comments(first: 100) { nodes { author { login } authorAssociation body path line url } pageInfo { hasNextPage } } } pageInfo { hasNextPage endCursor } }'
 GPC_ISSUE_COMMENTS='comments(first: 100) { nodes { author { login } authorAssociation body url } }'
 # shellcheck disable=SC2016 # GraphQL variables, not shell expansions
 GPC_QUERY='query($owner: String!, $name: String!, $pr: Int!, $cursor: String) { repository(owner: $owner, name: $name) { pullRequest(number: $pr) { '"$GPC_THREADS $GPC_ISSUE_COMMENTS"' } } }'
@@ -70,17 +72,21 @@ def conn_ok: isobj and ((.nodes | type) == "array") and all(.nodes[]; isobj);
 '
 
 # Page inspection: one verdict line — NONJSON, ERRORS: <messages>,
-# SHAPE: <detail>, NOPR, LAST or NEXT: <endCursor>. Input is slurped (-s), so
-# anything but exactly one JSON value is NONJSON; so are NaN and infinite
-# numbers and lone surrogate escapes, which jq and python3 parse differently.
+# SHAPE: <detail>, NOPR, LONG (a thread with more than 100 comments), LAST or
+# NEXT: <endCursor>. Input is slurped (-s), so anything but exactly one JSON
+# value is NONJSON; so are NaN and infinite numbers and lone surrogate
+# escapes, which jq and python3 parse differently.
 # shellcheck disable=SC2016 # jq source
 GPC_JQ_INSPECT='
+def thread_ok:
+  isobj and ((.isResolved | type) == "boolean") and (.comments | conn_ok)
+  and ((.comments.pageInfo.hasNextPage | type) == "boolean");
 def structure_ok:
   (.reviewThreads | isobj)
   and ((.reviewThreads.nodes | type) == "array")
   and ((.reviewThreads.pageInfo | type) == "object")
   and ((.reviewThreads.pageInfo.hasNextPage | type) == "boolean")
-  and all(.reviewThreads.nodes[]; isobj and ((.isResolved | type) == "boolean") and (.comments | conn_ok))
+  and all(.reviewThreads.nodes[]; thread_ok)
   and (.comments | conn_ok);
 def cursor_ok: type == "string" and length > 0 and all(explode[]; . >= 32 and . != 127);
 if length != 1 then "NONJSON"
@@ -97,6 +103,7 @@ else .[0]
     elif (.data.repository.pullRequest | isobj | not) then "SHAPE: pullRequest is not an object"
     else .data.repository.pullRequest
       | if ((try structure_ok catch false) | not) then "SHAPE: pull-request data has an unexpected structure"
+        elif any(.reviewThreads.nodes[]; .comments.pageInfo.hasNextPage) then "LONG"
         elif (.reviewThreads.pageInfo.hasNextPage | not) then "LAST"
         elif (.reviewThreads.pageInfo.endCursor | cursor_ok) then "NEXT: " + .reviewThreads.pageInfo.endCursor
         else "SHAPE: hasNextPage is true but endCursor is missing or malformed" end
@@ -220,6 +227,15 @@ def conn_ok(v):
             and all(isinstance(x, dict) for x in v["nodes"]))
 
 
+def thread_ok(t):
+    if not isinstance(t, dict) or not isinstance(t.get("isResolved"), bool):
+        return False
+    if not conn_ok(t.get("comments")):
+        return False
+    info = t["comments"].get("pageInfo")
+    return isinstance(info, dict) and isinstance(info.get("hasNextPage"), bool)
+
+
 def structure_ok(p):
     rt = p.get("reviewThreads")
     if not isinstance(rt, dict) or not isinstance(rt.get("nodes"), list):
@@ -227,10 +243,8 @@ def structure_ok(p):
     info = rt.get("pageInfo")
     if not isinstance(info, dict) or not isinstance(info.get("hasNextPage"), bool):
         return False
-    for t in rt["nodes"]:
-        if (not isinstance(t, dict) or not isinstance(t.get("isResolved"), bool)
-                or not conn_ok(t.get("comments"))):
-            return False
+    if not all(thread_ok(t) for t in rt["nodes"]):
+        return False
     return conn_ok(p.get("comments"))
 
 
@@ -278,6 +292,8 @@ def inspect():
         return "SHAPE: pullRequest is not an object"
     if not structure_ok(p):
         return "SHAPE: pull-request data has an unexpected structure"
+    if any(t["comments"]["pageInfo"]["hasNextPage"] for t in p["reviewThreads"]["nodes"]):
+        return "LONG"
     info = p["reviewThreads"]["pageInfo"]
     if not info["hasNextPage"]:
         return "LAST"
@@ -506,6 +522,9 @@ while ((more)); do
       ;;
     NOPR)
       die "gh api graphql returned no pull-request data for $WHERE: the pull request may not exist; the unresolved count is unknowable"
+      ;;
+    LONG)
+      die "a review thread of $WHERE has more than 100 comments (page $page): the comments after the first 100 are not read, so the thread is never reported incomplete"
       ;;
     *)
       die "cannot inspect the gh api graphql response for $WHERE (page $page)"

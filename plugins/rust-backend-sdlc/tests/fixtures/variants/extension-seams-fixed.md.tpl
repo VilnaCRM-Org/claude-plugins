@@ -27,7 +27,7 @@ The shipped adapter is the in-process `shared_infrastructure::cache::MokaCache`.
 1. Add the Redis client crate to `crates/shared/infrastructure/Cargo.toml` and to the allow-list of that layer in `architecture.toml`. The change to `architecture.toml` is protected configuration and needs the label `approved-config-change`.
 2. Add `shared_infrastructure::cache::RedisCache` next to `MokaCache`, implement `Cache` for it, and give it a `Debug` implementation that never prints keys or values.
 3. Add the settings (URL, timeouts) to the configuration of the `service` crate. Every setting is an environment variable: add each to `.env` and to `.env.test` where tests need it.
-4. Construct the adapter in the wiring of `crates/service/Cargo.toml` and its crate, and regenerate the contract snapshots with `make generate-openapi-spec` when a response changes.
+4. Construct the adapter in `Adapters::connect` and hand it to `CacheProbe` instead of `MokaCache`. The handler of `/api/health` and `HealthService` do not change.
 
 ## Outbox for domain events
 

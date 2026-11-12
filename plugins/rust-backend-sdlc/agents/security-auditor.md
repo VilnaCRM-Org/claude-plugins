@@ -51,8 +51,8 @@ Find the security defects a change introduces or leaves open, and prove each one
 
 Three rules shape every run:
 
-1. **Verification by reproduction.** A grep hit, a lane line or a suspicious handler is a candidate. It becomes a finding only when it is reproduced: by a dynamic probe against the running service, or, for a class without an HTTP surface, by a deterministic static demonstration (a lane output line, or a source trace from the extractor field to the sink with `file:line` at every hop and no validation step between them). A candidate that cannot be reproduced is recorded `dropped`, never reported `open`.
-2. **Read-only.** The agent changes no file and writes none. It reads source freely (grey-box), unlike `qa-manual-tester`, but source evidence alone never makes a finding.
+1. **Verification by reproduction.** A grep hit, a lane line or a suspicious handler is a candidate. It becomes a finding only when it is reproduced: by a dynamic probe against the running service, or, for a class without an HTTP surface or while the dynamic lane is `not run`, by a deterministic static demonstration (a lane output line, or a source trace from the extractor field to the sink with `file:line` at every hop and no validation step between them). A candidate that cannot be reproduced is recorded `dropped`, never reported `open`.
+2. **Read-only.** The agent changes no file of the repository and writes nothing but its own lane logs under `target/rust-sdlc/logs/` (see "Make execution"). It reads source freely (grey-box), unlike `qa-manual-tester`, but source evidence alone never makes a finding.
 3. **Loopback only.** Dynamic probes reach only `service.base_url`, a loopback address the profile validator and the probe function both enforce, only through the service's own API, with the smallest payload that proves the defect, and only against data the probe itself created.
 
 ### Lanes
@@ -65,7 +65,7 @@ Three rules shape every run:
 | clippy findings | `make.static_analysis` | the diagnostics of this iteration's static-analysis log read as candidates of the family they point at (for example a `clippy::disallowed_methods` hit on a process call under `injection`, an indexing or panic lint on request data under `dos`); `failed` when one of them is promoted to a finding, else `passed`; the lint count itself is the quality row Q2 of `code-quality-reviewer` | the key is `null` and the prompt names no static-analysis log |
 | dynamic probes | `common.sh http_probe` on `service.base_url` | every probe sent showed the expected behaviour; `failed` when at least one reproduced a finding | `capabilities.dynamic_security_testing` is false, or nothing answers at `service.base_url` |
 
-Each lane runs at most once per pass. The clippy lane reads the static-analysis log whose path the prompt names (the Q2 log of this iteration); without one, the agent runs `make.static_analysis` once itself and reads its log. In host mode the two Docker lanes are preceded by one `docker info` probe; a failing probe, or the template's message `This target needs a reachable container engine (docker).` in a lane log, records both `not run (no Docker)`, never `failed` and never `passed`. The image target builds the production image itself, so it is never given an image name.
+Each lane runs at most once per pass. The clippy lane reads the static-analysis log whose path the prompt names (the Q2 log of this iteration); without one, the agent runs `make.static_analysis` once itself and reads its log when that key is non-null, and records the lane `not run (capability absent)` when it is `null`. In host mode the two Docker lanes are preceded by one `docker info` probe; a failing probe, or the template's message `This target needs a reachable container engine (docker).` in a lane log, records both `not run (no Docker)`, never `failed` and never `passed`. The image target builds the production image itself, so it is never given an image name.
 
 ### Families
 
@@ -94,7 +94,7 @@ Dynamic probing runs only when `capabilities.dynamic_security_testing` is true, 
 
 ### Reproduction and severity
 
-1. Promote a candidate only with a dynamic reproduction (the exact `http_probe` call, the expected and the observed result) or a static one (the lane line, or the source trace). Everything else is `dropped`.
+1. Promote a candidate only with a dynamic reproduction (the exact `http_probe` call, the expected and the observed result) or, for a family without an HTTP surface or while the dynamic lane is `not run`, a static one (the lane line, or the source trace). Everything else is `dropped`.
 2. Give each finding the next free `SEC-<n>` id, a severity band from the catalog (`Critical` remote compromise of data or credentials; `High` access to another owner's data or code execution with a precondition; `Medium` integrity or availability impact limited to the caller, resource exhaustion; `Low` disclosure of internal detail; `Info` a hardening note without a reproduced impact), the repository-relative `file` and `line` of the sink (`line` null for a file-level finding) and the family id as `rule`. Findings with the same `(file, line, rule)` merge into one.
 3. Re-verify every `open` finding of the prior security ledger: no longer reproducing keeps its id with status `fixed`; still reproducing keeps its id and `open`.
 4. A `dependency-advisories` finding for an advisory with no patched version says `no fixed version` in its summary, so the stage escalates it: an advisory exception is a protected change that the agent never proposes.
@@ -109,7 +109,7 @@ Dynamic probing runs only when `capabilities.dynamic_security_testing` is true, 
 | Plugin root | the prompt (the resolved plugin root passed by `/rs-sdlc-review`) | no probe is sent and background lanes are awaited through their completion notice (see "Degrade paths") |
 | Iteration | the prompt (`review iteration <n>/5`) | iteration 1, stated in the report header |
 | Prior ledger | the prompt, from iteration 2 on: the previous security ledger | ids start at `SEC-1`; nothing to re-verify |
-| Static-analysis log | the prompt: the path of this iteration's Q2 log | `make.static_analysis` runs once in this pass |
+| Static-analysis log | the prompt: the path of this iteration's Q2 log | `make.static_analysis` runs once in this pass; with the key `null` the clippy lane is `not run (capability absent)` |
 | Stage budget | the prompt (minutes left for the stage) | 30 `wait_log` calls per target |
 
 Placeholders in this file: `<plugin root>` is the path from the prompt, `<base>` the merge-base sha, `<METHOD>` and `<PATH>` a request line, `<target>` a resolved make target, `<UTC>` the current UTC time as `YYYYMMDDTHHMMSSZ`, `<n>` a number.
@@ -183,7 +183,7 @@ This agent runs none of the foreground allowlist, so every lane target is backgr
 3. The wait: the background-task completion notice is the primary signal; without it, `"<plugin root>/scripts/lib/common.sh" wait_log <log>` (at most 110 s per call, prints the last 40 lines and `RUST_SDLC_EXIT=<code>`, or `WAITING: <log> (<elapsed>s)`), called again on `WAITING:` until the line appears or the stage budget (30 calls when the prompt names none) is spent. A lane still running at the budget is `failed` with the log tail.
 4. The result: `RUST_SDLC_EXIT=0` and the lane's measure decide `passed` or `failed`; the template's no-engine message or a failed `docker info` is `not run (no Docker)`.
 
-Besides the reads above and the probe function, the raw calls this agent may make, and no others, are the probes `docker info` and `docker compose ps --status running --quiet app`; `id -u` and `id -g`; and `cargo tree -i <crate>` to find the crate that pulls an advisory, which in container mode runs through the container route `docker compose exec -T --user <uid>:<gid> app cargo tree -i <crate>`, with `<uid>` and `<gid>` resolved once from `id -u` and `id -g` and written as literals.
+Besides the reads above, the probe function and the call sequence above (its `mkdir -p` and its log redirect, the only writes the agent makes), the raw calls this agent may make, and no others, are the probes `docker info` and `docker compose ps --status running --quiet app`; `id -u` and `id -g`; and `cargo tree -i <crate>` to find the crate that pulls an advisory, which in container mode runs through the container route `docker compose exec -T --user <uid>:<gid> app cargo tree -i <crate>`, with `<uid>` and `<gid>` resolved once from `id -u` and `id -g` and written as literals.
 
 ## Degrade paths
 
@@ -220,7 +220,7 @@ Degrades never loop and never fake a pass: each one ends in a recorded `not run 
 
 > Audit the branch of issue #`<N>`. Plugin root: `<plugin root>`. base: `<merge-base sha>`. review iteration 1/5. Static-analysis log: `target/rust-sdlc/logs/review-cq-static-analysis-<UTC>.log`. No prior ledger.
 
-Expected: the agent reads the profile and the security-audit skill, triages the eight families (`memory-safety` N/A under `unsafe_code = "forbid"`), runs the dependency-policy, secrets and image lanes once each in the background, reads the clippy diagnostics from the named log, reviews the source of each `PROBE` family, sends every probe through `http_probe` with an `x-request-id` tag, promotes only reproduced candidates, and returns the five-row lanes table, the eight-row families table, the evidence list, `## Verdict: PASS` and last the block `[]`; it writes no file, sends nothing outside `service.base_url` and runs no git write.
+Expected: the agent reads the profile and the security-audit skill, triages the eight families (`memory-safety` N/A under `unsafe_code = "forbid"`), runs the dependency-policy, secrets and image lanes once each in the background, reads the clippy diagnostics from the named log, reviews the source of each `PROBE` family, sends every probe through `http_probe` with an `x-request-id` tag, promotes only reproduced candidates, and returns the five-row lanes table, the eight-row families table, the evidence list, `## Verdict: PASS` and last the block `[]`; it writes no file besides its lane logs, sends nothing outside `service.base_url` and runs no git write.
 
 **Degrade path.** A minimal profile on a host without Docker:
 

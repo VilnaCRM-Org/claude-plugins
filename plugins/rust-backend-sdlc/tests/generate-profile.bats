@@ -831,6 +831,17 @@ gp_workflows_without() {
   [ -z "$(gp_items "$OUT" architecture.bounded_contexts | grep '^shared/' || true)" ]
 }
 
+@test "generate-profile: a parseable architecture.toml whose layer is not a list gives architecture.layers [] and nothing else moves" {
+  local value
+  for value in '5' 'true' '"domain"' '{ name = "domain" }'; do
+    printf 'layer = %s\n' "$value" >"$STUB/architecture.toml"
+    gp_detect
+    [ ! -s "$ERR" ]
+    gp_expect architecture.layers '[]'
+    gp_same "$EXPECTED" "$OUT"
+  done
+}
+
 @test "generate-profile: a SUBST target appended to make/service.mk maps its key; undocumented rules and assignments do not" {
   printf '\nfr-nfr-gate: ## Run the service FR/NFR gate\n\t@true\npr-comments:\n\t@true\nai-review-loop := not-a-rule ## a variable\n' \
     >>"$STUB/make/service.mk"

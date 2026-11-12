@@ -12,7 +12,7 @@ ADR-6 is "Permissions: acceptEdits, local allowlist, no bypass":
 - `.claude/settings.json` is protected in the template: `protected-config.toml` lists it. `merge-settings.sh --file shared` refuses that file while `protected-config.toml` lists it in `files` or below one of its `directories`, or exists and cannot be parsed, and prints the merged JSON after the `REFUSED:` line. Setup never passes `--file shared`.
 - `merge-settings.sh` never writes `ask`, `hooks`, `env` or `defaultMode`, never writes a `curl` entry and never sets `bypassPermissions`. The template's own allow, ask and deny rules and its guard hooks stay exactly as they are.
 
-The plugin's deny entries exist because the template's deny rules are prefix rules: without the plugin's own deny entries, the plugin's broad allow entries `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh:*)` and `Bash(make:*)` would also approve hook-bypass, force, label and gate-faking forms. "Why the plugin adds deny entries" below gives the details and the one residual gap.
+The plugin's deny entries exist because the template's deny rules are prefix rules: without the plugin's own deny entries, the plugin's broad allow entries `Bash(git commit:*)`, `Bash(git push:*)`, `Bash(gh:*)` and `Bash(make:*)` would also approve hook-bypass, force, label and gate-faking forms. "Why the plugin adds deny entries" below gives the details and the two residual gaps.
 
 ## How Claude Code applies the rules
 
@@ -37,7 +37,7 @@ The template's `.claude/settings.json` adds its own rules, which keep applying n
 
 | # | Entry | Covers |
 | --- | --- | --- |
-| 1 | `Bash(make:*)` | every `make <target> [VAR=value]` call with the ADR-13 closed variable set (template `ask` rules still prompt: ask before allow; deny entries M1–M10 refuse options and other variables) |
+| 1 | `Bash(make:*)` | every `make <target> [VAR=value]` call with the ADR-13 closed variable set (template `ask` rules still prompt: ask before allow; deny entries M1–M10 refuse options and the gate-overriding variables; any other variable is kept out by the plugin's spelling, not by a rule) |
 | 2 | `Bash(RUN_IN_CONTAINER=1 make:*)` | prefix spelling typed by users or template docs |
 | 3 | `Bash(RUN_IN_CONTAINER=1 git commit:*)` | hooked commits in container mode (`-F <file>`) |
 | 4 | `Bash(RUN_IN_CONTAINER=1 git push:*)` | hooked pushes in container mode (`-u origin HEAD`) |
@@ -246,13 +246,17 @@ The template's git deny rules are prefix rules such as `Bash(git commit --no-ver
 - **G1–G9** refuse a hook bypass or a force, mirror, delete or `+refspec` push wherever the option stands, so the two entries 9 and 10 cannot approve them. The template's prefix rules still catch the forms where the option comes first.
 - **H1–H8** keep `Bash(gh:*)` away from the two approval labels (any `gh` call that names one, whatever it does with it), merges, secrets, variables, repository deletion and settings, and branch protection. The plugin reads labels with `gh pr view --json labels` and looks for the label in the output; it never names an approval label in a `gh` call and never applies or removes one.
 - **B1–B2** keep bmalph state and the Ralph circuit breaker out of reach: entry 21 is exact, so `bmalph implement --force` never matches an allow entry, and B2 refuses it in any spelling; `bmalph reset` is refused outright.
-- **M1–M10** keep `Bash(make:*)` from faking a gate. GNU make command-line variables override every assignment of the template's gate makefile, so `make tests-with-coverage COVERAGE_GATE_CMD=true` or `make validate-configuration CONFIG_CHANGE_APPROVED=true` would pass a gate without running it, and `-i`, `-k`, `-n` or a long option would ignore, skip or redirect it. The plugin passes only the closed variable set `RUN_IN_CONTAINER COMMIT_TITLE base_ref BREAKING_CHANGE_APPROVED CONFIG_CHANGE_APPROVED group context name SCHEMATHESIS_URL`, `CONFIG_CHANGE_APPROVED` only with an empty value, and no option.
+- **M1–M10** keep `Bash(make:*)` from faking a gate. GNU make command-line variables override every assignment of the template's gate makefile, so `make tests-with-coverage COVERAGE_GATE_CMD=true` or `make validate-configuration CONFIG_CHANGE_APPROVED=true` would pass a gate without running it, and `-i`, `-k`, `-n` or a long option would ignore, skip or redirect it. The plugin passes only the closed variable set `RUN_IN_CONTAINER COMMIT_TITLE base_ref BREAKING_CHANGE_APPROVED CONFIG_CHANGE_APPROVED group context name SCHEMATHESIS_URL`, `CONFIG_CHANGE_APPROVED` only with an empty value, and no option. A variable that M2–M6 do not name is the second residual gap below.
 
 The plugin's own calls never match a deny entry: commits carry no message text (`git commit -F <file>`, the file written by `common.sh commit_msg_file`), pushes are always `git push -u origin HEAD`, label reads use `gh pr view --json labels`, and a commit subject that contains a space followed by a hyphen is pre-validated with `common.sh is_commit_subject` instead of `make check-commit-message COMMIT_TITLE='…'`, because M7–M10 can refuse that make call (a subject such as `fix(#7): support the -k option` matches M8).
 
 ### The residual gap: combined short options
 
 Claude Code patterns have no character classes, so a short option folded into a group of short options matches no deny rule: `git commit -nm x` is a hook bypass that neither G2, G3 nor the template's `Bash(git commit -n:*)` matches, and `git push -uf origin HEAD` is a force push that neither G5 nor the template's `Bash(git push -f:*)` matches. The gap is closed by the plugin's own spelling, not by a rule: the plugin never types combined short options. Every commit it makes is `git commit -F <path>` after `commit_msg_file`, every push is `git push -u origin HEAD` (CC-14 pins both spellings in every command, agent and workflow), and CC-15 checks the forbidden-pattern set P1–P7 over the commands, agents, skills, workflows and scripts. A person typing in the session is not held by those checks, and the deny entries are a backstop for the plugin's broad allow entries, not a sandbox.
+
+### The residual gap: other make variables
+
+Claude Code patterns cannot say "every variable except these", so M2–M6 refuse only the names that override a gate of the template's `make/gates.mk`: every `*_CMD`, `*_FLAGS` and `*_ARGS` variable, `CI_STAGES` and `CONFIG_CHANGE_APPROVED=true`. Any other command-line variable matches no deny entry and still overrides its assignment in the template's `Makefile`: `make tests-with-coverage SHELL=true` runs no recipe line and exits 0, and `make ci-tests CI_TESTS_TARGETS=` runs no test target. The closed variable set is held by the plugin's own spelling, not by a rule: CC-36 rejects a make call in the commands, agents, skills and workflows that passes an option, a variable outside the set or `CONFIG_CHANGE_APPROVED` with a value. As with combined short options, a person typing in the session is not held by that check.
 
 ## HTTP goes through `common.sh http_probe` only
 
@@ -290,7 +294,7 @@ The template's `PreToolUse` and `PostToolUse` hooks on `Edit|Write|MultiEdit|Not
 
 ### `ask` rules in headless runs
 
-An `ask` rule cannot be answered in a headless run (`claude -p`, a workflow, a scheduled session): the call comes back as a permission denial. The plugin records the target as `<target>: not run (ask rule)`, never retries it under another spelling and goes on; the outcome is at best `SUCCESS-WITH-REPORT` (D13 in `docs/degrade-matrix.md`). The case the plugin meets by design is the C8 rollback round trip of /rs-sdlc-new-context, `make migrate-rollback`, which is a template ask rule; C8 stays done on `make validate-sqlx-metadata`. In an interactive session the prompt appears and a person answers it.
+An `ask` rule cannot be answered in a headless run (`claude -p`, a workflow, a scheduled session): the call comes back as a permission denial. The plugin records the target as `<target>: not run (ask rule)`, never retries it under another spelling and goes on; the outcome is at best `SUCCESS-WITH-REPORT` (D13 in `docs/degrade-matrix.md`). The case the plugin meets by design is the rollback round trip, `make migrate-rollback`, which is a template ask rule: in the C8 item of /rs-sdlc-new-context, C8 stays done on `make validate-sqlx-metadata`; in a `rust-implementer` story that adds a migration pair, the rollback and its re-apply are recorded `not run (ask rule)` and the story still completes. In an interactive session the prompt appears and a person answers it.
 
 ## Calls per command
 
@@ -378,7 +382,7 @@ The command runs before any profile or allowlist exists, and the allowlist that 
 | `new-service.sh --name '<name>' --dry-run …`, `new-service.sh --phase source …`, `new-service.sh --phase customize …` | 27; the script's own `gh api`, `gh repo create`, `gh repo clone` and `git archive` calls run inside it |
 | `gh issue view <N> --json number,state,labels`, `gh issue edit <N> --add-label rust-backend-sdlc` | 20 |
 | `gh label list --search rust-backend-sdlc --json name --jq '.[].name'`, `gh label create rust-backend-sdlc …` | 20 |
-| `gh issue list --state open --label rust-backend-sdlc --json number,title --limit 100` | 20 |
+| `gh api --paginate 'repos/{owner}/{repo}/issues?labels=rust-backend-sdlc&state=open&sort=created&direction=desc&per_page=100' --jq …` | 20 |
 | `common.sh redact --in … --out target/rust-sdlc/tmp/new-service-issue.md`, the same for `new-service-pr.md` | 27 → `redact` |
 | `gh issue create --title 'Initialize <name> from the Rust service template' --body-file … --label rust-backend-sdlc` | 20 |
 | `git log -1 --format=%s main`, `git log -1 --format=%s`, `git log --format=%s <base>..HEAD` | 7 |
@@ -444,7 +448,7 @@ The issue stage calls no git and no make target.
 | `validate-profile.sh` | 27 |
 | `gh issue view <N> --json number,url,title,body,labels,state` | 20 |
 | `gh issue edit <N> --add-label rust-backend-sdlc`, `gh issue edit <N> --body-file target/rust-sdlc/tmp/issue.md` | 20 |
-| `gh issue list --state open --label rust-backend-sdlc --json number,url,title --limit 100` | 20 |
+| `gh api --paginate 'repos/{owner}/{repo}/issues?labels=rust-backend-sdlc&state=open&sort=created&direction=desc&per_page=100' --jq …` | 20 |
 | `gh label list --search rust-backend-sdlc …`, `gh label list --search enhancement …` | 20 |
 | `gh label create rust-backend-sdlc --color 5319e7 --description …` | 20 |
 | `common.sh redact --in target/rust-sdlc/tmp/issue.raw.md --out target/rust-sdlc/tmp/issue.md`, the same for `issue-title.md` | 27 → `redact` |

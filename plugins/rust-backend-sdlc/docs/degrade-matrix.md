@@ -5,7 +5,7 @@ Every capability gap and every safety block the plugin knows has exactly one def
 ## Rules
 
 - The outcome vocabulary is closed: `SUCCESS`, `SUCCESS-WITH-REPORT` and `ESCALATED`, nothing else. `DEGRADED:` is only a line prefix, never a status.
-- An absent capability ends `SUCCESS-WITH-REPORT`; a mapped capability that cannot run, or a safety block, ends `ESCALATED`.
+- An absent capability ends `SUCCESS-WITH-REPORT`; a mapped capability that cannot run, or a safety block, ends `ESCALATED`, unless its row names `SUCCESS-WITH-REPORT` for the stage: D13, whose `ask` targets are lifecycle and `-fix` targets and never a gate, and the setup and new-service cells of D2, D3, D5 and D25, which only report what they could not verify.
 - Degrade paths never loop and never fake a pass. A target that did not run is listed `<target>: not run (<reason>)`, never `passed`, and is never handed to remediation; the reasons are `capability absent`, `no Docker`, `ask rule`, `no toolchain`, `skipped by triage`, `not changed` and `deferred to PR CI`.
 - Where one condition reaches several stages, the Outcome cell names the outcome per stage.
 - A degraded stage still meets its exit string; it only reports what it could not verify. A run whose stages all meet their exit strings ends `result: SUCCESS`, with every note in `degrade_notes`.

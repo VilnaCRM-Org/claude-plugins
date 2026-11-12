@@ -28,7 +28,10 @@
                     "line": 42,
                     "url": "https://github.com/acme/billing-service/pull/7#discussion_r101"
                   }
-                ]
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
               }
             },
             {
@@ -45,7 +48,10 @@
                     "line": 17,
                     "url": "https://github.com/acme/billing-service/pull/7#discussion_r102"
                   }
-                ]
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
               }
             }
           ],

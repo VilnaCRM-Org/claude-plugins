@@ -450,6 +450,7 @@ wf_same_as_child() {
     wf_expect 'all(/^publish /).length >= 1' \
       'all(/^publish /).every((c) => has(c.prompt, ...FORMS, BG))' \
       'all(/^publish /).every((c) => has(c.prompt, "commit_msg_file", "protected_changes <merge-base-sha>", "hooks_active", "publish-<UTC>.log", "wait_log"))' \
+      'all(/^publish /).every((c) => has(c.prompt, "commit_msg_file \x27<subject>\x27") && !/\): <subject>|fix\(#<N>\): fix\(#/.test(c.prompt))' \
       'all(/^publish /).every((c) => formsClean(c.prompt) && p17clean(c.prompt))' \
       'all(/^publish /).every((c) => !/RUN_IN_CONTAINER=1 make|git commit -m|git commit -a/.test(c.prompt))'
   done
@@ -484,6 +485,15 @@ wf_same_as_child() {
   wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && calls.length === 0' \
     'field("stage") === "review" && field("iteration") === "0/5"' \
     'field("blocking_finding") === "malformed --pr value \"repo/pull/456-invalid123\""'
+  # A maxIterations that is not a whole number of at least 1 escalates the same way, never coerced to a cap.
+  local value variant
+  for value in 0 -2 2.5 '"3"'; do
+    variant="$BATS_TEST_TMPDIR/fnr-bad-cap.json"
+    node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.args.maxIterations = JSON.parse(process.argv[3]); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/fnr-iteration-cap.json" "$variant" "$value"
+    wf_scenario rs-sdlc-fr-nfr-review "$variant"
+    wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && calls.length === 0 && field("iteration") === "0/5"' \
+      'has(field("blocking_finding"), "malformed arguments: malformed maxIterations", "it only lowers the cap of 5")'
+  done
 }
 
 @test "workflows: fnr-converges: finding counts 3 → 1 → 0 end the loop SUCCESS, the fixes split by context with one verify step (AC-19.2)" {
@@ -724,6 +734,12 @@ wf_same_as_child() {
     'seq("scope", "code-quality-reviewer", "fr-nfr-reviewer", "security-auditor:all")' \
     'has(field("blocking_finding"), "code-quality-reviewer", "BLOCKED", "blocked rows: Q6 (no Docker)")' \
     'has(field("iteration_log"), "1: ", "code-quality-reviewer", "BLOCKED")'
+  # A lens that reports SKIPPED with a PASS verdict and no findings escalates too, never a pass.
+  local skipped="$BATS_TEST_TMPDIR/rp-lens-skipped.json"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); Object.assign(s.replies.find((x) => x.match === "^code-quality-reviewer$").reply, {status: "SKIPPED", verdict: "PASS", note: "nothing to review"}); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/rp-lens-blocked.json" "$skipped"
+  wf_scenario rs-sdlc-review-panel "$skipped"
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && count(/^verify:/) === 0 && count(/^fix:/) === 0' \
+    'has(field("blocking_finding"), "code-quality-reviewer SKIPPED: nothing to review")'
 }
 
 @test "workflows: rp-lens-protected: a lens finding whose fix is the protected-configuration line escalates at Review with that line verbatim, never verified or fixed" {
@@ -1113,7 +1129,9 @@ wf_same_as_child() {
   wf_scenario rs-sdlc-feature feat-qa-skipped-accepted
   wf_expect 'r.result === "SUCCESS-WITH-REPORT" && note("make.start absent: black-box QA not run")' \
     'order("qa-boot", "qa-skip-check", "publish finish-pr", "workflow:rust-backend-sdlc:rs-sdlc-pr-until-green") && count("qa-manual-tester") === 0' \
-    'stage("QA").met === "yes (degraded)"'
+    'stage("QA").met === "yes (degraded)"' \
+    'count("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green") === 2 && same(all("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review")[1].args, {pr: 34, head: "b2c3d4e5f60718293a4b5c6d7e8f901234567890"})' \
+    'stage("Finish PR").met === "yes"'
 }
 
 @test "workflows: feat-qa-skipped-rejected: a QA skip with make.start mapped escalates instead of passing" {

@@ -54,6 +54,7 @@ Exit 1: stop with `run /rs-sdlc-setup on the default branch and commit the resul
    A non-zero exit → `ESCALATED` with the command and its exit code as `blocking_finding`, never retried in a loop and never planned from a guessed issue. `state` other than `OPEN` → `ESCALATED` (`blocking_finding: issue #<N> is <state>`).
 4. `<kebab-title>`: the `--slug` value; else the `<slug>` of the current branch when it has the form `<type>/<N>-<slug>` for this `<N>`; else the skill's step-1 derivation from the issue title. `SPECS_DIR` is `specs/<N>-<kebab-title>`.
 5. When a directory `specs/<N>-*/` already exists, it is this issue's bundle: its name is `SPECS_DIR` and the plan revises it in place. A `--slug` naming a different directory, or more than one such directory, ends `ESCALATED`; there is never a second bundle for the same `<N>`.
+6. When no such directory exists, the `<kebab-title>` of item 4 must pass the `--slug` rule whatever its source (the slug, the branch or the issue title): it matches `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` and is at most 50 characters, so the directory name and the commit subject stay valid for the later stages. Otherwise → `ESCALATED` before anything is written (`blocking_finding: bundle title <value> is not kebab-case of at most 50 characters`, `recommended_action: run /rs-sdlc-plan #<N> --slug <kebab-title>`).
 
 ### Step 3 — Resume check
 
@@ -111,6 +112,7 @@ After the skill prints `SPECS_DIR: specs/<N>-<kebab-title>`, this stage checks t
    ```
 
    Exit 0 prints only `WOULD: stage <src> -> <dest>` lines and writes nothing; it re-proves the regex and the `## Constraints` length with the script's own measurement. Exit 1 prints one `REFUSED: <reason>` line: a refusal about the bundle (the `## Constraints` length, the readiness regex, a missing file or story heading) → shorten or correct the artifact it names and re-check from check 1, within the guard; a refusal about the staging folder (`_bmad-output/` not git-ignored or holding tracked files) is no bundle defect → `ESCALATED` at once. Exit 2 (usage, or a working directory outside a git work tree) → `ESCALATED`.
+5. the directory holds the seven files and nothing else: every path the Glob tool lists for `specs/<N>-<kebab-title>/**/*` (the recursive pattern, which also lists hidden files and files in subdirectories) is one of the seven files of step 5, directly inside the directory. Any other path (a scratch file, a file in a subdirectory, a leftover of an earlier plan) → `ESCALATED` at once, naming it (`recommended_action: move or delete <path> by hand, then run /rs-sdlc-plan again`), because step 8 stages the whole directory, subdirectories included, and this stage never deletes a file it did not write.
 
 A failed round names its artifact; the correction is made in that artifact (the skill's step 11 loop) and the round counts against the guard.
 
@@ -134,7 +136,7 @@ A failed round names its artifact; the correction is made in that artifact (the 
    git diff --cached --name-only
    ```
 
-   Every listed path must lie under `specs/<N>-<kebab-title>/`; any other staged path → `ESCALATED`, nothing committed (the stage never commits a file it did not write). An empty list means the bundle already equals `HEAD`: nothing is committed, and step 9 reports `UNCHANGED: specs/<N>-<kebab-title> (bundle already committed)`.
+   Every listed path must be one of the seven files of step 5 directly under `specs/<N>-<kebab-title>/`; any other staged path, inside the directory or outside it → `ESCALATED`, naming it, nothing committed (the stage never commits a file it did not write). An empty list means the bundle already equals `HEAD`: nothing is committed, and step 9 reports `UNCHANGED: specs/<N>-<kebab-title> (bundle already committed)`.
 2. Merge base (D24):
 
    ```bash
@@ -149,7 +151,7 @@ A failed round names its artifact; the correction is made in that artifact (the 
    "${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh" protected_changes <merge-base-sha>
    ```
 
-   Exit 0 → continue. A `PROTECTED: <path> (<commit>|working tree)` line → `ESCALATED` (D23) with `recommended_action: git restore --source=<merge-base-sha> -- <path>, or the approved-config-change label and a session restarted with ALLOW_PROTECTED_CONFIG_EDIT=1`. A `PROFILE_CHANGED: .claude/rust-sdlc.yml` line → `ESCALATED` (`recommended_action: run /rs-sdlc-setup on the default branch and commit the result`). Exit 2 → `ESCALATED`.
+   Exit 0 → continue. A `PROTECTED: <path> (<commit>|working tree)` line → `ESCALATED` (D23) with `recommended_action: git restore --source=<merge-base-sha> -- <path>, or the approved-config-change label and a session restarted with ALLOW_PROTECTED_CONFIG_EDIT=1`. A `PROFILE_CHANGED: .claude/rust-sdlc.yml` line → `ESCALATED` (`recommended_action: run /rs-sdlc-setup on the default branch and commit the result`). Exit 2, or exit 1 without either line (an unreadable `protected-config.toml`) → `ESCALATED`.
 4. Pre-validate the subject `docs(#N): add planning bundle <N>-<kebab-title>` (FR-2; the issue number fills `#N`, and the part after `bundle` equals the `specs/` directory name):
 
    ```bash

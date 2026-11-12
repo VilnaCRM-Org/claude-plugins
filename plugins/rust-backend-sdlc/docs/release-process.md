@@ -42,12 +42,12 @@ Tag the merge commit of `main` that the release pull request produced, after tha
 
 ```bash
 git fetch origin main
-git log -1 --format='%H %s' origin/main
+gh pr view <release-pr-number> --json mergeCommit --jq .mergeCommit.oid
 git tag -a rust-backend-sdlc-vX.Y.Z -m 'rust-backend-sdlc X.Y.Z' <merge-commit-sha>
 git push origin rust-backend-sdlc-vX.Y.Z
 ```
 
-The second line shows the sha and subject of the merge commit; tag that sha, never a commit of a feature branch. `.github/workflows/ci.yml` runs on pushed tags that match `rust-backend-sdlc-v*`. On a tag build the `manifest-validate` job:
+The second line prints the sha of the release pull request's merge commit, read from the pull request itself, so a pull request merged into `main` after it cannot take its place; tag that sha, never the tip of `origin/main` and never a commit of a feature branch. `.github/workflows/ci.yml` runs on pushed tags that match `rust-backend-sdlc-v*`. On a tag build the `manifest-validate` job:
 
 1. derives the plugin name from the tag (`${GITHUB_REF_NAME%-v*}`, here `rust-backend-sdlc`) and the version from its suffix (`${GITHUB_REF_NAME##*-v}`);
 2. fails when `plugins/rust-backend-sdlc/.claude-plugin/plugin.json` does not exist;

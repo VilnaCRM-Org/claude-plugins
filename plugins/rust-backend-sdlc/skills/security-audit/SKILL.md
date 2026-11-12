@@ -36,7 +36,7 @@ The caller passes the diff since the merge base, the profile `.claude/rust-sdlc.
 
 Three rules shape every step:
 
-- **Verification by reproduction.** A grep hit, a tool line or a suspicious handler is a candidate. It becomes a finding only when it is reproduced: by a dynamic probe against the running service, or, for a class that has no HTTP surface, by a deterministic static demonstration (step 6). A candidate that cannot be reproduced is recorded `dropped` and never reported as `open`.
+- **Verification by reproduction.** A grep hit, a tool line or a suspicious handler is a candidate. It becomes a finding only when it is reproduced: by a dynamic probe against the running service, or, for a class that has no HTTP surface or while the dynamic lane is `not run`, by a deterministic static demonstration (step 6). A candidate that cannot be reproduced is recorded `dropped` and never reported as `open`.
 - **Read-only.** The skill changes no repository file. The only file it may create is a probe body under `target/rust-sdlc/tmp/`. Fixes are made by the implementer that the calling stage dispatches, following [reference/remediation-patterns.md](reference/remediation-patterns.md).
 - **Loopback only.** Dynamic probes reach only `service.base_url`, only through the service's own API, with the smallest payload that proves the defect, and only against data the probe itself created.
 

@@ -386,13 +386,15 @@ while (iteration < MAX) {
     journal.push(`${iteration}: lenses ${lensNames} -> no result from ${missing.join(', ')}`)
     return escalate(`lens returned no result: ${missing.join(', ')}`, 're-run the review panel; if the lens returns nothing again, check the agent definition, or run /rs-sdlc-review')
   }
-  const blocked = replies.find((r) => r.status === 'BLOCKED')
+  // A lens that did not review (BLOCKED, or SKIPPED as a whole) leaves the
+  // exit condition unproven, so it escalates instead of passing as a note.
+  const blocked = replies.find((r) => r.status !== 'OK')
   if (blocked) {
-    journal.push(`${iteration}: lenses ${lensNames} -> ${blocked.lens} BLOCKED`)
-    return escalate(`${blocked.lens} BLOCKED: ${oneLine(blocked.note) || 'no reason given'}`, 'remove the blocking cause (Docker D2, toolchain D3, stack D25 or the named blocker), then re-run the review panel')
+    const status = oneLine(blocked.status).slice(0, 40) || 'no status'
+    journal.push(`${iteration}: lenses ${lensNames} -> ${blocked.lens} ${status}`)
+    return escalate(`${blocked.lens} ${status}: ${oneLine(blocked.note) || 'no reason given'}`, 'remove the blocking cause (Docker D2, toolchain D3, stack D25 or the named blocker), then re-run the review panel')
   }
   for (const r of replies) {
-    if (r.status === 'SKIPPED') notes.add(`${r.lens}: SKIPPED: ${oneLine(r.note) || 'no reason given'}`)
     for (const n of arr(r.degrade_notes)) notes.add(`${r.lens}: ${oneLine(n)}`)
   }
   const reported = replies.flatMap((r) => arr(r.findings).filter((f) => f && typeof f === 'object').map((f, n) => normalizeFinding(f, r.lens, n)))

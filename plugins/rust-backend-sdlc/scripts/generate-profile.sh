@@ -392,7 +392,8 @@ def detect(argv):
     features = sqlx.get("features") if isinstance(sqlx, dict) else None
     engine = "postgresql" if isinstance(features, list) and "postgres" in features else None
     layers = []
-    for layer in (load_toml("architecture.toml") or {}).get("layer") or []:
+    declared = (load_toml("architecture.toml") or {}).get("layer")
+    for layer in declared if isinstance(declared, list) else []:
         name = layer.get("name") if isinstance(layer, dict) else None
         if isinstance(name, str) and LAYER.fullmatch(name) and name not in layers:
             layers.append(name)

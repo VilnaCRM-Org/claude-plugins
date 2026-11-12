@@ -44,7 +44,7 @@ How the two rules apply here:
    ```
 
    Exit 1: stop with `run /rs-sdlc-setup on the default branch and commit the result` and the escalation block (`blocking_finding: validate-profile.sh exit 1`, the `VIOLATION:` lines quoted). Nothing else runs.
-2. Parse the arguments (nothing is written): exactly two positional values `<group>` and `<context>`, at most one `--issue <N>` and at most one `--no-handoff`. A usage error → `ESCALATED` with the usage line of "Inputs" and `recommended_action: /rs-sdlc-new-context <group> <context> [--issue <N>] [--no-handoff]`.
+2. Parse the arguments (nothing is written): exactly two positional values `<group>` and `<context>`, at most one `--issue <N>` whose value matches `^[1-9][0-9]*$`, and at most one `--no-handoff`. A usage error (an `--issue` value outside that pattern included) → `ESCALATED` with the usage line of "Inputs" and `recommended_action: /rs-sdlc-new-context <group> <context> [--issue <N>] [--no-handoff]`.
 
 ### Step 1 — Names against the live tree, then the preconditions
 
@@ -183,7 +183,7 @@ These items make every commit of the run: the context commit here, and the remed
    "${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh" protected_changes <merge-base-sha>
    ```
 
-   Exit 0 → continue. A `PROTECTED: <path> (<commit>|working tree)` line → `ESCALATED` (D23) with `blocking_finding: protected file <path> changed (<commit>)` and `recommended_action: revert with git restore --source=<merge-base-sha> -- <path> unless the plan intends it; otherwise approved-config-change`. A `PROFILE_CHANGED: .claude/rust-sdlc.yml` line → `ESCALATED` with `recommended_action: move the profile change to its own pull request from the default branch (/rs-sdlc-setup --refresh)`. Exit 2 → `ESCALATED` with its stderr. Nothing is committed on a hit.
+   Exit 0 → continue. A `PROTECTED: <path> (<commit>|working tree)` line → `ESCALATED` (D23) with `blocking_finding: protected file <path> changed (<commit>)` and `recommended_action: revert with git restore --source=<merge-base-sha> -- <path> unless the plan intends it; otherwise approved-config-change`. A `PROFILE_CHANGED: .claude/rust-sdlc.yml` line → `ESCALATED` with `recommended_action: move the profile change to its own pull request from the default branch (/rs-sdlc-setup --refresh)`. Any other non-zero exit (exit 2, or exit 1 without either line: an unreadable `protected-config.toml`) → `ESCALATED` with its stderr. Nothing is committed unless the exit is 0.
 6. **Subject.** The context commit is `feat(#N): add <group>/<context> bounded context`, with the issue number in place of `N`. Pre-validate it in the foreground:
 
    ```bash
@@ -262,7 +262,7 @@ The gate set runs after the commit, because the contract-snapshot and mutation g
    { make validate-configuration base_ref=<base> CONFIG_CHANGE_APPROVED=; echo "RUST_SDLC_EXIT=$?"; } > target/rust-sdlc/logs/new-context-<UTC>.log 2>&1  # Bash tool, run_in_background: true
    ```
 
-   The empty `CONFIG_CHANGE_APPROVED=` is always passed, so an inherited approval never reaches the check, and `base_ref` is always `<base>`, never the Makefile's fallback. `RUST_SDLC_EXIT=0` → `validate-configuration: passed`. A protected path in the log → `ESCALATED` (D23) with the wording of item 4. `make.validate_configuration` null → `validate-configuration: not run (capability absent)` and the library check replaces it: `protected_changes <merge-base-sha>` with a merge base read again as in step 5 item 4; exit 0 → no hit, a `PROTECTED:` or `PROFILE_CHANGED:` line → `ESCALATED` as in step 5 item 5. Any other failure → `ESCALATED` with the last 40 log lines.
+   The empty `CONFIG_CHANGE_APPROVED=` is always passed, so an inherited approval never reaches the check, and `base_ref` is always `<base>`, never the Makefile's fallback. `RUST_SDLC_EXIT=0` → `validate-configuration: passed`. A protected path in the log → `ESCALATED` (D23) with the wording of item 4. `make.validate_configuration` null → `validate-configuration: not run (capability absent)` and the library check replaces it: `protected_changes <merge-base-sha>` with a merge base read again as in step 5 item 4; exit 0 → no hit, a `PROTECTED:` or `PROFILE_CHANGED:` line or any other non-zero exit → `ESCALATED` as in step 5 item 5. Any other failure → `ESCALATED` with the last 40 log lines.
 7. **Committed.** `git status --porcelain` must show nothing but the untracked entries recorded in step 1; anything else → `ESCALATED` naming the paths. Then C12 is done: `DONE: C12 <count> stages passed (<stage list>), validate-configuration passed, 0 protected files changed`.
 
 ### Step 7 — Report, handles and hand-off
