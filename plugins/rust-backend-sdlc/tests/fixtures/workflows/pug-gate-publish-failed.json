@@ -1,0 +1,78 @@
+{
+  "args": "7",
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": {
+        "verdict": "GATE",
+        "next": "rs-sdlc-fr-nfr-review --pr 7 --head a1b2c3d — the BMAD FR/NFR Review Gate status is missing on head a1b2c3d; the gate is mandatory for every PR",
+        "pr": 7,
+        "url": "https://github.com/acme/billing-service/pull/7",
+        "head": "a1b2c3d",
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "ci": {
+          "status": "green",
+          "failing": [],
+          "pending": [],
+          "missing": []
+        },
+        "fr_nfr": {
+          "status": "missing"
+        },
+        "unresolved": {
+          "total": 0
+        },
+        "reviewers": [
+          {
+            "name": "coderabbit",
+            "status": "APPROVED"
+          }
+        ],
+        "human_gated": {
+          "checks": [
+            "Protected configuration",
+            "OpenAPI breaking changes",
+            "GraphQL breaking changes"
+          ],
+          "failing": [],
+          "labels": {
+            "Protected configuration": "approved-config-change",
+            "OpenAPI breaking changes": "approved-breaking-change",
+            "GraphQL breaking changes": "approved-breaking-change"
+          }
+        },
+        "notes": []
+      }
+    },
+    {
+      "match": "^publish ",
+      "reply": {
+        "pushed": false,
+        "head": null,
+        "issue": 42,
+        "commits": [
+          "fix(#42): address review gate iteration 1 findings"
+        ],
+        "reason": "step 8: git push -u origin HEAD exit 1 (pre-push hook failed after one make format and one retry)",
+        "protected": null,
+        "profile_changed": false,
+        "log_tail": "test invoicing::domain::invoice::tests::rounds_half_even_per_currency ... FAILED\npre-push: make test-unit failed (exit 2)\nerror: failed to push some refs to github.com:acme/billing-service.git\nRUST_SDLC_EXIT=1",
+        "degrade_notes": []
+      }
+    }
+  ],
+  "workflows": {
+    "rust-backend-sdlc:rs-sdlc-fr-nfr-review": {
+      "result": "SUCCESS",
+      "iterations": 2,
+      "new_findings": 0,
+      "fixed": [
+        "FRN-1 FR-3 crates/billing/invoicing/domain/src/invoice.rs:57: totals round half-up; FR-3 demands half-even per currency"
+      ],
+      "requirement_source": "specs/42-invoice-totals/ + PR #7 description and linked issue(s) #42",
+      "advisory": false,
+      "degrade_notes": []
+    }
+  }
+}

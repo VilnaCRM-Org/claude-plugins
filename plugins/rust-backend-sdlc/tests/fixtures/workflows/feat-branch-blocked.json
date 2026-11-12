@@ -1,0 +1,28 @@
+{
+  "args": "Add a due date to invoices so that overdue invoices can be listed over REST and GraphQL",
+  "replies": [
+    {
+      "match": "^setup-check$",
+      "reply": {
+        "ok": true,
+        "message": "ok",
+        "failures": [],
+        "warnings": []
+      }
+    },
+    {
+      "match": "^resolve-plan$",
+      "reply": {
+        "issue_url": "https://github.com/acme/billing-service/issues/12",
+        "issue_number": 12,
+        "branch": null,
+        "slug": null,
+        "readiness_ready": false,
+        "bundle_uncommitted": false,
+        "blocked": "git switch -c feat/12-invoice-due-date origin/main: exit 1 (error: Your local changes to the following files would be overwritten by checkout: Cargo.lock)",
+        "blocked_stage": "branch",
+        "degrade_notes": []
+      }
+    }
+  ]
+}

@@ -70,7 +70,7 @@ const CONTAINER_SENTENCE =
 
 const SCOPE_SCHEMA = {
   type: 'object',
-  required: ['profile_valid', 'base', 'files', 'specs_dir', 'execute_skills', 'not_applicable'],
+  required: ['profile_valid', 'base', 'files', 'protected', 'specs_dir', 'execute_skills', 'not_applicable'],
   properties: {
     profile_valid: { type: 'boolean' },
     blocked: { type: ['string', 'null'] },
@@ -158,6 +158,26 @@ const touchesPa5 = (files) => files.filter((p) => PA5_PATHS.some((re) => re.test
 const brief = (f) => ({ id: f.id, lens: f.lens, severity: f.severity, file: f.file, line: f.line, rule: f.rule, summary: f.summary, iteration: f.iteration, ...(f.unverified ? { unverified: true } : {}) })
 const uniqueByKey = (list) => [...new Map(list.map((f) => [keyOf(f), f])).values()]
 const nextStep = () => (iteration < MAX ? `iteration ${iteration + 1}` : 'the escalation (iteration cap reached)')
+// The protected-configuration line of the agent contracts (D23).
+const PROTECTED_BLOCK = /BLOCKED: protected configuration (\S+).*/
+const blockedPath = (text) => (PROTECTED_BLOCK.exec(text) || [])[1] || '<path>'
+const d23Action = (base, path) => `revert with git restore --source=${base} -- ${path}, or get the approved-config-change label and restart the session with ALLOW_PROTECTED_CONFIG_EDIT=1`
+
+// ADR-25 wording of a branch-guard hit: a PROTECTED: line is a protected file
+// (D23); a PROFILE_CHANGED: line moves the profile change to its own pull request.
+function guardEscalation(line, base) {
+  if (line.startsWith('PROFILE_CHANGED:')) return [line, 'move the profile change to its own pull request from the default branch (/rs-sdlc-setup --refresh)']
+  const hit = /^PROTECTED: (.+) \(([^()]+)\)$/.exec(line)
+  const path = hit ? hit[1] : '<path>'
+  return [hit ? `protected file ${path} changed (${hit[2]})` : line, `${d23Action(base, path)}, then re-run (D23)`]
+}
+
+// Decision rule 1 of /rs-sdlc-review: a lens finding that quotes the
+// protected-configuration line is a blocker, never verified or remediated.
+function quotedBlock(f) {
+  const hit = PROTECTED_BLOCK.exec(f.fix) || PROTECTED_BLOCK.exec(f.summary)
+  return hit ? { lens: f.lens, id: f.id, line: hit[0], path: hit[1] } : null
+}
 
 function escalationBlock(finding, action) {
   return [
@@ -250,10 +270,7 @@ if (typeof scope.base !== 'string' || !scope.base.trim()) {
 const protectedLines = arr(scope.protected).map(oneLine).filter(Boolean)
 if (protectedLines.length) {
   journal.push(`0: scope branch guard -> ${protectedLines.length} protected change(s)`)
-  return escalate(
-    protectedLines[0],
-    `revert with git restore --source=${scope.base} -- <path>, or get the approved-config-change label and restart the session with ALLOW_PROTECTED_CONFIG_EDIT=1, then re-run (D23)`,
-  )
+  return escalate(...guardEscalation(protectedLines.find((l) => l.startsWith('PROTECTED:')) || protectedLines[0], scope.base))
 }
 const files = [...new Set(arr(scope.files).filter((f) => typeof f === 'string' && f.trim()).map((f) => f.trim()))]
 if (!files.length) {
@@ -379,6 +396,11 @@ while (iteration < MAX) {
     for (const n of arr(r.degrade_notes)) notes.add(`${r.lens}: ${oneLine(n)}`)
   }
   const reported = replies.flatMap((r) => arr(r.findings).filter((f) => f && typeof f === 'object').map((f, n) => normalizeFinding(f, r.lens, n)))
+  const quoted = reported.filter((f) => f.status === 'open').map(quotedBlock).find(Boolean)
+  if (quoted) {
+    journal.push(`${iteration}: lenses ${lensNames} -> ${quoted.lens} ${quoted.id} BLOCKED: protected configuration ${quoted.path}`)
+    return escalate(quoted.line, `${d23Action(scope.base, quoted.path)}, then re-run (D23)`)
+  }
   const open = uniqueByKey(reported.filter((f) => f.status === 'open' && f.severity !== 'Info'))
   const fresh = open.filter((f) => !refutedKeys.has(keyOf(f)) && !confirmed.has(keyOf(f)))
   const persisting = open.filter((f) => confirmed.has(keyOf(f))).map((f) => confirmed.get(keyOf(f)))
@@ -445,7 +467,7 @@ while (iteration < MAX) {
     return escalate(
       `rust-implementer BLOCKED in ${dispatched[blockedFix][0]}: ${recommendation}`,
       /protected configuration/.test(recommendation)
-        ? `revert with git restore --source=${scope.base} -- <path>, or get the approved-config-change label and restart the session with ALLOW_PROTECTED_CONFIG_EDIT=1 (D23)`
+        ? `${d23Action(scope.base, blockedPath(recommendation))} (D23)`
         : 'resolve the blocker by hand, then re-run the review panel',
     )
   }

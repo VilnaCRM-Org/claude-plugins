@@ -189,10 +189,27 @@ let lastPushed = null
 
 // A note is recorded once: the same text with or without its trailing
 // degrade id (an agent's copy of a note the workflow already holds) is one.
-const noteKey = (s) => s.replace(/\s*\(D\d+\)\s*$/, '').toLowerCase()
+// No AI reviewer (D7) and no CI (D8) are one condition each, however the
+// sensor or an agent words it: one degrade note per condition (PRD NFR-3).
+const CONDITIONS = [
+  ['D7', /^no AI reviewer\b|\(D7\)\s*$/],
+  ['D8', /\bD8\b|ci\.provider is null/],
+]
+function noteKey(s) {
+  const condition = CONDITIONS.find(([, re]) => re.test(s))
+  return condition ? condition[0] : s.replace(/\s*\(D\d+\)\s*$/, '').toLowerCase()
+}
 function addNote(text) {
   const s = clip(text, 300)
   if (s && !degradeNotes.some((n) => noteKey(n) === noteKey(s))) degradeNotes.push(s)
+}
+
+// The workflow's own note on a condition takes the place of the sensor's or
+// an agent's note on that condition.
+function ownNote(text) {
+  const at = degradeNotes.findIndex((n) => noteKey(n) === noteKey(text))
+  if (at < 0) addNote(text)
+  else degradeNotes[at] = clip(text, 300)
 }
 
 // The degrade notes an agent reported; a list that is not an array is none.
@@ -806,7 +823,7 @@ async function d7Pass(rc, d7) {
   if (!spend('fix')) {
     return stop(seen, 'D7 review pass', { key: 'fix', result: 'fix budget spent', finding: `fix budget exhausted before the D7 review pass on head ${head7} (${d7})`, action: 'run /rs-sdlc-review on the branch by hand as the review source, then re-run' })
   }
-  addNote('no AI reviewer — ai-review-loop findings used as the comment source (D7)')
+  ownNote('no AI reviewer — ai-review-loop findings used as the comment source (D7)')
   log(`D7 review pass on head ${head7}: ${d7}`)
   phase('Fix')
   const action = `D7 review pass (fix ${counters.fix}/${CAP.fix})`
@@ -814,7 +831,7 @@ async function d7Pass(rc, d7) {
   if (out.stop) return out.stop
   if (out.change) return publishThenRead(rc, action, { key: 'fix', changes: [out.change], notes: ['', `${out.text}; `] })
   d7CleanHead = state.head
-  log(`D7 review pass clean on head ${head7}`)
+  record(seen, action, `${out.text}: clean on ${head7}`)
   return D7_CLEAN
 }
 
@@ -865,7 +882,7 @@ async function runCiFixer({ seen }, step) {
   const files = fileList(ci.changed_files)
   if (ci.status === 'SKIPPED-NO-CI') {
     noCi = true
-    addNote(`no CI provider: reported checks ${state.ci.failing.join(', ')} are not fixed (D8)`)
+    ownNote(`no CI provider: reported checks ${state.ci.failing.join(', ')} are not fixed (D8)`)
   } else if (ci.status === 'FIXES-READY' && files.length) {
     const check = clip(typeof ci.fixed_check === 'string' && state.ci.failing.includes(clip(ci.fixed_check, 120)) ? ci.fixed_check : state.ci.failing[0], 120)
     step.changes.push({ subject: `fix(#<N>): resolve ${check} failure`, files })

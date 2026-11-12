@@ -1,0 +1,92 @@
+{
+  "args": "12-invoice-due-date",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "profile_valid": true,
+        "blocked": null,
+        "base": "3e0bd3e5f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0",
+        "files": [
+          "Cargo.toml",
+          "crates/billing/invoice/pdf/Cargo.toml",
+          "crates/billing/invoice/pdf/src/lib.rs"
+        ],
+        "protected": [],
+        "specs_dir": "specs/12-invoice-due-date/",
+        "pr": 34,
+        "execute_skills": [
+          "code-review",
+          "quality-standards",
+          "implementing-ddd-architecture"
+        ],
+        "not_applicable": [
+          {
+            "skill": "database-migrations",
+            "reason": "no migration changed"
+          }
+        ],
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^code-quality-reviewer$",
+      "reply": {
+        "status": "OK",
+        "verdict": "FAIL",
+        "note": null,
+        "degrade_notes": [],
+        "findings": [
+          {
+            "id": "CQ-1",
+            "severity": "High",
+            "file": "crates/billing/invoice/pdf/src/lib.rs",
+            "line": 3,
+            "rule": "Q4",
+            "summary": "the domain crate billing-invoice-pdf imports sqlx, so make architecture reports a domain -> infrastructure dependency",
+            "status": "open",
+            "evidence": "architecture: billing-invoice-pdf (domain) depends on sqlx through PdfStore",
+            "fix": "move PdfStore and its sqlx queries into a new infrastructure crate crates/billing/invoice/pdf-store and keep the domain crate free of sqlx"
+          }
+        ]
+      }
+    },
+    {
+      "match": "^fr-nfr-reviewer$",
+      "reply": {
+        "status": "OK",
+        "verdict": "PASS",
+        "note": "FR_NFR_NEW_FINDINGS: 0",
+        "degrade_notes": [],
+        "findings": []
+      }
+    },
+    {
+      "match": "^security-auditor:all$",
+      "reply": {
+        "status": "OK",
+        "verdict": "PASS",
+        "note": null,
+        "degrade_notes": [],
+        "findings": []
+      }
+    },
+    {
+      "match": "^verify:",
+      "reply": {
+        "refuted": false,
+        "reason": "make architecture fails on the domain -> infrastructure dependency"
+      }
+    },
+    {
+      "match": "^fix:",
+      "reply": {
+        "status": "BLOCKED",
+        "files_modified": 0,
+        "changed_files": [],
+        "tests_status": "NOT_RUN",
+        "recommendation": "BLOCKED: protected configuration architecture.toml — needs approved-config-change and a session restarted with ALLOW_PROTECTED_CONFIG_EDIT=1"
+      }
+    }
+  ]
+}

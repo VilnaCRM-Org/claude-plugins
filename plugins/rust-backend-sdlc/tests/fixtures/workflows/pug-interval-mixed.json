@@ -1,0 +1,179 @@
+{
+  "args": "7 --reviewers coderabbit,cubic",
+  "replies": [
+    {
+      "match": "^(pr-state|wait )",
+      "reply": [
+        {
+          "verdict": "REQUEST",
+          "next": "request-ai-reviews.sh --pr 7 --reviewers coderabbit,cubic",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "a1b2c3d",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "STALE",
+              "reason": "last live review is on 9f8e7d6"
+            },
+            {
+              "name": "cubic",
+              "status": "NONE",
+              "reason": "has never reviewed this PR"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        },
+        {
+          "verdict": "REQUEST",
+          "next": "request-ai-reviews.sh --pr 7 --reviewers coderabbit",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "a1b2c3d",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "STALE",
+              "reason": "last live review is on 9f8e7d6"
+            },
+            {
+              "name": "cubic",
+              "status": "REQUESTED",
+              "ack": false,
+              "reason": "mention posted 0m ago"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        },
+        {
+          "verdict": "READY",
+          "next": "exit condition met — hand the PR to its human merger",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "a1b2c3d",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "APPROVED"
+            },
+            {
+              "name": "cubic",
+              "status": "APPROVED"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        }
+      ]
+    },
+    {
+      "match": "^request ",
+      "reply": [
+        {
+          "requested": [
+            "cubic"
+          ],
+          "waiting": [
+            {
+              "name": "coderabbit",
+              "minutes": 5
+            }
+          ],
+          "skipped": [],
+          "error": null
+        },
+        {
+          "requested": [],
+          "waiting": [
+            {
+              "name": "coderabbit",
+              "minutes": 4
+            }
+          ],
+          "skipped": [],
+          "error": null
+        }
+      ]
+    }
+  ]
+}

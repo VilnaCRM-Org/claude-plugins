@@ -1,0 +1,50 @@
+{
+  "args": "42-invoice-totals --pr 7",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "status": "OK",
+        "profile_valid": true,
+        "blocked": null,
+        "base": "HEAD",
+        "files": [],
+        "specs_present": true,
+        "slug": "42-invoice-totals",
+        "spec_files": [
+          "prd.md",
+          "architecture.md",
+          "epics.md"
+        ],
+        "pr": 7,
+        "pr_requirements": true,
+        "linked_issues": [
+          42
+        ],
+        "clean": true,
+        "head_matches": true,
+        "summary": "invoice totals rounded half-even per currency",
+        "notes": [
+          "base ref origin/main unavailable; base_ref=HEAD (D24)"
+        ]
+      }
+    },
+    {
+      "match": "^fr-nfr-reviewer ",
+      "reply": [
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=1/5 new_findings=0 verdict=PASS",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 1 --pr 7",
+          "status_posted": "STATUS_POSTED: success abc1234",
+          "degraded": [
+            "base ref origin/main unavailable; base_ref=HEAD (D24)"
+          ],
+          "blocking_finding": null,
+          "note": null,
+          "findings": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "args": "7 --reviewers coderabbit,qodo",
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": {
+        "verdict": "READY",
+        "next": "exit condition met — hand the PR to its human merger",
+        "pr": 7,
+        "url": "https://github.com/acme/billing-service/pull/7",
+        "head": "a1b2c3d",
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "ci": {
+          "status": "green",
+          "failing": [],
+          "pending": [],
+          "missing": []
+        },
+        "fr_nfr": {
+          "status": "success"
+        },
+        "unresolved": {
+          "total": 0
+        },
+        "reviewers": [
+          {
+            "name": "coderabbit",
+            "status": "APPROVED"
+          },
+          {
+            "name": "qodo",
+            "status": "SKIPPED",
+            "reason": "reviews are paused for this account (lapsed subscription)"
+          }
+        ],
+        "human_gated": {
+          "checks": [
+            "Protected configuration",
+            "OpenAPI breaking changes",
+            "GraphQL breaking changes"
+          ],
+          "failing": [],
+          "labels": {
+            "Protected configuration": "approved-config-change",
+            "OpenAPI breaking changes": "approved-breaking-change",
+            "GraphQL breaking changes": "approved-breaking-change"
+          }
+        },
+        "notes": [
+          "qodo: SKIPPED — reviews are paused for this account (lapsed subscription); its missing review is reported, not passed"
+        ]
+      }
+    }
+  ]
+}

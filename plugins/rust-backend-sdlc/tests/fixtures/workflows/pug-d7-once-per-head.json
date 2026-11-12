@@ -1,0 +1,181 @@
+{
+  "args": {
+    "pr": 7,
+    "reviewers": []
+  },
+  "replies": [
+    {
+      "match": "^(pr-state|wait )",
+      "reply": [
+        {
+          "verdict": "READY",
+          "next": "exit condition met — hand the PR to its human merger",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "a1b2c3d",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": [
+            "no AI reviewer is configured — the verdict waits for no review approval (D7)"
+          ]
+        },
+        {
+          "verdict": "READY",
+          "next": "exit condition met — hand the PR to its human merger",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "b2c3d4e",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": [
+            "no AI reviewer is configured — the verdict waits for no review approval (D7)"
+          ]
+        },
+        {
+          "verdict": "WAIT",
+          "next": "pr-state.sh --pr 7 --wait-seconds 540 — waiting for checks Tests and coverage",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "b2c3d4e",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "pending",
+            "failing": [],
+            "pending": [
+              "Tests and coverage"
+            ],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": [
+            "no AI reviewer is configured — the verdict waits for no review approval (D7)"
+          ]
+        },
+        {
+          "verdict": "READY",
+          "next": "exit condition met — hand the PR to its human merger",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "b2c3d4e",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": [
+            "no AI reviewer is configured — the verdict waits for no review approval (D7)"
+          ]
+        }
+      ]
+    },
+    {
+      "match": "^pr-comment-resolver ",
+      "reply": {
+        "remaining_unresolved": 0,
+        "changed_files": [],
+        "fix_path": null,
+        "not_actioned": 0,
+        "blocking_finding": null,
+        "summary": "AI_REVIEW_VERDICT: PASS from ai-review-loop.sh; no thread left",
+        "degrade_notes": [
+          "no AI reviewer — ai-review-loop findings used as the comment source"
+        ]
+      }
+    }
+  ]
+}

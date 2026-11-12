@@ -1,0 +1,98 @@
+{
+  "args": {
+    "slug": "42-invoice-totals",
+    "pr": 7,
+    "maxIterations": 3
+  },
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "status": "OK",
+        "profile_valid": true,
+        "blocked": null,
+        "base": "origin/main",
+        "files": [
+          "crates/billing/invoicing/domain/src/invoice.rs",
+          "crates/billing/invoicing/domain/src/invoice/tests.rs",
+          "crates/billing/invoicing/application/src/create_invoice.rs",
+          "crates/service/src/routes.rs"
+        ],
+        "specs_present": true,
+        "slug": "42-invoice-totals",
+        "spec_files": [
+          "prd.md",
+          "architecture.md",
+          "epics.md"
+        ],
+        "pr": 7,
+        "pr_requirements": true,
+        "linked_issues": [
+          42
+        ],
+        "clean": true,
+        "head_matches": true,
+        "summary": "invoice totals rounded half-even per currency",
+        "notes": []
+      }
+    },
+    {
+      "match": "^fr-nfr-reviewer ",
+      "reply": [
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=1/5 new_findings=1 verdict=FAIL",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 1 --pr 7",
+          "status_posted": null,
+          "degraded": [
+            "gate run failed: error: claude exited 1 before printing FR_NFR_NEW_FINDINGS"
+          ],
+          "blocking_finding": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 1 --pr 7 exit 1",
+          "note": "claude exited 1 before printing FR_NFR_NEW_FINDINGS",
+          "findings": []
+        },
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=2/5 new_findings=1 verdict=FAIL",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 2 --pr 7",
+          "status_posted": "STATUS_POSTED: failure abc1234",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": [
+            {
+              "id": "FRN-1",
+              "severity": "High",
+              "file": "crates/billing/invoicing/domain/src/invoice.rs",
+              "line": 57,
+              "rule": "FR-3",
+              "summary": "totals round half-up; FR-3 demands half-even per currency and no test covers the tie case",
+              "status": "open"
+            }
+          ]
+        },
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=3/5 new_findings=1 verdict=FAIL",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 3 --pr 7",
+          "status_posted": null,
+          "degraded": [
+            "gate run failed: claude transport failure after retry"
+          ],
+          "blocking_finding": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 3 --pr 7 exit 1",
+          "note": "claude transport failure after retry",
+          "findings": []
+        }
+      ]
+    },
+    {
+      "match": "^fix:",
+      "reply": {
+        "status": "COMPLETE",
+        "files_modified": 2,
+        "tests_status": "PASSING",
+        "recommendation": "re-run the FR/NFR gate"
+      }
+    }
+  ]
+}

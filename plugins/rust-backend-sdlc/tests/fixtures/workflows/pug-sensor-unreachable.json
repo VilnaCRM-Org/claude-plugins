@@ -1,0 +1,36 @@
+{
+  "args": "7",
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": {
+        "verdict": "BLOCKED",
+        "next": "pr-state.sh exit 1: [rust-sdlc][ERROR] gh pr view failed for PR #7 in acme/billing-service",
+        "pr": 0,
+        "url": null,
+        "head": "",
+        "state": "UNKNOWN",
+        "mergeable": "UNKNOWN",
+        "ci": {
+          "status": "none",
+          "failing": [],
+          "pending": [],
+          "missing": []
+        },
+        "fr_nfr": {
+          "status": "missing"
+        },
+        "unresolved": {
+          "total": 0
+        },
+        "reviewers": [],
+        "human_gated": {
+          "checks": [],
+          "failing": [],
+          "labels": {}
+        },
+        "notes": []
+      }
+    }
+  ]
+}

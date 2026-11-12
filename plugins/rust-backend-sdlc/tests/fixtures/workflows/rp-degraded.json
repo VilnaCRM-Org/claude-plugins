@@ -1,0 +1,68 @@
+{
+  "args": "12-invoice-due-date --base origin/main",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "profile_valid": true,
+        "blocked": null,
+        "base": "HEAD",
+        "files": [
+          "migrations/20261112000000_add_invoice_due_date.up.sql",
+          "migrations/20261112000000_add_invoice_due_date.down.sql",
+          "docs/invoices.md"
+        ],
+        "protected": [],
+        "specs_dir": "specs/12-invoice-due-date/",
+        "pr": null,
+        "execute_skills": [
+          "code-review",
+          "quality-standards",
+          "database-migrations",
+          "documentation-sync"
+        ],
+        "not_applicable": [
+          {
+            "skill": "load-testing",
+            "reason": "no scenario or latency budget changed"
+          }
+        ],
+        "degrade_notes": [
+          "DEGRADED: base ref origin/main unavailable; base_ref=HEAD (D24)"
+        ]
+      }
+    },
+    {
+      "match": "^code-quality-reviewer$",
+      "reply": {
+        "status": "OK",
+        "verdict": "PASS",
+        "note": null,
+        "degrade_notes": [],
+        "findings": []
+      }
+    },
+    {
+      "match": "^fr-nfr-reviewer$",
+      "reply": {
+        "status": "OK",
+        "verdict": "PASS",
+        "note": "FR_NFR_NEW_FINDINGS: 0",
+        "degrade_notes": [
+          "DEGRADED: no pull request for the branch; the gate ran with --advisory (D11)"
+        ],
+        "findings": []
+      }
+    },
+    {
+      "match": "^security-auditor:all$",
+      "reply": {
+        "status": "OK",
+        "verdict": "PASS",
+        "note": null,
+        "degrade_notes": [],
+        "findings": []
+      }
+    }
+  ]
+}

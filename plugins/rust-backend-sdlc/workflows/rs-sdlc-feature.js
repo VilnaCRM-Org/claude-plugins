@@ -901,7 +901,7 @@ const finishByHand = () => `run /rs-sdlc-finish-pr --pr ${run.pr} by hand`
 const HAND_BACK_DEFECTS = [
   (finish, c, head) => !HEAD_RE.test(head),
   (finish, c) => !c,
-  (finish) => finish.pr != null && finish.pr !== run.pr,
+  (finish) => finish.pr !== run.pr,
   (finish) => !isList(finish.journal),
   (finish) => !isList(finish.degrade_notes),
 ]

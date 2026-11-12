@@ -6,10 +6,11 @@
 # parallel(), pipeline(), phase(), log(), workflow(), args and budget in
 # scope. tests/lib/workflow-harness.mjs reproduces that contract in node and
 # answers every agent call from the scripted replies of one scenario file
-# under tests/fixtures/workflows/ (55 files: feat- 15, fnr- 15, pug- 17, rp- 8),
-# so every loop, counter, hand-back and escalation path is pinned without a
-# model in the loop. The suite proves control flow over mocked replies only:
-# it never observes what a real model does or how Ralph behaves.
+# under tests/fixtures/workflows/ (103 files: feat- 32, fnr- 23, pug- 30,
+# rp- 18), so every loop, counter, hand-back and escalation path is pinned
+# without a model in the loop. The suite proves control flow over mocked
+# replies only: it never observes what a real model does or how Ralph
+# behaves.
 #
 # Layout: 11 static cases (the runtime rules every workflow file meets) and
 # one case per scenario file, which asserts the outcome the scenario's name
@@ -468,7 +469,7 @@ wf_same_as_child() {
   wf_expect 'all(/^fix:/).length === 3 && all(/^fix:/).every((c) => has(c.prompt, CT, BG))'
 }
 
-# --- rs-sdlc-fr-nfr-review (fnr-, 15) -----------------------------------------
+# --- rs-sdlc-fr-nfr-review (fnr-, 23) -----------------------------------------
 
 @test "workflows: fnr-advisory: no pull request and a dirty tree run the gate advisory and end SUCCESS-WITH-REPORT (D11)" {
   wf_scenario rs-sdlc-fr-nfr-review fnr-advisory
@@ -491,8 +492,26 @@ wf_same_as_child() {
     'seq("scope", "fr-nfr-reviewer 1/5", "fix:crates/billing/invoicing", "fix:requirement-level", "verify 1/5", "fr-nfr-reviewer 2/5", "fix:crates/billing/invoicing", "fr-nfr-reviewer 3/5")' \
     'has(call("fr-nfr-reviewer 1/5").prompt, "No prior ledger", "exactly once")' \
     'has(call("fr-nfr-reviewer 3/5").prompt, "iteration 1: new_findings=3 verdict=FAIL", "iteration 2: new_findings=1 verdict=FAIL")' \
+    'has(call("fr-nfr-reviewer 2/5").prompt, "FRN-1", "crates/billing/invoicing/domain/src/invoice.rs:57", "FRN-2", "FRN-3")' \
+    'all(/^fix:/).slice(0, 2).every((c) => has(c.prompt, "mode: parallel")) && has(all(/^fix:/)[2].prompt, "mode: serial") && has(call("verify 1/5").prompt, "mode: verify")' \
     'all(/^fr-nfr-reviewer /).every((c) => c.agentType === "rust-backend-sdlc:fr-nfr-reviewer") && all(/^(fix:|verify )/).every((c) => c.agentType === "rust-backend-sdlc:rust-implementer")' \
     'r.requirement_source === "specs/42-invoice-totals/ + PR #7 description and linked issue(s) #42"'
+}
+
+@test "workflows: fnr-d24-base-head: after the D24 fallback an empty file list against HEAD still runs the gate, which computes its own diff" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-d24-base-head
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.iterations === 1 && r.new_findings === 0 && r.advisory === false' \
+    'seq("scope", "fr-nfr-reviewer 1/5")' \
+    'note("base_ref=HEAD (D24)") && !note("empty change set")' \
+    'has(call("fr-nfr-reviewer 1/5").prompt, "Diff base: HEAD", "the gate computes its own diff")'
+}
+
+@test "workflows: fnr-degrade-notes: a scope note and a DEGRADED line of a completed gate run end SUCCESS-WITH-REPORT naming both" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-degrade-notes
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.iterations === 2 && r.new_findings === 0 && r.advisory === false' \
+    'seq("scope", "fr-nfr-reviewer 1/5", "fix:crates/billing/invoicing", "fr-nfr-reviewer 2/5")' \
+    'note("gh issue view 43 failed", "issue #43")' \
+    'note("ignored fr-nfr-gate comment by review-bot")'
 }
 
 @test "workflows: fnr-degraded: a reviewer that finds the planning bundle missing escalates with the plan remedy" {
@@ -506,15 +525,27 @@ wf_same_as_child() {
   wf_scenario rs-sdlc-fr-nfr-review fnr-exhausted
   wf_expect 'r.result === "ESCALATED" && r.iterations === 5 && r.new_findings === 1 && seven()' \
     'field("stage") === "review" && field("iteration") === "5/5" && field("status") === "NOT MET"' \
+    'field("exit_condition") === "zero new gate findings AND every quality row PASS"' \
     'count(/^fr-nfr-reviewer /) === 5 && count(/^fix:/) === 4' \
     'has(field("blocking_finding"), "5 gate iteration(s) ended without new_findings=0 verdict=PASS")' \
-    'field("iteration_log").split(" | ").length === 5 && o.logs.some((l) => has(l, "not converging"))'
+    'field("iteration_log").split(" | ").length === 5 && o.logs.some((l) => has(l, "not converging"))' \
+    'field("iteration_log").split(" | ").every((e, i) => e.startsWith(`${i + 1}: fr-nfr-reviewer`))' \
+    'field("iteration_log").split(" | ").slice(0, 4).every((e) => has(e, "fix:crates/billing/invoicing")) && !has(field("iteration_log").split(" | ")[4], "fix:")'
 }
 
 @test "workflows: fnr-fail-no-findings: a FAIL verdict without an open finding escalates instead of looping" {
   wf_scenario rs-sdlc-fr-nfr-review fnr-fail-no-findings
   wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && r.new_findings === 2 && count(/^fix:/) === 0' \
     'has(field("blocking_finding"), "verdict FAIL with new_findings=2 but no open finding to act on")'
+}
+
+@test "workflows: fnr-fanout-cap: open findings in five crates/<group>/<context> groups dispatch 4 fix groups and one verify step, the fifth waits for the next gate iteration and a finding dropped there is not dispatched (SUCCESS)" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-fanout-cap
+  wf_expect 'r.result === "SUCCESS" && r.iterations === 3 && r.new_findings === 0' \
+    'seq("scope", "fr-nfr-reviewer 1/5", "fix:crates/billing/invoicing", "fix:crates/billing/payments", "fix:crates/catalog/pricing", "fix:crates/catalog/inventory", "verify 1/5", "fr-nfr-reviewer 2/5", "fix:crates/service/src", "fr-nfr-reviewer 3/5")' \
+    'has(call("fix:crates/service/src").prompt, "crates/service/src/routes.rs:118", "NFR-BASE-OBS")' \
+    'has(call("fix:crates/billing/invoicing").prompt, "invoice.rs:12", "rounding allocates per line item")' \
+    'all(/^fix:/).filter((c) => has(c.prompt, "rounding allocates per line item")).length === 1 && count(/^verify /) === 1'
 }
 
 @test "workflows: fnr-fix-blocked: a BLOCKED rust-implementer fix group escalates with its recommendation" {
@@ -533,12 +564,36 @@ wf_same_as_child() {
     'has(call("fr-nfr-reviewer 1/5").prompt, "--advisory")'
 }
 
+@test "workflows: fnr-iteration-cap: maxIterations 3 lowers the cap; two failed runs that are not consecutive are re-run and the third iteration ends ESCALATED at 3/3" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-iteration-cap
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 3 && r.new_findings === null && seven()' \
+    'field("stage") === "review" && field("iteration") === "3/3" && field("status") === "NOT MET"' \
+    'seq("scope", "fr-nfr-reviewer 1/3", "fr-nfr-reviewer 2/3", "fix:crates/billing/invoicing", "fr-nfr-reviewer 3/3")' \
+    'note("iteration 1:", "gate run failed", "consumed one iteration without a findings count") && note("iteration 3:", "consumed one iteration without a findings count")' \
+    'has(field("blocking_finding"), "3 gate iteration(s) ended without new_findings=0 verdict=PASS")' \
+    'field("iteration_log").split(" | ").length === 3'
+}
+
+@test "workflows: fnr-malformed-handle: a reviewer report whose last line is no FR_NFR_REVIEWER handle never passes the gate on that iteration" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-malformed-handle
+  wf_expect 'r.result !== "SUCCESS" && !(r.iterations === 1 && r.result.startsWith("SUCCESS"))' \
+    'count(/^fix:/) === 0'
+}
+
 @test "workflows: fnr-no-source: no bundle and no PR requirements record the fail-closed status once, then escalate" {
   wf_scenario rs-sdlc-fr-nfr-review fnr-no-source
   wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && r.requirement_source === "none"' \
     'seq("scope", "record-no-source")' \
     'has(call("record-no-source").prompt, "fr-nfr-gate.sh\" --pr 7", "exactly once")' \
     'has(field("blocking_finding"), "no requirement source", "a failure \"BMAD FR/NFR Review Gate\" status was posted on HEAD", "mandatory")'
+}
+
+@test "workflows: fnr-no-source-no-pr: no bundle and no pull request escalate as an advisory run that posts no gate status (D11)" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-no-source-no-pr
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && r.advisory === true && r.requirement_source === "none"' \
+    'seq("scope")' \
+    'note("no pull request (D11)")' \
+    'has(field("blocking_finding"), "no requirement source", "mandatory") && !has(field("blocking_finding"), "status was posted on HEAD")'
 }
 
 @test "workflows: fnr-no-specs: a named bundle that does not exist escalates after the scope, the gate never skipped" {
@@ -584,13 +639,28 @@ wf_same_as_child() {
     'has(field("recommended_action"), "restore the gate transport")'
 }
 
-# --- rs-sdlc-review-panel (rp-, 8) ---------------------------------------------
+@test "workflows: fnr-verify-blocked: a BLOCKED serialized verify step after a parallel fix round escalates with its recommendation" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-verify-blocked
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && field("iteration") === "1/5"' \
+    'seq("scope", "fr-nfr-reviewer 1/5", "fix:crates/billing/invoicing", "fix:requirement-level", "verify 1/5")' \
+    'has(field("blocking_finding"), "rust-implementer BLOCKED", "verify step", "a human must decide")' \
+    'has(field("recommended_action"), "resolve the blocker named above")'
+}
+
+@test "workflows: fnr-wrong-iteration: an FR_NFR_REVIEWER line naming another iteration never passes the gate on the iteration it was dispatched for" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-wrong-iteration
+  wf_expect 'r.result !== "SUCCESS" && !(r.iterations === 1 && r.result.startsWith("SUCCESS"))' \
+    'count(/^fix:/) === 0'
+}
+
+# --- rs-sdlc-review-panel (rp-, 18) --------------------------------------------
 
 @test "workflows: rp-all-refuted: a finding the three refuters reject is dropped and the panel ends after one iteration" {
   wf_scenario rs-sdlc-review-panel rp-all-refuted
   wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.iterations === 1 && r.findings.length === 0 && r.fixed.length === 0' \
     'count(/^verify:/) === 3 && ["correctness", "standards", "remedy"].every((l) => idx("verify:" + l + ":CQ-1") >= 0)' \
     'count(/^fix:/) === 0' \
+    'all(/^verify:/).every((c) => /default to refuted(=true)? when uncertain/i.test(c.prompt))' \
     'note("verdict FAIL rests only on findings the refuters rejected")'
 }
 
@@ -599,6 +669,7 @@ wf_same_as_child() {
   wf_expect 'r.result === "SUCCESS" && r.iterations === 3 && r.findings.length === 5 && r.fixed.length === 5 && r.carried.length === 0' \
     'same(pick(/^fix:/), ["fix:crates/billing/invoice", "fix:crates/billing/payment", "fix:crates/service/src", "fix:crates/internal/health-check", "fix:crates/service/src", "fix:crates/shared/domain"])' \
     'o.logs.some((l) => has(l, "fix fan-out capped at 4 groups")) && o.logs.some((l) => has(l, "carried to iteration 2"))' \
+    'o.logs.some((l) => has(l, "2 confirmed finding(s) carried to iteration 2")) && count(/^verify:/) === 15' \
     'labels.indexOf("fix:crates/shared/domain") > labels.indexOf("code-quality-reviewer", idx("fix:crates/billing/invoice"))'
 }
 
@@ -613,19 +684,95 @@ wf_same_as_child() {
     'same(o.phases, ["Scope", "Review", "Verify", "Fix", "Review", "Verify", "Fix", "Review", "Verify"])'
 }
 
+@test "workflows: rp-degraded: a D24 base fallback and a D11 advisory gate end SUCCESS-WITH-REPORT naming both; a migrations/ change brings in the security lens" {
+  wf_scenario rs-sdlc-review-panel rp-degraded
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.iterations === 1 && r.findings.length === 0 && notes.length === 2' \
+    'note("base ref origin/main unavailable", "base_ref=HEAD (D24)") && note("--advisory", "(D11)")' \
+    'seq("scope", "code-quality-reviewer", "fr-nfr-reviewer", "security-auditor:all")'
+}
+
 @test "workflows: rp-exhausted: 5 iterations that still confirm findings end ESCALATED with the 7-field block" {
   wf_scenario rs-sdlc-review-panel rp-exhausted
   wf_expect 'r.result === "ESCALATED" && r.iterations === 5 && r.carried.length === 1 && seven()' \
     'field("stage") === "review" && field("iteration") === "5/5"' \
     'count("code-quality-reviewer") === 5 && count(/^fix:/) === 5' \
     'o.logs.includes("maxIterations 9 capped at 5")' \
+    'field("iteration_log").split(" | ").length === 5 && field("iteration_log").split(" | ").every((e, i) => e.startsWith(i + 1 + ": ") && has(e, "code-quality-reviewer", " -> "))' \
+    'field("iteration_log").split(" | ").slice(0, 4).every((e) => has(e, "; fix "))' \
     'has(field("blocking_finding"), "5 iterations still produced confirmed findings", "CQ-5")'
+}
+
+@test "workflows: rp-fail-no-findings: a FAIL verdict with no open finding escalates instead of passing" {
+  wf_scenario rs-sdlc-review-panel rp-fail-no-findings
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 2 && field("stage") === "review" && field("iteration") === "2/5"' \
+    'count(/^verify:/) === 3 && count(/^fix:/) === 1 && count("code-quality-reviewer") === 2' \
+    'has(field("blocking_finding"), "code-quality-reviewer", "FAIL")'
+}
+
+@test "workflows: rp-fix-blocked: a rust-implementer BLOCKED on a protected configuration escalates with that line, the D23 remedy for its path and its finding carried" {
+  wf_scenario rs-sdlc-review-panel rp-fix-blocked
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && field("iteration") === "1/5" && r.fixed.length === 0 && same(r.carried.map((f) => f.id), ["CQ-1"])' \
+    'count(/^verify:/) === 3 && same(pick(/^fix:/), ["fix:crates/billing/invoice"]) && call("fix:crates/billing/invoice").agentType === "rust-backend-sdlc:rust-implementer"' \
+    'has(field("blocking_finding"), "BLOCKED: protected configuration architecture.toml — needs approved-config-change and a session restarted with ALLOW_PROTECTED_CONFIG_EDIT=1")' \
+    'has(field("recommended_action"), "git restore --source=3e0bd3e5f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0 -- architecture.toml,", "approved-config-change", "ALLOW_PROTECTED_CONFIG_EDIT=1", "(D23)")' \
+    'has(field("iteration_log"), "1: ", "BLOCKED")'
+}
+
+@test "workflows: rp-lens-blocked: a lens that reports BLOCKED (Docker rows not run, D2) escalates before any refuter or fix" {
+  wf_scenario rs-sdlc-review-panel rp-lens-blocked
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && field("iteration") === "1/5"' \
+    'seq("scope", "code-quality-reviewer", "fr-nfr-reviewer", "security-auditor:all")' \
+    'has(field("blocking_finding"), "code-quality-reviewer", "BLOCKED", "blocked rows: Q6 (no Docker)")' \
+    'has(field("iteration_log"), "1: ", "code-quality-reviewer", "BLOCKED")'
+}
+
+@test "workflows: rp-lens-protected: a lens finding whose fix is the protected-configuration line escalates at Review with that line verbatim, never verified or fixed" {
+  wf_scenario rs-sdlc-review-panel rp-lens-protected
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && field("iteration") === "1/5" && r.fixed.length === 0' \
+    'seq("scope", "code-quality-reviewer", "fr-nfr-reviewer", "security-auditor:all") && count(/^verify:/) === 0 && count(/^fix:/) === 0' \
+    'field("blocking_finding") === "BLOCKED: protected configuration architecture.toml — needs approved-config-change and a session restarted with ALLOW_PROTECTED_CONFIG_EDIT=1"' \
+    'has(field("recommended_action"), "git restore --source=3e0bd3e5f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0 -- architecture.toml,", "approved-config-change", "ALLOW_PROTECTED_CONFIG_EDIT=1", "(D23)")' \
+    'has(field("iteration_log"), "1: ", "code-quality-reviewer", "CQ-1", "BLOCKED")'
 }
 
 @test "workflows: rp-missing-lens: a lens that returns nothing escalates instead of vanishing" {
   wf_scenario rs-sdlc-review-panel rp-missing-lens
   wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && count(/^verify:/) === 0' \
     'has(field("blocking_finding"), "lens returned no result: rust-backend-sdlc:fr-nfr-reviewer")'
+}
+
+@test "workflows: rp-profile-changed: a PROFILE_CHANGED: line with an empty change set escalates before any lens with the ADR-25 profile remedy" {
+  wf_scenario rs-sdlc-review-panel rp-profile-changed
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && seq("scope")' \
+    'field("blocking_finding") === "PROFILE_CHANGED: .claude/rust-sdlc.yml"' \
+    'field("recommended_action") === "move the profile change to its own pull request from the default branch (/rs-sdlc-setup --refresh)"'
+}
+
+@test "workflows: rp-protected: a PROTECTED: line of the branch guard escalates before any lens with the D23 remedy" {
+  wf_scenario rs-sdlc-review-panel rp-protected
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && seq("scope")' \
+    'field("blocking_finding") === "protected file clippy.toml changed (working tree)"' \
+    'has(field("recommended_action"), "git restore --source=3e0bd3e5f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0 -- clippy.toml,", "approved-config-change", "ALLOW_PROTECTED_CONFIG_EDIT=1", "(D23)")'
+}
+
+@test "workflows: rp-reopened: a finding still open after a COMPLETE fix leaves fixed without new refuters; maxIterations 2 ends ESCALATED at 2/2 naming it" {
+  wf_scenario rs-sdlc-review-panel rp-reopened
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 2 && field("stage") === "review" && field("iteration") === "2/2"' \
+    'r.fixed.length === 0 && same(r.findings.map((f) => f.id), ["CQ-1"])' \
+    'count(/^verify:/) === 3 && count("code-quality-reviewer") === 2 && idx("fix:crates/billing/invoice") >= 0 && idx("fix:crates/billing/invoice") < labels.lastIndexOf("code-quality-reviewer")' \
+    'has(field("blocking_finding"), "CQ-1", "crates/billing/invoice/domain/src/invoice.rs:42")'
+}
+
+@test "workflows: rp-schema: a lens reply without status and a scope reply without protected are schema gaps, never a pass" {
+  local nostatus="$BATS_TEST_TMPDIR/rp-no-status.json" noguard="$BATS_TEST_TMPDIR/rp-no-protected.json"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); delete s.replies.find((x) => x.match === "^code-quality-reviewer$").reply.status; fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/rp-lens-blocked.json" "$nostatus"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); delete s.replies.find((x) => x.match === "^scope$").reply.protected; fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/rp-protected.json" "$noguard"
+  wf_run rs-sdlc-review-panel "$nostatus"
+  [ "$status" -eq 1 ]
+  wf_expect '!("result" in o) && has(o.error, "schema gap: reply for agent label=\"code-quality-reviewer\" lacks required key(s) \"status\"")'
+  wf_run rs-sdlc-review-panel "$noguard"
+  [ "$status" -eq 1 ]
+  wf_expect '!("result" in o) && has(o.error, "schema gap: reply for agent label=\"scope\" lacks required key(s) \"protected\"") && seq("scope")'
 }
 
 @test "workflows: rp-scope-blocked: an invalid profile escalates before any lens runs" {
@@ -635,11 +782,25 @@ wf_same_as_child() {
     'has(field("recommended_action"), "run /rs-sdlc-setup")'
 }
 
+@test "workflows: rp-security-not-rerun: a fix that touches no PA-5 path re-runs only the code-quality and FR/NFR lenses, SUCCESS in 2 iterations" {
+  wf_scenario rs-sdlc-review-panel rp-security-not-rerun
+  wf_expect 'r.result === "SUCCESS" && r.iterations === 2 && r.fixed.length === 1 && count("security-auditor:all") === 1' \
+    'seq("scope", "code-quality-reviewer", "fr-nfr-reviewer", "security-auditor:all", "verify:correctness:CQ-1", "verify:standards:CQ-1", "verify:remedy:CQ-1", "fix:docs/invoices.md", "code-quality-reviewer", "fr-nfr-reviewer")'
+}
+
 @test "workflows: rp-security-skipped: a diff without a PA-5 path runs two lenses and no security-auditor" {
   wf_scenario rs-sdlc-review-panel rp-security-skipped
   wf_expect 'r.result === "SUCCESS" && r.iterations === 2 && count(/^security-auditor/) === 0' \
     'o.logs.includes("security lens: not applicable, the diff touches no PA-5 path")' \
     'seq("scope", "code-quality-reviewer", "fr-nfr-reviewer", "verify:correctness:CQ-1", "verify:standards:CQ-1", "verify:remedy:CQ-1", "fix:docs/invoices.md", "code-quality-reviewer", "fr-nfr-reviewer")'
+}
+
+@test "workflows: rp-split-vote: one non-refutation drops a finding for the whole run, two keep it; SUCCESS-WITH-REPORT after 2 iterations" {
+  wf_scenario rs-sdlc-review-panel rp-split-vote
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.iterations === 2 && same(r.findings.map((f) => f.id), ["CQ-2"]) && same(r.fixed.map((f) => f.id), ["CQ-2"])' \
+    'count(/^verify:/) === 6 && ["CQ-1", "CQ-2"].every((id) => ["correctness", "standards", "remedy"].every((l) => idx("verify:" + l + ":" + id) >= 0))' \
+    'same(pick(/^fix:/), ["fix:crates/billing/invoice"]) && !has(call("fix:crates/billing/invoice").prompt, "line_item.rs")' \
+    'note("verdict FAIL rests only on findings the refuters rejected")'
 }
 
 @test "workflows: rp-unverified: a finding with a missing refuter vote is kept unverified and reported" {
@@ -649,7 +810,7 @@ wf_same_as_child() {
     'count(/^fix:/) === 1'
 }
 
-# --- rs-sdlc-pr-until-green (pug-, 17) -----------------------------------------
+# --- rs-sdlc-pr-until-green (pug-, 30) -----------------------------------------
 
 @test "workflows: pug-as-child: under --as-child with onGate: 'return' a GATE verdict returns without nesting" {
   wf_scenario rs-sdlc-pr-until-green pug-as-child --as-child
@@ -663,7 +824,7 @@ wf_same_as_child() {
   wf_scenario rs-sdlc-pr-until-green pug-blocked
   wf_expect 'r.result === "ESCALATED" && r.verdict === "BLOCKED" && seq("pr-state")' \
     'field("stage") === "finish-pr" && field("blocking_finding") === "PR #7 is MERGED"' \
-    'same(r.counters, {fix: 0, wait: 0, request: 0, gate: 0})'
+    'same(r.counters, {fix: 0, wait: 0, request: 0, gate: 0}) && field("iteration") === "0/5"'
 }
 
 @test "workflows: pug-carry: a re-entry with carry resumes every counter and the journal, resetting none (AC-3.4 b)" {
@@ -676,6 +837,15 @@ wf_same_as_child() {
     'seq("pr-state", "pr-comment-resolver 3/5", "publish 1", "pr-state", "wait 540s", "pr-state confirm")'
 }
 
+@test "workflows: pug-ci-fixer-blocked: a BLOCKED ci-fixer escalates with its block-detail lines and keeps its degrade note, nothing published" {
+  wf_scenario rs-sdlc-pr-until-green pug-ci-fixer-blocked
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "FIX" && same(r.counters, {fix: 1, wait: 0, request: 0, gate: 0})' \
+    'seq("pr-state", "ci-fixer 1/5")' \
+    'has(field("blocking_finding"), "ci-fixer BLOCKED", "Dependency policy https://github.com/acme/billing-service/actions/runs/912345678", "RUSTSEC-2026-0031")' \
+    'field("recommended_action") === "replace the dependency or drop the sqlx feature that pulls it in, or a maintainer-approved deny.toml exception (a protected file: approved-config-change and ALLOW_PROTECTED_CONFIG_EDIT=1)"' \
+    'note("base ref origin/main unavailable", "(D24)")'
+}
+
 @test "workflows: pug-coderabbit-interval: inside the CodeRabbit interval it waits through REQUEST instead of re-mentioning" {
   wf_scenario rs-sdlc-pr-until-green pug-coderabbit-interval
   wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.verdict === "READY" && same(r.counters, {fix: 0, wait: 2, request: 2, gate: 0})' \
@@ -683,6 +853,17 @@ wf_same_as_child() {
     'has(call("request 1/3").prompt, "request-ai-reviews.sh\" --pr 7 --reviewers coderabbit,qodo")' \
     'has(call("wait 540s").prompt, "--wait-verdicts WAIT,REQUEST")' \
     'note("qodo: SKIPPED", "reported, not passed")'
+}
+
+@test "workflows: pug-d7-once-per-head: each READY head without an AI reviewer gets one logged D7 pass, counts only when a second read confirms that same head and reports one D7 note (NFR-3)" {
+  wf_scenario rs-sdlc-pr-until-green pug-d7-once-per-head
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.verdict === "READY" && r.head === "b2c3d4e" && r.counters.fix === 2 && r.counters.request === 0 && r.counters.gate === 0' \
+    'seq("pr-state", "pr-comment-resolver 1/5 D7", "pr-state confirm", "pr-comment-resolver 2/5 D7", "pr-state confirm", "wait 540s", "pr-state confirm")' \
+    'has(call("pr-comment-resolver 1/5 D7").prompt, "head a1b2c3d", "ai-review-loop.sh") && has(call("pr-comment-resolver 2/5 D7").prompt, "head b2c3d4e", "ai-review-loop.sh")' \
+    'same(notes, ["no AI reviewer — ai-review-loop findings used as the comment source (D7)"])' \
+    'r.journal.length === 6' \
+    'has(r.journal[0], "1: READY -> D7 review pass (fix 1/5) -> ", "clean on a1b2c3d") && has(r.journal[2], "3: READY -> D7 review pass (fix 2/5) -> ", "clean on b2c3d4e")' \
+    'has(r.journal[1], "confirmation snapshot (wait 1/6)") && has(r.journal[5], "6: READY -> confirmation snapshot -> READY on b2c3d4e")'
 }
 
 @test "workflows: pug-fix-exhausted: the fix counter is bounded at 5 rounds" {
@@ -710,6 +891,15 @@ wf_same_as_child() {
     'has(call("publish 1").prompt, "fix(#<N>): address review gate iteration 1 findings")'
 }
 
+@test "workflows: pug-gate-advisory: an advisory nested FR/NFR run posts no gate status, never counts as a gate run and escalates" {
+  wf_scenario rs-sdlc-pr-until-green pug-gate-advisory
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "GATE" && same(r.counters, {fix: 0, wait: 0, request: 0, gate: 1})' \
+    'seq("pr-state", "workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review")' \
+    'same(call("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review").args, {pr: 7, head: "a1b2c3d"})' \
+    'has(field("blocking_finding"), "advisory on head a1b2c3d", "no gate status was posted")' \
+    'note("advisory gate run", "posted no BMAD FR/NFR Review Gate status")'
+}
+
 @test "workflows: pug-gate-escalated: an escalated nested FR/NFR review escalates the PR, the gate never skipped" {
   wf_scenario rs-sdlc-pr-until-green pug-gate-escalated
   wf_expect 'r.result === "ESCALATED" && r.verdict === "GATE" && r.counters.gate === 1' \
@@ -725,6 +915,16 @@ wf_same_as_child() {
     'field("iteration") === "3/3 (fr_nfr_gate)" && has(field("blocking_finding"), "still failure on head d4e5f6a after 3 gate rounds")'
 }
 
+@test "workflows: pug-gate-publish-failed: a push whose hook still fails after the one retry escalates with the log tail and the gate result in the iteration log" {
+  wf_scenario rs-sdlc-pr-until-green pug-gate-publish-failed
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "GATE" && same(r.counters, {fix: 0, wait: 0, request: 0, gate: 1})' \
+    'seq("pr-state", "workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review", "publish 1")' \
+    'has(call("publish 1").prompt, "fix(#<N>): address review gate iteration 1 findings")' \
+    'has(field("blocking_finding"), "publish failed", "git push -u origin HEAD exit 1", "pre-push: make test-unit failed")' \
+    'has(field("recommended_action"), "never bypassed")' \
+    'has(r.journal[r.journal.length - 1], "rs-sdlc-fr-nfr-review --pr 7 --head a1b2c3d", "publish failed")'
+}
+
 @test "workflows: pug-human-gated-blocked: a failing human-gated check ends ESCALATED naming its label, never fixed (AC-21.2, D9)" {
   wf_scenario rs-sdlc-pr-until-green pug-human-gated-blocked
   wf_expect 'r.result === "ESCALATED" && r.verdict === "BLOCKED" && seq("pr-state")' \
@@ -732,10 +932,42 @@ wf_same_as_child() {
     'has(field("recommended_action"), "applies the label approved-config-change", "never applies or removes a label")'
 }
 
+@test "workflows: pug-interval-mixed: a request round that posted a mention re-reads plainly; only a plan with nothing requested and a held mention waits out the interval" {
+  wf_scenario rs-sdlc-pr-until-green pug-interval-mixed
+  wf_expect 'r.result === "SUCCESS" && r.verdict === "READY" && same(r.counters, {fix: 0, wait: 1, request: 2, gate: 0})' \
+    'seq("pr-state", "request 1/3", "pr-state", "request 2/3", "wait 240s", "pr-state confirm")' \
+    'has(call("request 1/3").prompt, "request-ai-reviews.sh\" --pr 7 --reviewers coderabbit,cubic") && has(call("request 2/3").prompt, "request-ai-reviews.sh\" --pr 7 --reviewers coderabbit")' \
+    'has(call("wait 240s").prompt, "--wait-seconds 240", "--wait-verdicts WAIT,REQUEST")' \
+    'has(r.journal[0], "(request 1/3) -> requested=cubic waiting=coderabbit:5m") && has(r.journal[1], "(request 2/3), wait 1/6 -> requested=- waiting=coderabbit:4m", "waiting out the interval")'
+}
+
+@test "workflows: pug-malformed-carry: carry counters that are not an object escalate before any agent runs instead of restarting at zero" {
+  wf_scenario rs-sdlc-pr-until-green pug-malformed-carry
+  wf_expect 'r.result === "ESCALATED" && r.verdict === null && labels.length === 0' \
+    'has(field("blocking_finding"), "malformed arguments", "carry.counters must be an object")'
+}
+
 @test "workflows: pug-malformed-ready: a READY payload without the sensor fields is malformed and escalates" {
   wf_scenario rs-sdlc-pr-until-green pug-malformed-ready
   wf_expect 'r.result === "ESCALATED" && r.verdict === null && seq("pr-state")' \
     'has(field("blocking_finding"), "malformed sensor payload", "verdict READY")'
+}
+
+@test "workflows: pug-no-ci: after ci-fixer reports SKIPPED-NO-CI the CI half counts as none (D8): no second fix round, REQUEST before WAIT, SUCCESS-WITH-REPORT with one D8 note (NFR-3)" {
+  wf_scenario rs-sdlc-pr-until-green pug-no-ci
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.verdict === "READY" && same(r.counters, {fix: 1, wait: 1, request: 1, gate: 0})' \
+    'seq("pr-state", "ci-fixer 1/5", "pr-state", "request 1/3", "pr-state", "wait 540s", "pr-state confirm")' \
+    'has(call("request 1/3").prompt, "request-ai-reviews.sh\" --pr 7 --reviewers coderabbit")' \
+    'has(call("wait 540s").prompt, "--wait-verdicts WAIT,FIX")' \
+    'same(notes, ["no CI provider: reported checks Static analysis are not fixed (D8)"])'
+}
+
+@test "workflows: pug-no-ci-conflicting: a conflicting PR escalates BLOCKED naming the conflict, also after the no-CI rule (D8)" {
+  wf_scenario rs-sdlc-pr-until-green pug-no-ci-conflicting
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "BLOCKED" && same(r.counters, {fix: 1, wait: 0, request: 0, gate: 0})' \
+    'seq("pr-state", "ci-fixer 1/5", "pr-state")' \
+    'field("blocking_finding") === "PR #7 conflicts with its base branch" && has(field("recommended_action"), "resolve the merge conflict")' \
+    'same(notes, ["no CI provider: reported checks Static analysis are not fixed (D8)"])'
 }
 
 @test "workflows: pug-not-approved: a reviewer that reviewed the head without approving escalates after 3 requests" {
@@ -760,11 +992,35 @@ wf_same_as_child() {
     'has(field("recommended_action"), "never passed with a report")'
 }
 
+@test "workflows: pug-request-failed: a failed request-ai-reviews.sh run escalates (D10) instead of reading as an empty plan" {
+  wf_scenario rs-sdlc-pr-until-green pug-request-failed
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "REQUEST" && same(r.counters, {fix: 0, wait: 0, request: 1, gate: 0})' \
+    'seq("pr-state", "request 1/3")' \
+    'has(field("blocking_finding"), "request-ai-reviews.sh --pr 7 --reviewers coderabbit failed", "gh api failed listing comments for PR #7", "(D10)")' \
+    'has(field("recommended_action"), "gh auth login")'
+}
+
+@test "workflows: pug-resolver-protected: a thread that needs a protected file escalates with the D23 remedy, nothing published" {
+  wf_scenario rs-sdlc-pr-until-green pug-resolver-protected
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "FIX" && same(r.counters, {fix: 1, wait: 0, request: 0, gate: 0})' \
+    'seq("pr-state", "pr-comment-resolver 1/5")' \
+    'has(field("blocking_finding"), "protected configuration deny.toml")' \
+    'has(field("recommended_action"), "git restore --source=<merge-base> -- <path>", "approved-config-change", "ALLOW_PROTECTED_CONFIG_EDIT=1")'
+}
+
 @test "workflows: pug-return-gate: with onGate: 'return' a GATE verdict is handed back to the caller" {
   wf_scenario rs-sdlc-pr-until-green pug-return-gate
   wf_expect 'r.result === "GATE" && r.pr === 7 && r.head === "a1b2c3d" && r.counters.gate === 1' \
     'seq("pr-state") && count(/^workflow:/) === 0' \
     '!("verdict" in r) && !("escalation" in r)'
+}
+
+@test "workflows: pug-sensor-unreachable: a sensor that exits non-zero yields the BLOCKED fallback and escalates with the gh remedy (D10)" {
+  wf_scenario rs-sdlc-pr-until-green pug-sensor-unreachable
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "BLOCKED" && r.pr === 7 && r.head === null && seq("pr-state")' \
+    'same(r.counters, {fix: 0, wait: 0, request: 0, gate: 0}) && field("iteration") === "0/5"' \
+    'field("blocking_finding") === "pr-state.sh exit 1: [rust-sdlc][ERROR] gh pr view failed for PR #7 in acme/billing-service"' \
+    'has(field("recommended_action"), "gh auth login", "(D10)")'
 }
 
 @test "workflows: pug-silent-reviewer: a reviewer silent for 6 waits is dropped with a note and the D7 pass is the comment source" {
@@ -773,7 +1029,23 @@ wf_same_as_child() {
     'count("wait 540s") === 6 && idx("pr-comment-resolver 1/5 D7") > idx("wait 540s")' \
     'note("coderabbit never reviewed head a1b2c3d within 6 wait rounds", "reported as missing, not passed")' \
     'note("no AI reviewer", "(D7)")' \
-    'has(call("pr-comment-resolver 1/5 D7").prompt, "ai-review-loop.sh", "(D7)")'
+    'has(call("pr-comment-resolver 1/5 D7").prompt, "ai-review-loop.sh", "(D7)")' \
+    'r.journal.some((l) => has(l, "READY -> D7 review pass (fix 1/5) -> ", "clean on a1b2c3d"))'
+}
+
+@test "workflows: pug-skipped-reviewer: a SKIPPED reviewer beside an approving one is reported and runs no D7 pass, SUCCESS-WITH-REPORT" {
+  wf_scenario rs-sdlc-pr-until-green pug-skipped-reviewer
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.verdict === "READY" && same(r.counters, {fix: 0, wait: 0, request: 0, gate: 0})' \
+    'seq("pr-state", "pr-state confirm")' \
+    'note("qodo: SKIPPED", "its missing review is reported, not passed")'
+}
+
+@test "workflows: pug-untrusted-thread: a not-actioned thread by a non-collaborator escalates to a maintainer instead of looping (ADR-26)" {
+  wf_scenario rs-sdlc-pr-until-green pug-untrusted-thread
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "FIX" && same(r.counters, {fix: 1, wait: 0, request: 0, gate: 0})' \
+    'seq("pr-state", "pr-comment-resolver 1/5")' \
+    'has(field("blocking_finding"), "1 unresolved thread(s)", "not collaborators")' \
+    'has(field("recommended_action"), "a maintainer answers and resolves them on PR #7")'
 }
 
 @test "workflows: pug-wait-exhausted: 6 WAIT verdicts exhaust the wait counter and escalate (AC-21.2)" {
@@ -783,7 +1055,7 @@ wf_same_as_child() {
     'has(field("blocking_finding"), "wait budget exhausted")'
 }
 
-# --- rs-sdlc-feature (feat-, 15) -----------------------------------------------
+# --- rs-sdlc-feature (feat-, 32) -----------------------------------------------
 
 @test "workflows: feat-happy: a fresh run ends SUCCESS-WITH-REPORT, a QA FAIL hands its rows to one implementer round (AC-3.4 b)" {
   wf_scenario rs-sdlc-feature feat-happy
@@ -792,7 +1064,10 @@ wf_same_as_child() {
     'order("setup-check", "resolve-plan", "stage", "story 1.1", "verify 2", "story 1.4", "publish implement", "workflow:rust-backend-sdlc:rs-sdlc-review-panel", "qa-manual-tester", "story QA-1", "publish qa-fix 1", "publish finish-pr", "pr create/update", "workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")' \
     'count("workflow:rust-backend-sdlc:rs-sdlc-review-panel") === 2 && count("qa-manual-tester") === 2' \
     'has(call("story QA-1").prompt, "Fix QA findings 1") && (r.stages || []).some((s) => s.stage === "qa" && s.iterations === "1/2 (qa_loops)" && s.met === "no")' \
-    'call("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green").args.onGate === "return" && stage("Finish PR").met === "yes"'
+    'call("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green").args.onGate === "return" && stage("Finish PR").met === "yes"' \
+    'order("resolve-plan", "publish plan", "stage") && subjects()[0] === "docs(#12): add planning bundle 12-invoice-due-date"' \
+    'order("workflow:rust-backend-sdlc:rs-sdlc-review-panel", "publish review 1", "workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review") && subjects().some((s) => /^fix\(#12\): address review gate iteration [0-9]+ findings$/.test(s))' \
+    'note("advisory gate run: no pull request (D11)")'
 }
 
 @test "workflows: feat-setup-fails: a failed setup check halts with the /rs-sdlc-setup instruction" {
@@ -897,7 +1172,8 @@ wf_same_as_child() {
     'all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")[0].args.carry === null' \
     'same(all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")[1].args.carry.counters, {fix: 0, wait: 1, request: 1, gate: 1})' \
     'same(all("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review")[1].args, {pr: 34, head: "b2c3d4e5f60718293a4b5c6d7e8f901234567890"})' \
-    'has(call("publish gate 1/3").prompt, "fix(#12): address review gate iteration 1 findings")'
+    'has(call("publish gate 1/3").prompt, "fix(#12): address review gate iteration 1 findings")' \
+    '((c) => c.journal.length === 2 && c.journal[0] === "1: GATE -> hand-back (gate 1/3) -> GATE on b2c3d4e returned to the caller" && has(c.journal[1], "GATE hand-back") && same(c.degrade_notes, []))(all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")[1].args.carry)'
 }
 
 @test "workflows: feat-gate-handback-exhausted: a fourth GATE hand-back escalates after the feature-owned 3 gate rounds" {
@@ -915,4 +1191,133 @@ wf_same_as_child() {
     '["story 1.1", "story 1.2", "story 1.3"].every((l) => has(call(l).prompt, "mode: parallel", "Run only the DB-free targets"))' \
     'has(call("verify 1").prompt, "mode: verify", "make.integration_tests", "make.sqlx_prepare") && call("verify 1").agentType === "rust-backend-sdlc:rust-implementer"' \
     'has(all("story 1.3")[1].prompt, "mode: serial", "ended STATUS: IN_PROGRESS")'
+}
+
+@test "workflows: feat-layer-first-batches: the earliest open layer runs first, at most 4 independent stories run in parallel and a dependent story runs alone" {
+  wf_scenario rs-sdlc-feature feat-layer-first-batches
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && stage("Implement").iterations === "4/5"' \
+    'same(pick(/^(story |verify )/), ["story 2.1", "story 1.1", "story 1.2", "story 1.3", "story 1.4", "verify 2", "story 1.5", "story 1.6"])' \
+    '["story 1.1", "story 1.2", "story 1.3", "story 1.4"].every((l) => has(call(l).prompt, "mode: parallel", "Run only the DB-free targets"))' \
+    '["story 2.1", "story 1.5", "story 1.6"].every((l) => has(call(l).prompt, "mode: serial"))' \
+    '["2.1", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6"].every((id) => subjects().filter((x) => x.startsWith(`feat(#12): story ${id} `)).length === 1)' \
+    'calls.slice(0, idx("verify 2")).filter((c) => /^publish/.test(c.label)).every((c) => !/story 1\.[1-4] /.test(c.prompt))'
+}
+
+@test "workflows: feat-verify-without-exit-signal: a verify step without EXIT_SIGNAL true leaves the round's stories open for the next round" {
+  wf_scenario rs-sdlc-feature feat-verify-without-exit-signal
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && stage("Implement").iterations === "2/5"' \
+    'same(pick(/^(story |verify )/), ["story 1.1", "story 1.2", "verify 1", "story 1.1", "story 1.2", "verify 2"])' \
+    'count("publish implement") === 1 && idx("publish implement") > idx("verify 2")'
+}
+
+@test "workflows: feat-verify-blocked: a serialized verify step that replies BLOCKED ends ESCALATED with the 7 fields (D22)" {
+  wf_scenario rs-sdlc-feature feat-verify-blocked
+  wf_expect 'r.result === "ESCALATED" && seven() && field("stage") === "implement" && field("iteration") === "1/5"' \
+    'seq("setup-check", "resolve-plan", "stage", "story 1.1", "story 1.2", "verify 1")' \
+    'has(field("blocking_finding"), "BLOCKED", "verify", "Cannot connect to the Docker daemon") && has(field("recommended_action"), "(D22)")'
+}
+
+@test "workflows: feat-parallel-story-blocked: a BLOCKED story of a parallel round ends ESCALATED before the verify step (D22)" {
+  wf_scenario rs-sdlc-feature feat-parallel-story-blocked
+  wf_expect 'r.result === "ESCALATED" && seven() && field("stage") === "implement" && field("iteration") === "1/5"' \
+    'seq("setup-check", "resolve-plan", "stage", "story 1.1", "story 1.2") && count(/^verify /) === 0' \
+    'has(field("blocking_finding"), "story 1.2", "BLOCKED: protected configuration deny.toml") && has(field("recommended_action"), "(D22)")'
+}
+
+@test "workflows: feat-qa-loops-exhausted: a third QA FAIL after 2 QA loops ends ESCALATED at stage qa with iteration 2/2" {
+  wf_scenario rs-sdlc-feature feat-qa-loops-exhausted
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "qa" && /^2\/2( |$)/.test(field("iteration"))' \
+    'count("qa-manual-tester") === 3 && same(pick(/^story QA-/), ["story QA-1", "story QA-2"]) && labels[labels.length - 1] === "qa-manual-tester"' \
+    'order("qa-manual-tester", "story QA-1", "publish qa-fix 1", "story QA-2", "publish qa-fix 2")' \
+    'has(field("blocking_finding"), "AC-3 GET /api/invoices?overdue=true") && count(/pr-until-green/) === 0 && count("pr create/update") === 0'
+}
+
+@test "workflows: feat-qa-boot-blocked: a QA boot that finds Docker unreachable ends ESCALATED at stage qa without a QA verdict (D2)" {
+  wf_scenario rs-sdlc-feature feat-qa-boot-blocked
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "qa"' \
+    'labels[labels.length - 1] === "qa-boot" && count("qa-manual-tester") === 0 && count(/pr-until-green/) === 0' \
+    'has(field("blocking_finding"), "Cannot connect to the Docker daemon") && /\bD2\b/.test(esc)' \
+    '(r.stages || []).filter((s) => s.stage === "qa").every((s) => s.met === "no")'
+}
+
+@test "workflows: feat-plan-not-ready: a bundle whose readiness is not ready escalates at stage plan before it is published or staged" {
+  wf_scenario rs-sdlc-feature feat-plan-not-ready
+  wf_expect 'r.result === "ESCALATED" && seq("setup-check", "resolve-plan") && r.specs_dir === null' \
+    'field("stage") === "plan" && field("exit_condition") === "bundle complete, readiness \"ready\", readiness regex clean, bundle committed"' \
+    'has(field("blocking_finding"), "specs/12-invoice-due-date/", "not ready") && has(field("recommended_action"), "/rs-sdlc-plan #12")'
+}
+
+@test "workflows: feat-branch-blocked: a refused git switch escalates at stage branch with iteration 1/1" {
+  wf_scenario rs-sdlc-feature feat-branch-blocked
+  wf_expect 'r.result === "ESCALATED" && seq("setup-check", "resolve-plan") && r.branch === null' \
+    'field("stage") === "branch" && field("iteration") === "1/1"' \
+    'field("exit_condition") === "branch `<type>/<N>-<slug>` checked out from the default branch"' \
+    'has(field("blocking_finding"), "git switch -c feat/12-invoice-due-date origin/main", "exit 1")'
+}
+
+@test "workflows: feat-staging-out-of-order: bmalph implement reported before stage-planning-artifacts.sh escalates before any story (ADR-10a)" {
+  wf_scenario rs-sdlc-feature feat-staging-out-of-order
+  wf_expect 'r.result === "ESCALATED" && seq("setup-check", "resolve-plan", "stage")' \
+    'field("stage") === "implement" && field("iteration") === "0/5"' \
+    'has(field("blocking_finding"), "stage-planning-artifacts.sh", "bmalph implement")'
+}
+
+@test "workflows: feat-staging-context-part-a-missing: a PROJECT_CONTEXT.md without part (a) escalates before any story" {
+  wf_scenario rs-sdlc-feature feat-staging-context-part-a-missing
+  wf_expect 'r.result === "ESCALATED" && seq("setup-check", "resolve-plan", "stage")' \
+    'field("stage") === "implement" && field("iteration") === "0/5"' \
+    'has(field("blocking_finding"), ".ralph/PROJECT_CONTEXT.md lacks part (a)", "(#12)") && !has(field("blocking_finding"), "part (b)")' \
+    'has(field("recommended_action"), "/rs-sdlc-plan #12")'
+}
+
+@test "workflows: feat-fix-branch: a fix/<N>-<slug> branch commits its stories as fix(#<N>): story <N.M> <title>" {
+  wf_scenario rs-sdlc-feature feat-fix-branch
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.branch === "fix/12-overdue-list-includes-due-today" && r.specs_dir === "specs/12-overdue-list-includes-due-today/"' \
+    'same(subjects(), ["docs(#12): add planning bundle 12-overdue-list-includes-due-today", "fix(#12): story 1.1 Exclude invoices due today from the overdue list"]) && subjects().every(subjectOk)'
+}
+
+@test "workflows: feat-gate-handback-advisory: an advisory FR/NFR run on the handed-back head escalates instead of re-entering pr-until-green" {
+  wf_scenario rs-sdlc-feature feat-gate-handback-advisory
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "finish-pr" && field("iteration") === "1/3 (fr_nfr_gate)"' \
+    'count("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green") === 1 && count(/^publish gate /) === 0 && labels[labels.length - 1] === "workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review"' \
+    'same(all("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review")[1].args, {pr: 34, head: "b2c3d4e5f60718293a4b5c6d7e8f901234567890"})' \
+    'has(field("blocking_finding"), "advisory") && has(field("recommended_action"), "PR #34")'
+}
+
+@test "workflows: feat-gate-handback-wrong-pr: a GATE hand-back naming another pull request escalates before a gate round is spent" {
+  wf_scenario rs-sdlc-feature feat-gate-handback-wrong-pr
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "finish-pr" && field("iteration") === "0/3 (fr_nfr_gate)"' \
+    'count("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green") === 1 && count("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review") === 1 && count(/^publish gate /) === 0' \
+    'labels[labels.length - 1] === "workflow:rust-backend-sdlc:rs-sdlc-pr-until-green" && has(field("blocking_finding"), "GATE hand-back")'
+}
+
+@test "workflows: feat-gate-handback-null-pr: a GATE hand-back without a pull request number escalates before a gate round is spent" {
+  wf_scenario rs-sdlc-feature feat-gate-handback-null-pr
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "finish-pr" && field("iteration") === "0/3 (fr_nfr_gate)"' \
+    'count("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green") === 1 && count("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review") === 1 && count(/^publish gate /) === 0' \
+    'labels[labels.length - 1] === "workflow:rust-backend-sdlc:rs-sdlc-pr-until-green" && has(field("blocking_finding"), "malformed GATE hand-back")'
+}
+
+@test "workflows: feat-gate-handback-clean: a hand-back whose FR/NFR review fixed nothing publishes nothing and re-enters with counters, journal and degrade notes carried" {
+  wf_scenario rs-sdlc-feature feat-gate-handback-clean
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && stage("Finish PR").met === "yes (degraded)" && note("no AI reviewer", "(D7)")' \
+    'count("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green") === 2 && count("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review") === 2 && count(/^publish gate /) === 0' \
+    'same(all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")[1].args.carry.counters, {fix: 0, wait: 0, request: 0, gate: 1})' \
+    'same(all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")[1].args.carry.degrade_notes, ["no AI reviewer is configured — the verdict waits for no review approval (D7)"])' \
+    '((j) => j.length === 2 && j[0] === "1: GATE -> hand-back (gate 1/3) -> GATE on b2c3d4e returned to the caller" && has(j[1], "GATE hand-back"))(all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")[1].args.carry.journal)'
+}
+
+@test "workflows: feat-finish-escalated: an ESCALATED pr-until-green ends the feature ESCALATED at finish-pr with the exhausted counter's iteration" {
+  wf_scenario rs-sdlc-feature feat-finish-escalated
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "finish-pr" && field("iteration").startsWith("5/5 ")' \
+    'field("exit_condition") === "CI green + FR/NFR gate green on the head SHA + 0 unresolved review threads"' \
+    'count("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green") === 1 && labels[labels.length - 1] === "workflow:rust-backend-sdlc:rs-sdlc-pr-until-green"' \
+    'has(field("blocking_finding"), "fix budget exhausted", "Static analysis")'
+}
+
+@test "workflows: feat-lowered-caps: maxImplementRounds 2 lowers the implement cap and a story still open after 2 rounds escalates at 2/2" {
+  wf_scenario rs-sdlc-feature feat-lowered-caps
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "implement" && field("iteration") === "2/2"' \
+    'seq("setup-check", "resolve-plan", "stage", "story 1.1", "story 1.1") && count(/^publish/) === 0' \
+    'has(field("blocking_finding"), "1.1") && has(call("story 1.1").prompt, "iteration 1/2")'
 }
