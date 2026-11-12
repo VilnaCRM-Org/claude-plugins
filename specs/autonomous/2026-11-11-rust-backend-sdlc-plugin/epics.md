@@ -30,7 +30,7 @@ This document decomposes the PRD (44 FRs, 16 NFRs) and the architecture (the imp
 >
 > Assumption A6: commit subjects in this repository follow § Constraints: `<type>(rust-backend-sdlc): <subject>`, one commit per story or more, never `--no-verify`, never force-push; a defect found by a later story is fixed in the owning story's files by a `fix(rust-backend-sdlc): …` commit.
 
-### Story format (parsed by bmalph)
+### Story layout (parsed by bmalph)
 
 Epics are `## Epic N: Title` plus one paragraph; stories are `### Story N.M: Title` with, in order: the user story (As a / I want / So that), a `**Read:**` line naming the architecture sections to load (nothing else needs reading), the `**Acceptance Criteria:**` block (one criterion per line, each starting `- Given`, phrased Given/when/then), then `**Files owned:**`, `**Depends on:**`, `**FRs:**` and `**Verification:**`. No heading and no indented line appears inside a story body, so bmalph's parser (`dist/transition/story-parsing.js`) attaches every criterion to the right story and ignores the trailing metadata.
 
