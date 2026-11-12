@@ -1411,3 +1411,450 @@ So that 28 verdicts are recorded from frontmatter and the guide alone and only t
 - `head -1 plugins/rust-backend-sdlc/skills/SKILL-DECISION-GUIDE.md | { ! grep -qx -- '---'; } && grep -qF 'every skill verdict recorded, no silent skips' plugins/rust-backend-sdlc/skills/SKILL-DECISION-GUIDE.md`
 - `for d in plugins/rust-backend-sdlc/skills/*/; do n=$(basename "$d"); grep -qE "^\| \`?$n\`? \|" plugins/rust-backend-sdlc/skills/SKILL-DECISION-GUIDE.md || echo "no row $n"; done | { ! grep .; }`
 
+## Epic 5: Agents and the feature loop
+
+A feature engineer can run /rs-sdlc "<task>" (or any single stage command) and be driven from a GitHub issue through a committed BMAD bundle, a bmalph/Ralph implementation with the claude-code driver, a three-lens review that loops the FR/NFR gate to zero new findings, black-box REST/GraphQL QA and PR finishing to CI green with every thread resolved, resumable from the issue's state comment and bounded by the 7-field escalation; this epic adds the stage-state and Ralph helpers of `common.sh`, the seven agents, the agent guide and the seven loop commands, using the scripts of Epic 3 and the skills of Epic 4.
+
+### Story 5.1: Stage state and resume (`common.sh` section `stage state and resume`)
+
+As a feature engineer resuming an interrupted run,
+I want tested functions that record each stage durably and compute where to resume,
+So that a fresh clone or a cleaned `target/` resumes at the right stage with its counters, and a forged comment cannot skip review or QA.
+**Read:** § Script Contracts › `scripts/lib/common.sh` rows `state_cache_update`, `state_comment_body`, `resume_point`; ADR-10c (`BLOCKED_STAGE`), ADR-14, ADR-26; PRD FR-3 (PA-7 resume rules), AC-3.4 (a). **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given `state_cache_update FILE STAGE RESULT HEAD_SHA ITERATION [--staged-specs-dir DIR]`, when called, then it creates or updates atomically `{"schema_version": 1, "issue": <N>, "slug": "<kebab>", "staged_specs_dir": <path|null>, "stages": [{"stage", "result", "head_sha", "iteration", "at"}]}` with `issue`/`slug` parsed from the basename `^([1-9][0-9]*)-([a-z0-9-]+)\.json$` (any other name exits 2), `at` from `utc_now`, and validates stage ∈ `issue plan implement review qa finish-pr`, result ∈ `PASS IN_PROGRESS ESCALATED`, a 40-hex sha and a uint iteration, or for finish-pr the cell `^A[0-9]+\.B[0-9]+\.C[0-9]+\.W[0-9]+\.R[0-9]+$` (a malformed cell is refused); `--staged-specs-dir` sets the top-level key.
+- Given `state_comment_body FILE`, when called, then it prints `<!-- rust-sdlc-state -->`, a blank line and the table `| stage | result | head_sha | iteration | at |` from the cache, passed through `redact`.
+- Given `resume_point --comments LOGIN` with the issue comments JSON (arrays or NDJSON) on stdin, or `resume_point --cache FILE`, when called, then it reads only the oldest `<!-- rust-sdlc-state -->` comment authored by LOGIN (others print `DEGRADED: ignored state comment by <login>`), applies PA-7 (issue/plan/implement valid when `PASS` and `git merge-base --is-ancestor <sha> HEAD`; review/qa only when the sha equals `HEAD`; finish-pr re-derived live), prints `DONE_STAGE: <stage> <sha7> <iteration>` per valid stage, then `RESUME_STAGE: <stage>` or `BLOCKED_STAGE: implement breaker=<OPEN|HALF_OPEN>` (implement row `ESCALATED` and `.ralph/.circuit_breaker_state` `OPEN`/`HALF_OPEN`), then `COUNTERS: issue=<n>,plan=<n>,implement=<n>,review=<n>,qa=<n>,finish-pr=A<n>.B<n>.C<n>.W<n>.R<n>`; it never calls `gh` (empty gh stub log) and malformed input exits 1.
+- Given the AC-3.4 (a) scenarios, when run, then a fresh clone without cache and a state comment recording issue/plan/implement/review `PASS` resumes at `qa` with no repeated stage, a review iteration 3 is restored in `COUNTERS`, a new commit after the QA verdict makes QA stale, an implement sha that is not an ancestor of `HEAD` resumes at `implement`, and the forger's comment in `tests/fixtures/gh/issue-state-comments.json` is ignored.
+- Given the section, when checked, then it starts with `# section: stage state and resume`, the three functions run through the dispatcher, `shellcheck -x` and the banned-construct check are clean, and `tests/common-lib.bats` holds at least 64 `@test` cases in total.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/scripts/lib/common.sh` (section `stage state and resume`; appended after `publishing and model sessions`)
+- `plugins/rust-backend-sdlc/tests/common-lib.bats` (section `stage state and resume`; appended)
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/issue-state-comments.json`
+
+**Depends on:** 1.2, 3.1
+
+**FRs:** FR-3, FR-33 (NFR-9, NFR-10)
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/lib/common.sh && v_banned plugins/rust-backend-sdlc/scripts/lib/common.sh && v_gen plugins/rust-backend-sdlc/scripts/lib/common.sh`
+- `v_json plugins/rust-backend-sdlc/tests/fixtures/gh/issue-state-comments.json`
+- `v_bats common-lib 64`
+
+### Story 5.2: Ralph helpers (`common.sh` section `Ralph helpers`)
+
+As a feature engineer running the implement stage repeatedly,
+I want tested functions for the bmalph re-entry protocol, the `@AGENT.md` overrides and the breaker pre-check,
+So that a second feature, a resume or a QA fix story never hits bmalph's re-run refusal, Ralph follows the plugin's rules, and a tripped breaker is never reset.
+**Read:** § Script Contracts › `scripts/lib/common.sh` rows `ralph_fix_plan_prepare`, `ralph_fix_plan_restore`, `ralph_agent_md_patch`, `ralph_breaker_state`; ADR-10, ADR-10a, ADR-10b, ADR-10c; PRD FR-18, NFR-5. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given `ralph_fix_plan_prepare SPECS_DIR STATE_FILE`, when called, then it prints exactly one of `FIX_PLAN: absent` (no `.ralph/@fix_plan.md`), `FIX_PLAN: current` (cache `staged_specs_dir` equals SPECS_DIR and every `### Story N.M:` id of `SPECS_DIR/epics.md` is in the plan), `ARCHIVED: target/rust-sdlc/ralph-archive/<utc_stamp>-fix_plan.md keep-progress` (same bundle, a story id absent from the plan) or `ARCHIVED: … discard-progress` (cache absent or another bundle), moving `.ralph/@fix_plan.md` only in the `ARCHIVED` cases.
+- Given `ralph_fix_plan_restore ARCHIVE`, when called after a new `bmalph implement`, then it re-marks `- [x] Story <id>: <title>` only for stories whose id and title were both checked in the archive and prints `RESTORED: <n> stories`; one end-to-end case runs prepare → the bmalph stub's `implement` → restore, and one case shows the stub's `already been run` refusal while the plan exists.
+- Given `tests/fixtures/ralph/AGENT.md.tpl`, a byte copy of bmalph 2.11.0's `ralph/templates/AGENT.md` after the cargo customization, when `ralph_agent_md_patch SPECS_DIR` runs on a `.ralph/@AGENT.md` copied from it with the golden profile, then the fenced blocks under `## Project Setup`, `## Running Tests`, `## Build Commands` and `## Development Server` become `make bootstrap`, `make unit-tests` followed by `make setup-test-db`, `make integration-tests`, `make e2e-tests`, then `make tests-with-coverage` and `make start` (a null key drops its line; an empty block reads `not available (capability absent)`), every line containing `85%` becomes `Coverage floor: 100% lines and 100% functions`, items 1–3 of `### Git Workflow Requirements` become the three rules (commit each story as `<type>(#<N>): story N.M <title>` with N from `specs/<N>-<slug>`; stay on `<type>/<N>-<slug>`; never push, the plugin command pushes) while item 4 stays, it prints `UPDATED: .ralph/@AGENT.md` and a second run prints `UNCHANGED: .ralph/@AGENT.md`; a missing heading appends a `## rust-backend-sdlc overrides` section; an absent file or an invalid profile exits 1.
+- Given `ralph_breaker_state`, when `.ralph/.circuit_breaker_state` holds `CLOSED`, `OPEN`, `HALF_OPEN` or is absent and `CB_AUTO_RESET` comes from the environment or else a `CB_AUTO_RESET=` line of `.ralph/.ralphrc`, then it prints `BREAKER: <state>` and `AUTO_RESET: true|false`, exits 0 only for `CLOSED`/`ABSENT` with `AUTO_RESET: false`, and edits no file (one case per state and per auto-reset source).
+- Given the section, when checked, then it starts with `# section: Ralph helpers`, these four functions are the only code in the plugin that writes into `.ralph/`, all 17 dispatcher names now resolve to defined functions, `shellcheck -x` and the banned-construct check are clean, and `tests/common-lib.bats` holds at least 76 `@test` cases in total (floor 72 met).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/scripts/lib/common.sh` (section `Ralph helpers`; appended after `stage state and resume`)
+- `plugins/rust-backend-sdlc/tests/common-lib.bats` (section `Ralph helpers`; appended)
+- `plugins/rust-backend-sdlc/tests/fixtures/ralph/AGENT.md.tpl`
+
+**Depends on:** 1.1, 1.2, 1.7, 5.1
+
+**FRs:** FR-18, FR-33, FR-44 (NFR-5, NFR-6)
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/lib/common.sh && v_banned plugins/rust-backend-sdlc/scripts/lib/common.sh && v_gen plugins/rust-backend-sdlc/scripts/lib/common.sh`
+- `v_bats common-lib 76`
+- `for n in validate_context_name resume_point derive_issue_number is_commit_subject redact state_cache_update state_comment_body ledger_write hooks_active commit_msg_file wait_log http_probe protected_changes ralph_fix_plan_prepare ralph_fix_plan_restore ralph_agent_md_patch ralph_breaker_state; do bash -c "source plugins/rust-backend-sdlc/scripts/lib/common.sh && declare -F $n >/dev/null" || echo "undefined $n"; done | { ! grep .; }`
+
+### Story 5.3: Implementer and QA agents: `rust-implementer`, `qa-manual-tester`
+
+As a feature engineer,
+I want an implementer agent that applies every Rust rule of the template and a black-box QA agent that judges only HTTP behaviour,
+So that stories are implemented end to end with tests and verified against the running service without reading its source.
+**Read:** § Agent Contracts (shared paragraph, rows `rust-implementer` and `qa-manual-tester`, agent-specific rules); § Markdown component conventions › Agents; ADR-13; PRD FR-22, FR-23, FR-26, AC-23.1, AC-26.1. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given SC-AGENT, when `agents/rust-implementer.md` and `agents/qa-manual-tester.md` are checked, then `rust-implementer` has `model: sonnet` and `tools: Read, Write, Edit, Glob, Grep, Bash`, `qa-manual-tester` has `model: sonnet` and `tools: Bash, Read`, and both have the 8 H2s with `MAX_ITERATIONS=5` and a two-prompt smoke section.
+- Given `rust-implementer`, when read, then it carries every FR-23 rule token (`ValidatedJson`, `ApiPath`, `ValidatedQuery`, `ApiJson`, `UuidGenerator`, `Clock`, `tests.rs`, `#[expect`, `reason =`, `sqlx-prepare`, `create-migration`, `generate-openapi-spec`, `generate-graphql-spec`, `workspace.dsl`, `Problem`, `no mod.rs`), the layer order domain → application → infrastructure → `crates/service` wiring, never editing an applied migration, the DB rule (parallel stories run only the DB-free keys, one serialized verify step runs the DB-backed keys), the background and container-precondition sentences verbatim, and outputs a changed-files list, a targets-run list, a self-review checklist and a final `---RALPH_STATUS---` block with `STATUS`, `TASKS_COMPLETED_THIS_LOOP`, `FILES_MODIFIED`, `TESTS_STATUS`, `WORK_TYPE`, `EXIT_SIGNAL`, `RECOMMENDATION` (AC-23.1).
+- Given `qa-manual-tester`, when read, then verdicts come only from observed HTTP behaviour, reads of `crates/`, `tests/`, `features/`, `xtask/`, `migrations/`, `.sqlx/` and `Cargo.toml` are forbidden, every probe goes through `"<plugin root>/scripts/lib/common.sh" http_probe <METHOD> <PATH> …` (never `curl` directly, never a second URL, never a host other than `service.base_url`), the only log read is `docker compose logs --no-log-prefix --tail 200 app`, `make logs` appears only on a prohibition line, the evidence table columns are `check`, `method`, `URL`, `request`, `status`, `content type`, `x-request-id`, `excerpt (≤ 20 lines)`, `expected`, `observed`, each FAIL carries a reproduction command written with placeholders (no line matches `curl http`), and the output ends `## Verdict: PASS|FAIL` (AC-26.1, L33).
+- Given the skills of Epic 4 and the `common.sh` functions of Story 2.4, when lint runs, then neither agent has a finding (L3, L6, L8, L10, L13, L16, L23, L26, L33), and their `## Profile keys consumed` keys are declared in `docs/profile-schema.md`.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/agents/rust-implementer.md`
+- `plugins/rust-backend-sdlc/agents/qa-manual-tester.md`
+
+**Depends on:** 2.4, 4.13
+
+**FRs:** FR-22, FR-23, FR-26 (NFR-5, NFR-10)
+
+**Verification:**
+
+- `v_lint 'agents/(rust-implementer|qa-manual-tester)\.md'`
+- `S="plugins/rust-backend-sdlc/agents/rust-implementer.md plugins/rust-backend-sdlc/agents/qa-manual-tester.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S && v_suffix $S && v_sent plugins/rust-backend-sdlc/agents/rust-implementer.md`
+- `for t in ValidatedJson ApiPath ValidatedQuery ApiJson UuidGenerator Clock tests.rs '#[expect' 'reason =' sqlx-prepare create-migration generate-openapi-spec generate-graphql-spec workspace.dsl Problem 'no mod.rs' ---RALPH_STATUS---; do grep -qF -- "$t" plugins/rust-backend-sdlc/agents/rust-implementer.md || echo "missing $t"; done | { ! grep .; }`
+- `grep -qF http_probe plugins/rust-backend-sdlc/agents/qa-manual-tester.md && ! grep -nE 'curl http' plugins/rust-backend-sdlc/agents/qa-manual-tester.md`
+
+### Story 5.4: Review lens agents: `code-quality-reviewer`, `fr-nfr-reviewer`, `security-auditor`
+
+As a reviewer,
+I want three read-only opus lenses that measure the quality rows, trace every requirement and audit security,
+So that the review stage aggregates evidence instead of opinions, in one ledger format.
+**Read:** § Agent Contracts (shared paragraph, rows `code-quality-reviewer`, `fr-nfr-reviewer`, `security-auditor`, agent-specific rules); ADR-5, ADR-16; PRD FR-19 (Q1–Q15 table), FR-24, FR-25, FR-29, AC-24.1, AC-25.1, AC-29.1. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given SC-AGENT, when the three files are checked, then each has `model: opus` and `tools: Read, Glob, Grep, Bash` (no `Write`/`Edit`, L33), carries the background and container-precondition sentences verbatim, and ends its output contract with one fenced `json` block holding the ADR-16 findings array with its id prefix (`CQ-`, `FRN-`, `SEC-`).
+- Given `code-quality-reviewer`, when read, then it runs the Q1–Q15 targets itself (backgrounded), renders `| row | target key | quality key or "binary gate, no quality key" | PASS/FAIL/NOT RUN (reason) | measured |` with the row → key mapping of PRD FR-19 exactly (byte-identical with `rs-sdlc-review.md`, CC-35), quotes the `clippy.toml` limits in Q3, reports findings as `file:line | severity | rule | root-cause fix` with severity ∈ `Critical High Medium Low Info`, ends with `## Verdict: PASS|FAIL`, never runs `static-analysis-fix` or `unused-dependencies-fix`, and never proposes a suppression, exclusion or lowered limit (AC-24.1).
+- Given `fr-nfr-reviewer`, when read, then it runs the gate exactly once per iteration (`make <make.fr_nfr_gate>` when non-null, else `"${CLAUDE_PLUGIN_ROOT}/scripts/fr-nfr-gate.sh" --spec-path <SPECS_DIR> --iteration <n> [--pr <n>] [--advisory]`), recognises the id forms `FR-12`, `FR12`, `NFR-3`, `G12` and the seven `NFR-BASE-*` ids, renders `| id | requirement | PASS/FAIL | evidence (test target) |`, emits `rule` = requirement id with null `file`/`line` for requirement-level findings, and ends with `FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=<PASS|FAIL>` with `new_findings` copied from `FR_NFR_NEW_FINDINGS:`; degrade paths emit `verdict=FAIL`, a `DEGRADED: <reason>` line and `blocking_finding` (`SPECS MISSING: <path>`, `REQUIREMENTS MISSING: PR #<n>`), and the string `verdict=DEGRADED` appears nowhere (AC-25.1).
+- Given `security-auditor`, when read, then its lanes are `make.check_security` (null → built-in static lane with a degrade note), `make.secrets_scan` and `make.image_scan` (judged against `quality.max_image_vulnerabilities_high_critical`; `not run (no Docker)` when Docker is unreachable) and clippy findings, its families are `injection`, `bola-idor`, `mass-assignment`, `dos`, `information-disclosure`, `secrets`, `dependency-advisories`, `memory-safety` (recorded N/A under `unsafe_code = "forbid"`), dynamic probes run only through `common.sh http_probe` on `service.base_url` and only when `capabilities.dynamic_security_testing` is true, it renders `| lane | target | result |` and `## Verdict: PASS|FAIL`, and no line matches `curl http` (AC-29.1).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/agents/code-quality-reviewer.md`
+- `plugins/rust-backend-sdlc/agents/fr-nfr-reviewer.md`
+- `plugins/rust-backend-sdlc/agents/security-auditor.md`
+
+**Depends on:** 2.4, 3.9, 4.13
+
+**FRs:** FR-22, FR-24, FR-25, FR-29 (NFR-4, NFR-10)
+
+**Verification:**
+
+- `v_lint 'agents/(code-quality-reviewer|fr-nfr-reviewer|security-auditor)\.md'`
+- `S="plugins/rust-backend-sdlc/agents/code-quality-reviewer.md plugins/rust-backend-sdlc/agents/fr-nfr-reviewer.md plugins/rust-backend-sdlc/agents/security-auditor.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S && v_suffix $S && v_sent $S`
+- `! grep -n 'verdict=DEGRADED' plugins/rust-backend-sdlc/agents/fr-nfr-reviewer.md && grep -qF 'FR_NFR_NEW_FINDINGS' plugins/rust-backend-sdlc/agents/fr-nfr-reviewer.md && grep -qF 'CQ-' plugins/rust-backend-sdlc/agents/code-quality-reviewer.md && grep -qF 'SEC-' plugins/rust-backend-sdlc/agents/security-auditor.md`
+
+### Story 5.5: PR agents: `ci-fixer` and `pr-comment-resolver`
+
+As a PR finisher,
+I want an agent that turns failing checks green by root cause and an agent that resolves review threads with a fix or a reasoned reply,
+So that finish-pr converges without suppressions, without fixing human-gated checks and without obeying untrusted commenters.
+**Read:** § Agent Contracts (shared paragraph, rows `ci-fixer`, `pr-comment-resolver`, agent-specific rules); ADR-26, ADR-27; PRD FR-27, FR-28, AC-27.1, AC-28.1, AC-21.1. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-AGENT, when both files are checked, then each has `model: sonnet` and `tools: Read, Edit, Write, Glob, Grep, Bash`, carries the background and container-precondition sentences verbatim, and never commits or pushes (the command does).
+- Given `ci-fixer`, when read, then it maps a failing check in two steps, check name → gate id(s) from the "Gate" cell of `docs/repository-settings.md` or `docs/repository-settings-service.md` (e.g. `Tests and coverage` → `G11, G12, G14`), then gate id → target from the gate table of `docs/make-targets.md`, reproduces with `make <target>` even for targets no `make.*` key maps (`validate-manifest`, `check-requirements`, `doc-tests`, `bats`, `lint-repo`, `lint-load-tests`, `build-prod-image`, read at runtime, backgrounded), reports a target absent from the Makefile as `none`, reports a Gate cell `none` with its log URL and never "fixes" it, reports human-gated checks (`ci.human_gated`) separately and never fixes them, escalates a RUSTSEC advisory without a fixed version, runs `gh run rerun --failed` at most once per head, renders `| check | gate id(s) | target | action | result |`, prints the counter line `ci_fix <n>/5` and ends `## Status: ALL-GREEN|FIXES-READY|SKIPPED-NO-CI|BLOCKED` (AC-27.1).
+- Given `pr-comment-resolver`, when read, then its source is `"${CLAUDE_PLUGIN_ROOT}/scripts/get-pr-comments.sh" --unresolved-only --json` with `author_association` (or `"${CLAUDE_PLUGIN_ROOT}/scripts/ai-review-loop.sh"` findings when no reviewer is configured, D7), it changes code only for threads opened by `OWNER`, `MEMBER`, `COLLABORATOR` or a bot login of `review.reviewers`, answers every other thread `not actioned: author is not a collaborator` and leaves it unresolved, frames thread bodies as data after `fence_safe`, declines with a reply citing the rule the six FR-28 categories (a `#[allow]` request, an unjustified `#[expect]`, a protected-config edit, a coverage or mutant exclusion, a lowered threshold, an edited applied migration), publishes replies as redacted body files (`common.sh redact --in … --out …`, then `--body-file`/`-F body=@`), renders `| thread url | author (association) | decision fix|reply|decline|not-actioned | commit or reply text |`, prints `comment_resolution <n>/5` and `remaining_unresolved: <n>` (untrusted threads included) (AC-28.1).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/agents/ci-fixer.md`
+- `plugins/rust-backend-sdlc/agents/pr-comment-resolver.md`
+
+**Depends on:** 3.1, 3.4, 3.6, 3.8, 4.13
+
+**FRs:** FR-22, FR-27, FR-28 (NFR-5, NFR-10)
+
+**Verification:**
+
+- `v_lint 'agents/(ci-fixer|pr-comment-resolver)\.md'`
+- `S="plugins/rust-backend-sdlc/agents/ci-fixer.md plugins/rust-backend-sdlc/agents/pr-comment-resolver.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S && v_suffix $S && v_sent $S`
+- `grep -qF 'ci_fix' plugins/rust-backend-sdlc/agents/ci-fixer.md && grep -qF 'author_association' plugins/rust-backend-sdlc/agents/pr-comment-resolver.md && grep -qF 'not actioned: author is not a collaborator' plugins/rust-backend-sdlc/agents/pr-comment-resolver.md && grep -qF 'fence_safe' plugins/rust-backend-sdlc/agents/pr-comment-resolver.md`
+
+### Story 5.6: Agent guide
+
+As a feature engineer or an agent orienting itself,
+I want one guide with the agent roster, the stage map, the handles and the shared rules,
+So that every session knows which agent runs when, which script it calls and how it escalates.
+**Read:** § Skill Library › Meta-guides (`AI-AGENT-GUIDE.md`); § Agent Contracts; § Command Contracts › Exit strings; § The canonical escalation block; ADR-11; PRD FR-32, AC-32.1. **Size:** S.
+
+**Acceptance Criteria:**
+
+- Given `skills/AI-AGENT-GUIDE.md`, when read, then it has no frontmatter and lists the 7 agents with the model, tools and trigger of § Agent Contracts.
+- Given the stage map, when read, then each stage row gives stage → command → agents → scripts → exit string, with the exit strings byte-equal to § Exit strings, followed by the handle list, the 7-field escalation block, the status vocabulary `SUCCESS`, `SUCCESS-WITH-REPORT`, `ESCALATED`, the shared-resource (DB) rule and the git ownership rule.
+- Given the skill library, when compared, then the guide enumerates exactly the 28 shipped skill names (LLM-judge J10), and lint over `skills/` and `agents/` reports 0 findings (L5, L23 included).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/AI-AGENT-GUIDE.md`
+
+**Depends on:** 4.13, 5.3, 5.4, 5.5
+
+**FRs:** FR-32 (NFR-9, NFR-11)
+
+**Verification:**
+
+- `v_lint 'skills/|agents/'`
+- `v_md plugins/rust-backend-sdlc/skills/AI-AGENT-GUIDE.md && v_cmdtok plugins/rust-backend-sdlc/skills/AI-AGENT-GUIDE.md && v_esc plugins/rust-backend-sdlc/skills/AI-AGENT-GUIDE.md`
+- `for d in plugins/rust-backend-sdlc/skills/*/; do grep -qF "$(basename "$d")" plugins/rust-backend-sdlc/skills/AI-AGENT-GUIDE.md || echo "missing $(basename "$d")"; done | { ! grep .; }`
+
+### Story 5.7: Issue and plan commands: `/rs-sdlc-issue`, `/rs-sdlc-plan`
+
+As a feature engineer,
+I want one command that turns a task into a well-formed issue and one that writes and commits the BMAD bundle without prompts,
+So that stages 1 and 2 of the loop produce the issue and the bundle Ralph needs.
+**Read:** § Command Contracts › Shared command contract, Exit strings (rows `issue`, `plan`), `/rs-sdlc-issue`, `/rs-sdlc-plan`; § Implementation Patterns › Git rules; ADR-10, ADR-21, ADR-27; PRD FR-15, FR-16, AC-15.1, AC-16.1. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-CMD, when `commands/rs-sdlc-issue.md` is read, then its frontmatter equals § `/rs-sdlc-issue` (`argument-hint: "[task-text | issue-URL | #N]"`, amends FR-15), stage id is `issue` with its exit string byte-equal, it has no background or container sentence (it runs no make or git), and its Procedure adopts (`gh issue view <N> --json number,url,title,body,labels,state`; open with ≥ 3 testable criteria → add the `rust-backend-sdlc` label when missing, never a duplicate issue) or creates (body with the H2s of `.github/ISSUE_TEMPLATE/feature_request.md`, else `Problem statement`, `Proposed change`, `Affected area`, `Tasks`, `Acceptance criteria`; ≥ 3 criteria phrased as observable HTTP status or GraphQL result; raw body → `common.sh redact --in … --out target/rust-sdlc/tmp/issue.md` → `gh issue create --title … --body-file … --label rust-backend-sdlc [--label enhancement]`, the managed label created when missing and `enhancement` only when it exists), with a self-check loop on the criteria and the handles `ISSUE_URL:` and `ISSUE_NUMBER:` (AC-15.1).
+- Given SC-CMD, when `commands/rs-sdlc-plan.md` is read, then its frontmatter equals § `/rs-sdlc-plan` (`argument-hint: "[#N] [--slug <kebab-title>]"`), stage id is `plan` with its exit string byte-equal, it carries both sentences, and its Procedure loads `.claude/skills/bmad-autonomous-planning/SKILL.md` when present, else `${CLAUDE_PLUGIN_ROOT}/skills/bmad-autonomous-planning/SKILL.md`, never the BMAD wrapper commands and no interactive prompt.
+- Given the plan Procedure, when read, then it writes `specs/<N>-<kebab-title>/` with the seven FR-16 files and their required H2s; `architecture.md` carries `## Tech Stack` (Rust toolchain and crates only) and `## Constraints` of at most 4,500 characters in the order (a) the commit convention with the literal `(#<N>)` and the `story N.M` subject form, then (b) the story-dispatch rule naming the five DB-free keys and the five DB-backed keys with both ADR-21 branches; `epics.md` carries one `Depends on:` line per story; a needed context absent from `[workspace].members` becomes story 1 "Scaffold `<group>/<context>`"; the readiness self-check requires no `/NO[-\s]?GO/i` match, verdict "ready" and `"${CLAUDE_PLUGIN_ROOT}/scripts/stage-planning-artifacts.sh" "$SPECS_DIR" --dry-run` exiting 0 (a `REFUSED:` line → shorten and re-check within the guard); the bundle is committed `docs(#N): add planning bundle <N>-<kebab-title>` through `protected_changes`, `commit_msg_file` and `git commit -F`; the handle is `SPECS_DIR:` (AC-16.1, CC-20).
+- Given both commands, when lint and the kit run, then they have no finding, P1–P7 match only prohibition lines, every make call is in suffix form, and command tokens are only the 10 stems.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/commands/rs-sdlc-issue.md`
+- `plugins/rust-backend-sdlc/commands/rs-sdlc-plan.md`
+
+**Depends on:** 1.7, 2.4, 3.3, 4.4
+
+**FRs:** FR-15, FR-16, FR-1, FR-2 (NFR-6, NFR-10)
+
+**Verification:**
+
+- `v_lint 'commands/rs-sdlc-(issue|plan)\.md'`
+- `I=plugins/rust-backend-sdlc/commands/rs-sdlc-issue.md; L=plugins/rust-backend-sdlc/commands/rs-sdlc-plan.md; v_md $I $L && v_esc $I $L && v_exit issue $I && v_exit plan $L && v_p17 $I $L && v_suffix $I $L && v_cmdtok $I $L && v_sent $L`
+- `grep -qF '4,500' plugins/rust-backend-sdlc/commands/rs-sdlc-plan.md && grep -qF 'ISSUE_NUMBER:' plugins/rust-backend-sdlc/commands/rs-sdlc-issue.md && grep -qF 'git commit -F' plugins/rust-backend-sdlc/commands/rs-sdlc-plan.md`
+
+### Story 5.8: Implement command: `/rs-sdlc-implement`
+
+As a feature engineer,
+I want the implement stage to stage the bundle, run Ralph with the claude-code driver as the only implementer, and verify subjects, protected files and coverage afterwards,
+So that stories are implemented autonomously, resumably and without ever resetting the circuit breaker.
+**Read:** § Command Contracts › Shared command contract, Exit strings (row `implement`), `/rs-sdlc-implement`; ADR-10, ADR-10a, ADR-10b, ADR-10c, ADR-13, ADR-25; § Degrade Matrix D2, D22, D23; PRD FR-18, AC-18.1, AC-18.2. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given SC-CMD, when `commands/rs-sdlc-implement.md` is read, then its frontmatter equals § `/rs-sdlc-implement` (`argument-hint: "[SPECS_DIR]"`), stage id is `implement` with its exit string byte-equal, it carries both sentences, `MAX_ITERATIONS=5` counts resumable `bmalph run` attempts, and step 1 runs `common.sh hooks_active` (`unset` → `make install-hooks` and re-check; `foreign`/`missing` → escalate) and names the read-only `git config --get core.hooksPath` form.
+- Given step 2, when read, then it runs `"${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh" ralph_fix_plan_prepare "$SPECS_DIR" target/rust-sdlc/state/<N>-<slug>.json`; on `FIX_PLAN: absent` or `ARCHIVED:` it runs `stage-planning-artifacts.sh "$SPECS_DIR"`, `bmalph implement` (never `--force`; an `already been run` refusal escalates as a protocol defect), `ralph_fix_plan_restore <archive>` after `keep-progress`, and `state_cache_update … --staged-specs-dir "$SPECS_DIR"`; on `FIX_PLAN: current` it skips both; it always runs `ralph_agent_md_patch "$SPECS_DIR"` and verifies both `## Constraints` parts in `.ralph/PROJECT_CONTEXT.md` (missing part or failure output → escalate naming /rs-sdlc-plan).
+- Given steps 3–5, when read, then `ralph_breaker_state` runs first (`OPEN`, `HALF_OPEN` or `AUTO_RESET: true` → `ESCALATED`, D22, nothing run), then `bmalph run --driver claude-code --no-dashboard` in the background, polled with `wait_log` at most every 30 s, `---RALPH_STATUS---` blocks parsed; the sentence "`bmalph run` is the only implementer; while it is active this command dispatches no `rust-implementer` and edits no file" appears verbatim; a breaker trip (`.ralph/.circuit_breaker_state` `.state == "OPEN"` after the run, or `STATUS: BLOCKED`) ends `ESCALATED` with the last status block and the last 50 lines of the newest `.ralph/logs/` file, no second `bmalph run`, `.ralph/.ralphrc` never edited (never a repository-root `.ralphrc`), and only resumable exits (API or rate limit, timeout, `EXIT_SIGNAL: false` with the breaker `CLOSED`) consume an attempt (AC-18.2).
+- Given step 6, when read, then it computes `git merge-base <ci.base_ref> HEAD` → `<sha>`, checks every subject of `git log --format=%s <sha>..HEAD` with `make check-commit-message COMMIT_TITLE='<subject>'` (or `is_commit_subject` for a subject containing a space-hyphen sequence; mismatch → escalate naming the commit), runs `make validate-configuration base_ref=<sha> CONFIG_CHANGE_APPROVED=` backgrounded (no toolchain or Docker → `protected_changes <sha>`; a hit → D23 with `git restore --source=`), and `make tests-with-coverage` backgrounded (Docker unreachable or the template's Docker message in the log → `not run (no Docker)`, D2), so the CC-20 tokens `ralph_fix_plan_prepare`, `ralph_fix_plan_restore`, `ralph_agent_md_patch`, `ralph_breaker_state`, `.circuit_breaker_state`, `CB_AUTO_RESET`, `already been run`, `hooks_active`, `protected_changes`, `CONFIG_CHANGE_APPROVED=` all appear (AC-18.1).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/commands/rs-sdlc-implement.md`
+
+**Depends on:** 2.4, 3.3, 5.2, 5.3
+
+**FRs:** FR-18, FR-1, FR-2 (NFR-3, NFR-5, NFR-6)
+
+**Verification:**
+
+- `v_lint 'commands/rs-sdlc-implement\.md'`
+- `C=plugins/rust-backend-sdlc/commands/rs-sdlc-implement.md; v_md $C && v_sent $C && v_esc $C && v_exit implement $C && v_p17 $C && v_suffix $C && v_cmdtok $C`
+- `for t in ralph_fix_plan_prepare ralph_fix_plan_restore ralph_agent_md_patch ralph_breaker_state .circuit_breaker_state CB_AUTO_RESET 'already been run' hooks_active protected_changes 'CONFIG_CHANGE_APPROVED=' '--driver claude-code --no-dashboard' '.ralph/.ralphrc' 'git config --get core.hooksPath' 'git restore --source='; do grep -qF -- "$t" plugins/rust-backend-sdlc/commands/rs-sdlc-implement.md || echo "missing $t"; done | { ! grep .; }`
+
+### Story 5.9: Review command: `/rs-sdlc-review`
+
+As a reviewer,
+I want the review stage to triage all 28 skills, run the three lenses and the quality rows, and loop the FR/NFR gate to zero new findings,
+So that a branch leaves review only with every requirement traced and every bar met, with ledgers for the PR comments.
+**Read:** § Command Contracts › Shared command contract, Exit strings (row `review`), `/rs-sdlc-review`; ADR-5, ADR-16, ADR-25; PRD FR-19 (Q1–Q15 table, PA-13 mutation rule), AC-19.1; § Degrade Matrix D1, D2, D9, D11. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given SC-CMD, when `commands/rs-sdlc-review.md` is read, then its frontmatter equals § `/rs-sdlc-review` (`argument-hint: "[SPECS_DIR] [--base <ref>]"`, `allowed-tools: ["Bash", "Read", "Glob", "Grep", "Task"]`), stage id is `review` with its exit string byte-equal, it carries both sentences, and it first checks the governance markers with the stage-0 wording.
+- Given each iteration, when read, then the branch guards run first, outside the Q table (`git merge-base <ci.base_ref> HEAD` → `<sha>`; `make validate-configuration base_ref=<sha> CONFIG_CHANGE_APPROVED=` backgrounded, else `protected_changes <sha>`; `PROTECTED:` → D23, `PROFILE_CHANGED:` → `ESCALATED`), then the triage table `| skill | source | verdict | evidence or reason |` with exactly 28 rows (the count `28` pinned in the text), counterpart pairs once with source `repo+plugin` and the repository skill read first, verdicts from frontmatter plus `skills/SKILL-DECISION-GUIDE.md`, bodies only on `EXECUTE`.
+- Given the lenses, when read, then `code-quality-reviewer` and `fr-nfr-reviewer` always run and `security-auditor` runs when the diff since the merge base touches `*.rs`, `Cargo.toml`, `Cargo.lock`, `migrations/`, `.sqlx/`, `deny.toml`, `Dockerfile` or `.github/workflows/` (re-run only when remediation touched them), each through Task with `subagent_type: rust-backend-sdlc:<agent>`; the Q1–Q15 table matches PRD FR-19 exactly (row target key → `quality.*` key or "binary gate, no quality key") and byte-equals the mapping in `agents/code-quality-reviewer.md` (CC-35); the enforced-elsewhere sentence names `quality.max_image_vulnerabilities_high_critical` and `quality.max_smoke_budget_breaches` with their enforcing stage, so all 12 quality keys appear; the PA-13 mutation run rule is stated; Q14 passes `BREAKING_CHANGE_APPROVED=true` only when `gh pr view --json labels` shows `approved-breaking-change`, and an unlabelled breaking change escalates naming the label (D9) (AC-19.1).
+- Given gate ownership, when the Procedure is read, then it never runs the gate script itself (the string `fr-nfr-gate.sh` is absent from the Procedure section), names `FR_NFR_NEW_FINDINGS` and the agent line `FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=<PASS|FAIL>`, exits the loop on `new_findings=0` AND every row PASS (NOT RUN for an absent capability → `SUCCESS-WITH-REPORT`; a mapped row that cannot run → `ESCALATED`; Docker-dependent rows classified by `docker info` or the template's message, D2), dispatches remediation as one Task to `rust-implementer`, then runs `protected_changes` and commits `fix(#N): address review gate iteration <n> findings`, pipes each lens's fenced `json` block into `"${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh" ledger_write <lens> <n> <head_sha>` under `${SDLC_LEDGER_DIR:-target/rust-sdlc/review-ledgers}`, runs `post-review-findings.sh <lens>` only when a PR exists (otherwise deferred), never posts the conclusion, and ends `## Verdict: PASS|FAIL`.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/commands/rs-sdlc-review.md`
+
+**Depends on:** 2.4, 3.1, 3.10, 4.13, 5.3, 5.4
+
+**FRs:** FR-19, FR-1, FR-2 (NFR-3, NFR-4, NFR-6, NFR-12)
+
+**Verification:**
+
+- `v_lint 'commands/rs-sdlc-review\.md'`
+- `C=plugins/rust-backend-sdlc/commands/rs-sdlc-review.md; v_md $C && v_sent $C && v_esc $C && v_exit review $C && v_p17 $C && v_suffix $C && v_cmdtok $C`
+- `awk '/^## Procedure/{x=1;next}/^## /{x=0}x' plugins/rust-backend-sdlc/commands/rs-sdlc-review.md | { ! grep -qF 'fr-nfr-gate.sh'; } && grep -qF 'FR_NFR_NEW_FINDINGS' plugins/rust-backend-sdlc/commands/rs-sdlc-review.md && grep -qw 28 plugins/rust-backend-sdlc/commands/rs-sdlc-review.md`
+- `for k in coverage_lines coverage_functions max_surviving_mutants max_clippy_findings max_complexity_violations max_architecture_violations max_unused_dependencies max_dependency_policy_findings max_spectral_findings max_unapproved_breaking_changes max_image_vulnerabilities_high_critical max_smoke_budget_breaches; do grep -qF "quality.$k" plugins/rust-backend-sdlc/commands/rs-sdlc-review.md || echo "missing $k"; done | { ! grep .; }`
+
+### Story 5.10: QA command: `/rs-sdlc-qa`
+
+As a feature engineer,
+I want the QA stage to boot the service, apply migrations and have the QA agent probe every acceptance criterion over HTTP,
+So that a feature is accepted on observed REST, GraphQL and health behaviour with reproducible evidence.
+**Read:** § Command Contracts › Shared command contract, Exit strings (row `qa`), `/rs-sdlc-qa`; ADR-13 (suffix variables); PRD FR-20, AC-20.2; § Degrade Matrix D1, D2, D25. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-CMD, when `commands/rs-sdlc-qa.md` is read, then its frontmatter equals § `/rs-sdlc-qa` (`argument-hint: "[SPECS_DIR | #N]"`, `allowed-tools: ["Bash", "Read", "Glob", "Grep", "Task"]`, no `Write`/`Edit`, L33), stage id is `qa` with its exit string byte-equal, and it carries both sentences.
+- Given the boot procedure, when read, then the liveness probe runs through `common.sh http_probe GET <service.liveness_path>`; on failure `make start` runs backgrounded for at most 900 s; `make.start: null` → `SUCCESS-WITH-REPORT`; Docker unreachable with `make.start` mapped → `ESCALATED` with `make doctor` output; `make migrate` runs backgrounded before the first probe when `persistence.engine` is non-null and `make.migrate` is mapped; liveness is polled every ≤ 10 s for ≤ 900 s until two consecutive 200 responses (timeout → `ESCALATED` with `docker compose logs --no-log-prefix --tail 200 app`); the shared stack is never stopped.
+- Given the probe rules, when read, then liveness expects 200 `text/plain` `pong` and readiness 204 (a 500 `application/problem+json` of type `/problems/dependency-unavailable` is a FAIL listing `failures[]`); every issue acceptance criterion maps to ≥ 1 check; REST operations come from `service.openapi_snapshot`, GraphQL bodies from `service.graphql_snapshot` posted to `service.graphql_path`; negatives (400/404/405/413/415/422) are asserted on status, problem `type` and content type, never on axum rejection text; GraphQL errors are HTTP 200 with `extensions.code` `VALIDATION_FAILED` or `INTERNAL_SERVER_ERROR`; `x-request-id` is echoed for a value matching `^[A-Za-z0-9._-]{1,128}$`; the optional lane is `make schemathesis-validate SCHEMATHESIS_URL=<service.base_url>` when `capabilities.dynamic_security_testing` and the key are set (AC-20.2).
+- Given delegation, when read, then the probes run in `qa-manual-tester` through Task, the evidence fields and `## Verdict: PASS|FAIL` with a reproduction command per FAIL are required, and a FAIL routes to stage 3 through the orchestrator's loop-back because this command changes no file.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/commands/rs-sdlc-qa.md`
+
+**Depends on:** 2.4, 5.3
+
+**FRs:** FR-20, FR-1 (NFR-3, NFR-10)
+
+**Verification:**
+
+- `v_lint 'commands/rs-sdlc-qa\.md'`
+- `C=plugins/rust-backend-sdlc/commands/rs-sdlc-qa.md; v_md $C && v_sent $C && v_esc $C && v_exit qa $C && v_p17 $C && v_suffix $C && v_cmdtok $C`
+- `grep -qF 'http_probe' plugins/rust-backend-sdlc/commands/rs-sdlc-qa.md && grep -qF 'docker compose logs --no-log-prefix --tail 200 app' plugins/rust-backend-sdlc/commands/rs-sdlc-qa.md && ! grep -nE '^allowed-tools:.*(Write|Edit)' plugins/rust-backend-sdlc/commands/rs-sdlc-qa.md`
+
+### Story 5.11: Finish-PR command: `/rs-sdlc-finish-pr`
+
+As a PR finisher,
+I want the finish-pr stage to create or update the PR and loop on the sensor until CI is green, the gate is green on the head and every thread is resolved,
+So that a feature ends as a merge-ready PR with bounded counters and named human actions for anything left.
+**Read:** § Command Contracts › Shared command contract, Exit strings (row `finish-pr`), `/rs-sdlc-finish-pr` (incl. the verdict table); § The canonical escalation block (counter labels); ADR-14 (state cell), ADR-25, ADR-26, ADR-27; PRD FR-21, AC-21.1; § Degrade Matrix D7, D8, D9, D12, D23. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given SC-CMD, when `commands/rs-sdlc-finish-pr.md` is read, then its frontmatter equals § `/rs-sdlc-finish-pr` (`argument-hint: "[--pr <n>]"`), stage id is `finish-pr` with its exit string byte-equal, it carries both sentences, and the branch guards run first (`protected_changes <merge-base-sha>`; `PROTECTED:` → D23, `PROFILE_CHANGED:` → `ESCALATED` with "move the profile change to its own pull request from the default branch (/rs-sdlc-setup --refresh)").
+- Given PR creation or update, when read, then the title is pre-validated (Git rules), the issue number comes from `derive_issue_number` and never from the PR number, the body built from the `.github/pull_request_template.md` H2s with `Closes #N`, `SPECS_DIR`, the QA verdict and targets run / not run is written raw, redacted with `common.sh redact --in … --out …` and passed with `gh pr create --body-file …` or `gh pr edit --body-file …`, and the draft state is left as the user set it; then, for each lens ledger with open findings and no lens comment by the posting identity, `post-review-findings.sh <lens> --pr <n>` runs (the deferred posting).
+- Given the sensor loop, when read, then it calls `pr-state.sh --json --required-checks <ci.required_checks> --reviewers <review.reviewers> --human-gated-checks <ci.human_gated>` and dispatches all six verdicts exactly as the contract table: `FIX` → `ci-fixer` for failing non-human-gated checks and `pr-comment-resolver` for unresolved trusted threads, after which the command runs `protected_changes`, commits `fix(#N): resolve <check> failure` or `fix(#N): address review comment on <path>` and pushes `git push -u origin HEAD`; `GATE` → `fr-nfr-gate.sh --pr <n> --iteration <c>` on the clean head; `REQUEST` → `request-ai-reviews.sh` with the sensor's `NEXT:` arguments; `WAIT` → `pr-state.sh --wait-seconds 540`; `BLOCKED` → `ESCALATED` naming the label or conflict (never applied); `READY` → a second snapshot, then `post-review-findings.sh --conclusion` once (finish-pr only) and `## Status: ALL-GREEN`.
+- Given the counters, when read, then A `ci_fix` 5, B `comment_resolution` 5, C `fr_nfr_gate` 3, W `wait` 6 and R `request` 3 are restored from and written to the state cell `A<n>.B<n>.C<n>.W<n>.R<n>`, an exhausted counter escalates with `iteration: <n>/<cap> (<label>)`, and the counter names and caps equal those in `agents/ci-fixer.md` (AC-21.1).
+- Given the degrades, when read, then no CI (`ci.provider: null`, or both check lists empty and zero checks reported) ends `## Status: SKIPPED-NO-CI` (`SUCCESS-WITH-REPORT`, D8) while zero reported checks with a non-empty `ci.required_checks` is `WAIT`; no reviewer makes `ai-review-loop.sh` the comment source (D7); comments off keep findings in ledgers (D12); the command never applies or removes labels, never re-runs human-gated checks, and emits `PR_URL:` and `## Status: ALL-GREEN|FIXES-READY|SKIPPED-NO-CI|BLOCKED`.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/commands/rs-sdlc-finish-pr.md`
+
+**Depends on:** 2.4, 3.4, 3.6, 3.7, 3.8, 3.9, 3.10, 5.5
+
+**FRs:** FR-21, FR-1, FR-2 (NFR-3, NFR-5, NFR-6, NFR-10)
+
+**Verification:**
+
+- `v_lint 'commands/rs-sdlc-finish-pr\.md'`
+- `C=plugins/rust-backend-sdlc/commands/rs-sdlc-finish-pr.md; v_md $C && v_sent $C && v_esc $C && v_exit finish-pr $C && v_p17 $C && v_suffix $C && v_cmdtok $C`
+- `for t in ci_fix comment_resolution fr_nfr_gate 'A<n>.B<n>.C<n>.W<n>.R<n>' -- '--conclusion' '--body-file' 'git push -u origin HEAD' 'SKIPPED-NO-CI' 'git restore --source='; do grep -qF -- "$t" plugins/rust-backend-sdlc/commands/rs-sdlc-finish-pr.md || echo "missing $t"; done | { ! grep .; }`
+
+### Story 5.12: Orchestrator command: `/rs-sdlc`
+
+As a feature engineer,
+I want one command that runs the whole loop from a task description or resumes an issue at the right stage,
+So that I type one line and get either a finished PR or an escalation that names the exact human action, with a run report either way.
+**Read:** § Command Contracts › Shared command contract, Exit strings (all stage rows), `/rs-sdlc` (incl. run report); ADR-10a (QA loop-back), ADR-10c, ADR-14, ADR-26, ADR-27; PRD FR-3, AC-3.1–AC-3.3; § Degrade Matrix D10, D19, D22, D24. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given SC-CMD, when `commands/rs-sdlc.md` is read, then its frontmatter equals § `/rs-sdlc` (`argument-hint: "[task-text | #N | issue-URL]"`), it carries both sentences, and besides the spine it has `## Stage table`, `## Resume table` and `## Run report` after `## Procedure`.
+- Given stage 0 and resume, when read, then `setup-check` runs `validate-profile.sh`, `grep -q '<!-- rust-backend-sdlc:begin -->'` on `CLAUDE.md` and `AGENTS.md` and `test -d _bmad`, escalating with the halt wording and never running setup; the posting identity is resolved once with `gh api user --jq .login`; `gh api repos/{owner}/{repo}/issues/<N>/comments --paginate` is piped into `common.sh resume_point --comments <login>`, else `resume_point --cache target/rust-sdlc/state/<N>-<slug>.json`, else a fresh start with the D10 note; `BLOCKED_STAGE: implement …` ends `ESCALATED` (D22) without running anything; `COUNTERS:` restores every stage counter and the five finish-pr counters.
+- Given stages 1–6, when read, then each is executed by reading `${CLAUDE_PLUGIN_ROOT}/commands/<stage>.md` and following its procedure; the branch step runs `git fetch origin <default_branch>` once (D24 on failure) and `git switch -c <type>/<N>-<slug>` from `origin/<default_branch>` (type `fix` when the issue carries `bug`, else `feat`; slug kebab ≤ 40) or reuses the branch, a failure escalating with `stage: branch`; a QA `FAIL` appends `### Story <E>.<k>: Fix QA findings <n>` with one acceptance criterion per FAIL row to `SPECS_DIR/epics.md`, runs `protected_changes`, commits `docs(#N): add QA fix story <n>` and re-enters stage 3 on implement's budget.
+- Given state recording, when read, then after each stage `common.sh state_cache_update …` then `state_comment_body …` produce a redacted body file published with `gh api -X PATCH repos/{owner}/{repo}/issues/comments/<id> -F body=@<file>` (only a comment authored by the posting identity) or, the first time, `gh api repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>`, with the ADR-14 concurrency check (re-read `updated_at`, one re-merge, then `ESCALATED` with `blocking_finding: concurrent /rs-sdlc runs on issue #<N>`).
+- Given the three extra sections, when read, then `## Stage table` holds the 8 rows `setup-check`, `issue`, `branch`, `plan`, `implement`, `review`, `qa`, `finish-pr` with "Delegates to", exit strings byte-equal to § Exit strings and the guards; `## Resume table` gives each stage its durable record and validity (issue/plan/implement ancestor, review/qa equal, finish-pr live `pr-state.sh`); `## Run report` holds the block `=== SDLC RUN REPORT ===` … `=== END ===` with exactly the 8 fields `task`, `branch`, `result`, `stages`, `artifacts`, `degrade_notes`, `targets_not_run`, `escalation`, the `met` values `yes`, `yes (degraded)`, `no` and the SUCCESS-WITH-REPORT mapping sentence; the state marker `<!-- rust-sdlc-state -->` with its 5 columns and the tokens `resume_point --comments`, `BLOCKED_STAGE`, `Fix QA findings` appear (AC-3.1–AC-3.3, CC-33).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/commands/rs-sdlc.md`
+
+**Depends on:** 2.5, 5.1, 5.7, 5.8, 5.9, 5.10, 5.11
+
+**FRs:** FR-3, FR-1, FR-2 (NFR-6, NFR-9, NFR-10)
+
+**Verification:**
+
+- `v_lint 'commands/rs-sdlc\.md'`
+- `C=plugins/rust-backend-sdlc/commands/rs-sdlc.md; v_md $C && v_sent $C && v_esc $C && v_p17 $C && v_suffix $C && v_cmdtok $C && for s in setup-check issue branch plan implement review qa finish-pr; do v_exit $s $C || exit 1; done`
+- `for t in '=== SDLC RUN REPORT ===' 'task:' 'branch:' 'result:' 'stages:' 'artifacts:' 'degrade_notes:' 'targets_not_run:' 'escalation:' 'yes (degraded)' '<!-- rust-sdlc-state -->' '| stage | result | head_sha | iteration | at |' 'resume_point --comments' BLOCKED_STAGE 'Fix QA findings' '## Stage table' '## Resume table' '## Run report'; do grep -qF -- "$t" plugins/rust-backend-sdlc/commands/rs-sdlc.md || echo "missing $t"; done | { ! grep .; }`
+
+## Epic 6: Service creation and bounded contexts
+
+A service creator can run /rs-sdlc-new-service <name> to get a GitHub repository (template flow or clone-and-push) or a local copy with identity, version, README, changelog, planning bundle and sync flavour customized, bootstrapped, set up and opened as a bootstrap pull request handed to PR finishing; a feature engineer can run /rs-sdlc-new-context <group> <context> to scaffold a bounded context through `make new-context`, complete the C1–C12 wiring checklist and prove it with the template's own gate stages; this epic builds on setup (Epic 2), the scaffolding skills (Epic 4) and the loop commands and agents (Epic 5).
+
+### Story 6.1: New-service script and its defaults
+
+As a service creator,
+I want `new-service.sh` to create or import the repository and apply every deterministic customization step idempotently, with the default template slug kept in plugin configuration,
+So that a new service is one command away from a clean, customized checkout and a re-run after any failure is safe.
+**Read:** § Plugin Manifest and Configuration › `config/new-service.defaults.json` (exact); § Script Contracts › `scripts/new-service.sh` (incl. the customize step table); ADR-12, ADR-20, ADR-23; § Degrade Matrix D17, D18; PRD FR-12, FR-13, AC-12.1–AC-12.6, AC-13.1, AC-13.2. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given `config/new-service.defaults.json`, when read by `new-service.sh` through `resolve_plugin_root`, then it is exactly the architecture's JSON (5 keys), a violation (extra key, non-slug `template_repository`, visibility outside `private public`, non-semver version, `poll_attempts` outside 1–60, `poll_interval_seconds` outside 0–60, malformed JSON) prints `[rust-sdlc][ERROR] malformed <path>: <key>: <reason>` and exits 2, and the slug resolution order `--template` > `RUST_SDLC_TEMPLATE_REPO` > `RUST_SDLC_CONFIG_FILE` > the shipped file is proven by three cases (AC-13.1); the slug appears in no file under `skills/ commands/ agents/ scripts/ workflows/` (AC-13.2).
+- Given invalid input, when the script runs, then each of `--name` not `is_kebab` or over 50 characters, a multi-line or over-200-character or control-character `--description`/`--intro`, an `--owner` not matching `^[A-Za-z0-9][A-Za-z0-9-]{0,38}$`, a non-semver `--version`, a bad enum and two source flags exits 2; omitted flags default to description = name, owner = `gh api user --jq .login` (empty → exit 1 `pass --owner`), intro = description, version = `default_version`, visibility = `default_visibility`, dest = `.` (AC-12.6).
+- Given `--phase source` in GitHub mode, when the gh stub routes run, then the exact argv order is `gh api repos/<slug> --jq .is_template`, `gh repo view <owner>/<name> --json nameWithOwner --jq .nameWithOwner`, then for `is_template=true` `gh repo create <owner>/<name> --template <slug> --private|--public` (never `--clone`), polling `gh api 'repos/<owner>/<name>/commits?per_page=1' --jq length` up to `poll_attempts` × `poll_interval_seconds` (timeout → exit 1) and `gh repo clone <owner>/<name> <checkout>`; for `is_template=false` an empty create, `gh repo clone <slug> <tmp> -- --depth 1`, `git -C <tmp> archive HEAD | tar -x -C <checkout>`, `git -C <checkout> init -b main`, the `origin` remote, `IMPORT_PENDING: <slug>@<sha40>` and `NEXT: ask the template owner to enable Settings > Template repository` (D17); an existing repository whose checkout `origin` matches prints `SKIP: source (exists)`, a mismatch or a foreign non-empty checkout exits 1 with no `repo create` call (AC-12.2); the handles `SOURCE_MODE:`, `REPO:`, `CHECKOUT:`, `SOURCE:`, `SOURCE_SHA:` print, and `<checkout>/target/rust-sdlc/new-service/source.json` (`schema_version`, `mode`, `source`, `sha`, `identity_slug`, `specs`) is written once and never overwritten.
+- Given local and in-place modes, when run, then `--template-path` on a checkout with uncommitted tracked changes prints `REFUSED: template checkout <dir> has uncommitted tracked changes` and exits 1; `--in-place` prints `SKIP: source (in place)`, refuses tracked changes (`REFUSED: in-place target has uncommitted tracked changes`) and an already customized target (`REFUSED: in-place target already customized`), writes `source.json` from the root commit on its first customize run, and prints `SKIP: specs (modified since import)` for a bundle changed since import without deleting it.
+- Given `--phase customize`, when run on a materialized copy, then the steps `identity`, `version`, `bmalph-config`, `readme`, `changelog`, `specs`, `sync-flavour`, `templatesyncignore`, `docs-check-citations` run in order, each printing `DONE:`/`UNCHANGED:`/`SKIP:`/`NEXT:` with a file diff equal to its golden diff (identity touches only `description` and `repository` of `[workspace.package]`; version prints `UNCHANGED: version <v>` or `NEXT: scripts/set-version.sh <v>`; README badges use `identity_slug`; CHANGELOG becomes the cocogitto skeleton; specs deletes the bundle directories listed in `source.json`, `--keep-specs` → `SKIP: specs (--keep-specs)`); a second run prints only `UNCHANGED:`/`SKIP:` and exits 0 (AC-12.1); a failing step (read-only `CHANGELOG.md`) leaves its file untouched and exits 1, and a re-run still rewrites the badges from `identity_slug`.
+- Given `--sync-flavour app` and, separately, `--sync-flavour pat`, when customize runs, then each keeps one workflow-plus-guide pair, deletes the other, appends each deleted path once to `.templatesyncignore`, rewrites exactly the deleted flavour's code span in `docs/extension-seams.md` to its bare file name, appends that file once to `.templatesyncignore`, prints `DONE: docs-check citation docs/extension-seams.md:<line>` and leaves 0 rule-3 violations under `docs_rules`; a second run prints `UNCHANGED: docs-check citations`, the fixed variant prints `UNCHANGED: docs-check citations`, and an omitted flavour prints `SKIP: sync flavour (undecided)` plus `NEXT: re-run with --sync-flavour app|pat` (AC-12.5, D18).
+- Given `--dry-run`, when run, then only `WOULD:` lines and the summary print, no mutating gh call is made and the tree is unchanged (AC-12.3); every run ends `SUMMARY: done=<n> unchanged=<n> skip=<n> next=<n>`; the git and gh logs show 0 `commit` and 0 `push` calls (AC-12.4); K7 cases run markdownlint-cli2 and typos on `README.md` and `CHANGELOG.md` and Prettier on `bmalph/config.json` after customize (skipped locally with a reason); the script never removes the example context or changes the licence and meets SC-SCRIPT and SC-SUITE.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/config/new-service.defaults.json`
+- `plugins/rust-backend-sdlc/scripts/new-service.sh`
+- `plugins/rust-backend-sdlc/tests/new-service.bats`
+
+**Depends on:** 1.1, 1.2, 1.3, 1.4, 1.5, 1.6
+
+**FRs:** FR-12, FR-13 (NFR-1, NFR-2, NFR-3, NFR-13)
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/new-service.sh && v_banned plugins/rust-backend-sdlc/scripts/new-service.sh && v_gen plugins/rust-backend-sdlc/scripts/new-service.sh`
+- `python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert sorted(d)==["default_version","default_visibility","poll_attempts","poll_interval_seconds","template_repository"]' plugins/rust-backend-sdlc/config/new-service.defaults.json`
+- `v_bats new-service 34`
+
+### Story 6.2: New-service command and walkthrough
+
+As a service creator,
+I want `/rs-sdlc-new-service` to run S1–S14 end to end, executing what is deterministic and printing every human decision as `NEXT:`,
+So that I get a bootstrapped, set-up service and a bootstrap PR handed to PR finishing with no surprise in CI.
+**Read:** § Command Contracts › Shared command contract, Exit strings (row `new-service`), `/rs-sdlc-new-service`; § Implementation Patterns › Git rules (S3 exception); § Documentation Set row `docs/new-service-walkthrough.md`; ADR-24, ADR-27; PRD FR-11, AC-11.1; § Degrade Matrix D2, D17, D18, D25. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given SC-CMD, when `commands/rs-sdlc-new-service.md` is read, then its frontmatter equals § `/rs-sdlc-new-service`, it has no `validate-profile.sh` first-fence requirement, stage id is `new-service` with its exit string byte-equal, it carries both sentences, and `MAX_ITERATIONS=5` counts hook-failure remediation rounds at S11/S13 (a failing pre-commit hook → `make format`, re-stage, retry).
+- Given the Procedure, when read, then it lists S1–S14 in order with the EXECUTED/NEXT condition of each: S1 `"${CLAUDE_PLUGIN_ROOT}/scripts/new-service.sh" --phase source …` (parse the handles, `cd` into `CHECKOUT`); S2 in GitHub mode `gh label create rust-backend-sdlc --color 5319e7 --description "Managed by the rust-backend-sdlc plugin"` when missing and `gh issue create --body-file <redacted file>` titled `Initialize <name> from the Rust service template` (local mode uses `--issue`); S3 clone-and-push only, before hook activation by design, commit `chore(#N): import template <slug> at <sha7>` pre-validated with `is_commit_subject` and pushed with `git push -u origin HEAD`; S4 `git switch -c chore/<N>-initialize-service`; S5 `--phase customize`; S6 `NEXT:` judgment lines; S7 `make doctor` report-only; S8 `make bootstrap` backgrounded with log `target/rust-sdlc/new-service/bootstrap.log`, `wait_log` every 30 s for ≤ 60 min, else `NOT RUN (no Docker)`; S9 `scripts/set-version.sh <v>` on the host, `docker compose exec -T --user <uid>:<gid> app scripts/set-version.sh <v>` in container mode, or `NEXT:`; S10 `make generate-openapi-spec` backgrounded or `NEXT:` and stop before S11; S11 `common.sh hooks_active` then commit `chore(#N): initialize service from template`; S12 the procedure of `rs-sdlc-setup.md` with `--exec <resolved>`; S13 commit `chore(#N): add rust-backend-sdlc profile and governance` with hooks active; S14 title check, `HOOKS: active`, `git push -u origin HEAD`, `gh pr create --body-file <redacted file>` from the PR template H2s with `Closes #N`, then the finish-pr procedure (AC-11.1, CC-18).
+- Given defaults and modes, when read, then `--exec` defaults to `container` when `docker info` exits 0 and `cargo` is absent, else `host`; the four identity defaults are stated; `--dry-run` runs the script's dry run plus `WOULD:` lines for S2–S14 with no GitHub mutation; an interactive session asks once for a missing name and sync flavour while a headless run takes the documented defaults; the handles are `ISSUE_NUMBER:`, `BRANCH:`, `PR_URL:` and one `DONE:`/`NEXT:` summary.
+- Given `docs/new-service-walkthrough.md`, when read, then it walks S1–S14 with sample `DONE:`/`NEXT:` output, the traps (OpenAPI title `<description> API`, directory name = Compose project, version only through `scripts/set-version.sh`, sync flavour, docs-check citation repair) and an empty "K9/K13 record" section, the default template slug appears only inside `# profile-example` fences, and the file meets SC-DOC.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/commands/rs-sdlc-new-service.md`
+- `plugins/rust-backend-sdlc/docs/new-service-walkthrough.md`
+
+**Depends on:** 2.4, 2.5, 4.12, 5.11, 6.1
+
+**FRs:** FR-11, FR-41, FR-1, FR-2 (NFR-3, NFR-5, NFR-14)
+
+**Verification:**
+
+- `v_lint 'commands/rs-sdlc-new-service\.md'`
+- `C=plugins/rust-backend-sdlc/commands/rs-sdlc-new-service.md; D=plugins/rust-backend-sdlc/docs/new-service-walkthrough.md; v_md $C $D && v_sent $C && v_esc $C && v_exit new-service $C && v_p17 $C && v_suffix $C && v_cmdtok $C $D`
+- `for s in S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11 S12 S13 S14 'chore(#N): import template' 'chore(#N): initialize service from template' 'chore(#N): add rust-backend-sdlc profile and governance' hooks_active is_commit_subject; do grep -qF -- "$s" $C || echo "missing $s"; done | { ! grep .; }`
+
+### Story 6.3: New-context command
+
+As a feature engineer,
+I want `/rs-sdlc-new-context <group> <context>` to validate the names, scaffold the context, complete C1–C12 and prove it with the template's gate stages,
+So that a new bounded context is wired, tested and committed in one command, then handed to review, QA and PR finishing.
+**Read:** § Command Contracts › Shared command contract, Exit strings (row `new-context`), `/rs-sdlc-new-context`; product brief § Three entry points (C1–C12 table); ADR-13, ADR-25; PRD FR-14, AC-14.2; § Degrade Matrix D2, D13, D23. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-CMD, when `commands/rs-sdlc-new-context.md` is read, then its frontmatter equals § `/rs-sdlc-new-context` (`argument-hint: "[<group> <context>] [--issue <N>] [--no-handoff]"`, amends FR-14), stage id is `new-context` with its exit string byte-equal, it carries both sentences, and `MAX_ITERATIONS=5` counts remediation rounds.
+- Given steps 1–3, when read, then `"${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh" validate_context_name <g> <c>` runs before anything (exit 1 → print the `REFUSED:` line and escalate with nothing written); the branch rule reuses a `<type>/<N>-…` branch, else requires `--issue` or runs the issue stage, then creates `feat/<N>-<context>` from the default branch; `make new-context group=<g> context=<c>` runs backgrounded and a non-zero exit is classified by the stderr prefix `new-context refused:` (validation drift), `new-context could not run:` (attach `git status --porcelain`) or neither (log tail), each escalating.
+- Given steps 4–6, when read, then the `bounded-context-scaffolding` skill is loaded and C2–C11 are dispatched to `rust-implementer` (each item returns `DONE: C<n> <evidence>` or `N/A: C<n> <reason>`, C1–C12 listed with their evidence targets, `make migrate-rollback` headless → `not run (ask rule)`, D13); the commit is `feat(#N): add <group>/<context> bounded context`; C12 runs `docker info` first (failure → `ESCALATED` with `make doctor` output, no stage remediated, D2), then `make ci-preflight`, `make ci-static-analysis`, `make ci-tests`, `make ci-contracts`, `make ci-mutation`, `make ci-delivery` (read at runtime from `CI_*_TARGETS`, `ci-cli` never) one backgrounded call each, a failing stage → `rust-implementer` remediation and `fix(#N): <what>`, then `make validate-configuration base_ref=<ci.base_ref> CONFIG_CHANGE_APPROVED=`.
+- Given step 7, when read, then the command hands off to the review, QA and finish-pr procedures with the loop's counters, or with `--no-handoff` prints three `NEXT:` lines naming /rs-sdlc-review, /rs-sdlc-qa and /rs-sdlc-finish-pr; the handles are `ISSUE_NUMBER:`, `BRANCH:`, the checklist lines and the targets-run list (AC-14.2, CC-19).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/commands/rs-sdlc-new-context.md`
+
+**Depends on:** 2.4, 4.12, 5.3, 5.7, 5.9, 5.10, 5.11
+
+**FRs:** FR-14, FR-1, FR-2 (NFR-3, NFR-6)
+
+**Verification:**
+
+- `v_lint 'commands/rs-sdlc-new-context\.md'`
+- `C=plugins/rust-backend-sdlc/commands/rs-sdlc-new-context.md; v_md $C && v_sent $C && v_esc $C && v_exit new-context $C && v_p17 $C && v_suffix $C && v_cmdtok $C`
+- `for t in validate_context_name 'new-context refused:' 'new-context could not run:' C1 C12 ci-preflight ci-static-analysis ci-tests ci-contracts ci-mutation ci-delivery 'CONFIG_CHANGE_APPROVED=' 'feat(#N): add <group>/<context> bounded context' --no-handoff; do grep -qF -- "$t" $C || echo "missing $t"; done | { ! grep .; }`
+
