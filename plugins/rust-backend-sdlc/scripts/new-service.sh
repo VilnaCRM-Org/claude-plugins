@@ -1333,7 +1333,7 @@ NS_ARMED=1
 # --- mode, owner, defaults and checkout -----------------------------------------------------------
 
 if [[ "$IN_PLACE" == 1 ]]; then
-  KIND=in-place
+  KIND='in-place'
   top="$(git rev-parse --show-toplevel 2>/dev/null)" ||
     die "--in-place needs a git checkout in the working directory"
   if [[ "$(cd "$top" && pwd -P)" != "$(pwd -P)" ]]; then
