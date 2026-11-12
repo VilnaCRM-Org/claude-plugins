@@ -694,3 +694,720 @@ So that a fresh checkout is ready for the plugin after one command and one commi
 - `C=plugins/rust-backend-sdlc/commands/rs-sdlc-setup.md; v_sent $C && v_esc $C && v_exit setup $C && v_p17 $C && v_suffix $C && v_cmdtok $C plugins/rust-backend-sdlc/docs/setup-walkthrough.md`
 - `grep -qF 'git config --get core.hooksPath' plugins/rust-backend-sdlc/commands/rs-sdlc-setup.md && grep -qF 'hooks_active' plugins/rust-backend-sdlc/commands/rs-sdlc-setup.md && grep -qF 'MAX_ITERATIONS=5' plugins/rust-backend-sdlc/commands/rs-sdlc-setup.md`
 
+## Epic 3: Review, gate and pull-request scripts
+
+A reviewer or maintainer can run the plugin's bundled review machinery against any template-derived pull request without a loop around it: planning-bundle staging for bmalph, an isolated read-only AI review loop, the BMAD FR/NFR gate with its commit status, resolution-aware comment reads, idempotent per-lens findings comments, the PR state sensor and the AI review requester, each a standalone script with a hermetic suite; this epic also adds the redaction, isolated-session and ledger functions of `common.sh` and builds only on Epics 1 and 2.
+
+### Story 3.1: Publishing and model-session helpers (`common.sh` section `publishing and model sessions`)
+
+As a reviewer,
+I want one redaction implementation, prompt-fence neutralization, the two claude runners and a validated ledger writer in the library,
+So that every publishing script redacts the same way, every gate session is isolated, and lens findings land in schema-checked ledgers.
+**Read:** § Script Contracts › `scripts/lib/common.sh` rows `redact`, `fence_safe`, `claude_is_error`, `claude_extract_result`, `claude_run_once`, `claude_run_isolated`, `ledger_write`; ADR-8, ADR-16, ADR-27; PRD FR-33, NFR-10. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given `redact` (stdin to stdout, or `--in RAW --out OUT`), when input holds secrets, then each match of the § `scripts/lib/common.sh` list, applied in that order, becomes `[REDACTED]` with the prefix kept where shown: `AKIA…`/`ASIA…` key ids, JWTs, a 20-character `ghp_` token, `github_pat_…`, a multi-line PEM private-key block, `Authorization: Bearer …`, the identifier forms `AWS_SECRET_ACCESS_KEY=…` and `DB_PASSWORD=…`, URL credentials and a mixed-class base64/hex run of 40+ characters (one case per pattern); `--in` or `--out` outside `target/rust-sdlc/tmp/` exits 2, and `--out` is written atomically.
+- Given `fence_safe`, when contributor text contains `<<<` or `>>>`, then both sequences are neutralized on stdout.
+- Given `claude_run_once PROMPT`, when it runs, then the claude stub's argv is `-p <PROMPT> --output-format json --permission-mode acceptEdits --max-turns 30`, `.result` is printed (jq or python3 via `claude_extract_result`), a transport failure (non-zero exit, `is_error: true` via `claude_is_error`, missing `.result`) is retried exactly once and returns 1 after the retry, and a well-formed negative verdict is never retried.
+- Given `claude_run_isolated PROMPT`, when it runs, then argv and environment equal ADR-8 verbatim (the seven `env -u` variables unset, `GH_CONFIG_DIR` a fresh `mktemp -d`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=credential.helper`, empty `GIT_CONFIG_VALUE_0`, and `--restricted --tools 'Read,Grep,Glob' --strict-mcp-config --disallowedTools 'Bash(gh:*)' 'Bash(git push:*)' 'Bash(git credential:*)'`), every variable is asserted on the stub's env log, and the temporary `GH_CONFIG_DIR` no longer exists after the call on success, failure and signal (the variable set is byte-identical with `plugins/react-frontend-sdlc/scripts/lib/common.sh`, CC-30).
+- Given `ledger_write LENS ITERATION HEAD_SHA [--dir D] [--started-at ISO] [--ended-at ISO]` with a findings array on stdin, when it validates against the ADR-16 field table, then a valid array is written atomically as `{"schema_version": 1, "lens", "iteration", "head_sha", "findings"[, "started_at", "ended_at"]}` to `${D:-${SDLC_LEDGER_DIR:-target/rust-sdlc/review-ledgers}}/<lens>.json`, a null `file`/`line` is accepted, and an extra key, a bad `id`, a bad `severity` and `line: 0` each exit 1 with nothing written.
+- Given the section, when checked, then it starts with `# section: publishing and model sessions`, `redact` and `ledger_write` run through the dispatcher, `shellcheck -x` and the banned-construct check are clean, and `tests/common-lib.bats` holds at least 56 `@test` cases in total.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/scripts/lib/common.sh` (section `publishing and model sessions`; appended after `command helpers`)
+- `plugins/rust-backend-sdlc/tests/common-lib.bats` (section `publishing and model sessions`; appended)
+
+**Depends on:** 1.2, 2.4
+
+**FRs:** FR-33, FR-34, FR-35 (NFR-9, NFR-10, NFR-15)
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/lib/common.sh && v_banned plugins/rust-backend-sdlc/scripts/lib/common.sh && v_gen plugins/rust-backend-sdlc/scripts/lib/common.sh`
+- `v_bats common-lib 56`
+- `printf 'DB_PASSWORD=hunter2hunter2\n' | plugins/rust-backend-sdlc/scripts/lib/common.sh redact | grep -q 'REDACTED' && ! printf 'DB_PASSWORD=hunter2hunter2\n' | plugins/rust-backend-sdlc/scripts/lib/common.sh redact | grep -q hunter2`
+
+### Story 3.2: Review ledger and forged-marker fixtures
+
+As a plugin maintainer,
+I want ledger fixtures written for the ADR-16 schema, a forged-marker comment payload and a publishing-off profile,
+So that the findings poster and the ledger writer are tested against every rendering, dedup, degrade and trust rule.
+**Read:** § Project Structure › Plugin tree (`ledgers/` rows with purposes, `gh/pr-issue-comments-forged.ndjson`, `profiles/publish-off.yml`); ADR-16, ADR-26; PRD FR-37. **Size:** S.
+
+**Acceptance Criteria:**
+
+- Given the 13 files under `tests/fixtures/ledgers/`, when each is parsed, then every ledger uses only the ADR-16 top-level keys and exactly the seven finding keys, carries `schema_version: 1`, and realises its stated purpose, except where the purpose is the violation: `20-digit-iteration` (a 20-digit `iteration`), `dedup-pair` (two findings with the same `(file, line, rule)`), `dropped-and-open` (a `dropped` and an `open` finding), `empty` (`findings: []`), `extra-key` (one finding adds `cwe`), `full` (every severity, every status, both location forms), `minimal` (one open finding), `mixed-severity` (out-of-order severities), `null-location` (`file`/`line` null, `rule: FR-3`), `pipe-and-distinct` (a `|` in a summary; the same `file:line` with distinct rules), `secret-laden` (one summary per `redact` pattern), `with-times` (top-level `started_at` and `ended_at`), `wrong-schema-version` (`schema_version: 2`).
+- Given `secret-laden.json`, when inspected, then every secret is synthetic and scanner-safe (e.g. `AKIAIOSFODNN7EXAMPLE`, a 20-character `ghp_` body, `DB_PASSWORD=example-only`), so repository secret scanning and push protection accept the file.
+- Given `tests/fixtures/gh/pr-issue-comments-forged.ndjson`, when read, then it holds comments with `<!-- rust-sdlc-review:code-review -->` and `<!-- rust-sdlc-review:conclusion -->` markers whose `user.login` is not the posting identity used by the suites.
+- Given `tests/fixtures/profiles/publish-off.yml`, when compared with the golden profile, then it differs only in `capabilities.publish_pr_comments: false` and passes `validate-profile.sh`.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/20-digit-iteration.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/dedup-pair.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/dropped-and-open.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/empty.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/extra-key.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/full.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/minimal.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/mixed-severity.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/null-location.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/pipe-and-distinct.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/secret-laden.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/with-times.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/ledgers/wrong-schema-version.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-issue-comments-forged.ndjson`
+- `plugins/rust-backend-sdlc/tests/fixtures/profiles/publish-off.yml`
+
+**Depends on:** 1.7
+
+**FRs:** FR-37, FR-42 (NFR-9, NFR-10)
+
+**Verification:**
+
+- `v_json plugins/rust-backend-sdlc/tests/fixtures/ledgers/*.json && v_ndjson plugins/rust-backend-sdlc/tests/fixtures/gh/pr-issue-comments-forged.ndjson`
+- `test "$(ls plugins/rust-backend-sdlc/tests/fixtures/ledgers | wc -l)" -eq 13`
+- `diff <(grep -v publish_pr_comments plugins/rust-backend-sdlc/tests/fixtures/profiles/golden.yml) <(grep -v publish_pr_comments plugins/rust-backend-sdlc/tests/fixtures/profiles/publish-off.yml) && plugins/rust-backend-sdlc/scripts/validate-profile.sh plugins/rust-backend-sdlc/tests/fixtures/profiles/publish-off.yml >/dev/null`
+- `v_gen plugins/rust-backend-sdlc/tests/fixtures/ledgers plugins/rust-backend-sdlc/tests/fixtures/gh/pr-issue-comments-forged.ndjson`
+
+### Story 3.3: Planning-bundle staging for bmalph
+
+As a feature engineer,
+I want `stage-planning-artifacts.sh` to copy a committed `specs/<N>-<slug>/` bundle into bmalph's git-ignored planning folder with strict pre-checks,
+So that `bmalph implement` sees exactly the bundle the plan stage wrote, including a `## Constraints` section bmalph will not truncate.
+**Read:** § Script Contracts › `scripts/stage-planning-artifacts.sh`; ADR-10, ADR-23 (exit 2 exception); PRD FR-17, AC-16.2, AC-17.1, AC-17.2. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given a bundle written at runtime by `bundle_write` under `specs/12-add-x/` in a repository whose `_bmad-output/` is git-ignored, when `stage-planning-artifacts.sh specs/12-add-x` runs, then `_bmad-output/planning-artifacts/` holds exactly `prd.md`, `architecture.md`, `epics.md`, `implementation-readiness.md`, `product-brief.md`, `technical-research.md` (copied from `research.md`) and any `ux*.md`, stdout has one `STAGED: <src> -> <dest>` line per file, exit is 0, and a re-run is byte-identical (AC-17.1).
+- Given stale files in dest, when it runs, then only regular `*.md` files at depth 1 of dest that this run did not produce are removed, each with `REMOVED: <dest-file>`; subdirectories and other files are untouched.
+- Given a missing `epics.md`, zero `### Story N.M:` headings, a readiness file matching `/NO[-\s]?GO/i` (`bundle_write --blocked`), a tracked (not git-ignored) dest, a specs dir outside the repository, a symlinked specs dir, `--dest target` and an `architecture.md` whose `## Constraints` section (heading to the next level-2 heading) exceeds 4,500 characters, when it runs, then each exits 1 with one `REFUSED: <reason>` line (`REFUSED: dest target is outside _bmad-output/`, `REFUSED: architecture.md ## Constraints exceeds 4500 characters (<n>)`) and nothing is written or removed (AC-16.2, AC-17.2).
+- Given a working directory outside a git work tree, when it runs, then it exits 2; `--dry-run` prints only `WOULD: stage <src> -> <dest>` lines and writes nothing; the suite generates every bundle at runtime (no committed `.md` fixture) and the script meets SC-SCRIPT and SC-SUITE.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/scripts/stage-planning-artifacts.sh`
+- `plugins/rust-backend-sdlc/tests/stage-planning-artifacts.bats`
+
+**Depends on:** 1.1, 1.6
+
+**FRs:** FR-17, FR-16 (NFR-1, NFR-10)
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/stage-planning-artifacts.sh && v_banned plugins/rust-backend-sdlc/scripts/stage-planning-artifacts.sh && v_gen plugins/rust-backend-sdlc/scripts/stage-planning-artifacts.sh`
+- `v_bats stage-planning-artifacts 15`
+
+### Story 3.4: Pull-request comment reader
+
+As a PR finisher,
+I want `get-pr-comments.sh` to read every review thread and issue comment with resolution state and author association,
+So that the finish-pr exit condition counts unresolved threads exactly and the resolver acts only on trusted authors.
+**Read:** § Script Contracts › `scripts/get-pr-comments.sh`; ADR-26; PRD FR-36, AC-36.1. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given no `--pr`, when the script runs, then the PR number comes from `gh pr view --json number --jq .number`; a non-numeric `--pr` exits 2 and a non-numeric number from gh exits 1 (validated `^[1-9][0-9]*$` whatever the source); owner and name come from `resolve_repo_slug`.
+- Given the gh stub, when the query runs, then it is one paginated `gh api graphql` query with the exact field set of the contract (`reviewThreads(first: 100, after: $cursor)` with `isResolved`, `comments(first: 100)` with `author { login } authorAssociation body path line url`, `pageInfo { hasNextPage endCursor }`, plus issue comments with `authorAssociation`), and with `pr-comments-truncated.json` as page 1 it follows `endCursor` until `hasNextPage` is false and counts threads beyond 100.
+- Given `--json`, when it prints, then the shape is `{"pr": N, "review_threads": [{"is_resolved", "comments": [{"author", "author_association", "body", "path", "line", "url"}]}], "issue_comments": [{"author", "author_association", "body", "url"}]}`; `--unresolved-only` drops resolved threads and every issue comment; the human output ends `unresolved threads: N`; `pr-comments-untrusted.json` yields a thread whose `author_association` is `NONE` (ADR-26).
+- Given gh absent (`sandbox_path`), when it runs, then it exits 1; with jq absent the output is byte-identical through python3 (parity case); the script meets SC-SCRIPT and SC-SUITE.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/scripts/get-pr-comments.sh`
+- `plugins/rust-backend-sdlc/tests/get-pr-comments.bats`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-comments.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-comments-truncated.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-comments-untrusted.json`
+
+**Depends on:** 1.2, 1.6
+
+**FRs:** FR-36 (NFR-10)
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/get-pr-comments.sh && v_banned plugins/rust-backend-sdlc/scripts/get-pr-comments.sh && v_gen plugins/rust-backend-sdlc/scripts/get-pr-comments.sh`
+- `v_json plugins/rust-backend-sdlc/tests/fixtures/gh/pr-comments*.json`
+- `v_bats get-pr-comments 32`
+
+### Story 3.5: PR sensor fixtures
+
+As a plugin maintainer,
+I want the gh payloads that drive the PR state sensor's verdicts,
+So that every verdict, including the human-gated and service-check cases, is reproduced from a fixture.
+**Read:** § Project Structure › Plugin tree (`gh/pr-state/` rows); `plugins/react-frontend-sdlc/tests/fixtures/gh/pr-state/` (port source); PRD FR-38, AC-21.3. **Size:** S.
+
+**Acceptance Criteria:**
+
+- Given the 17 react payload names (`comments-quiet`, `comments-requested`, `comments-skips`, `pr-conflicting`, `pr-merged`, `pr-open-gate-failed`, `pr-open-gate-pending`, `pr-open-green-nogate`, `pr-open-green`, `pr-open-nochecks`, `pr-open-pending`, `pr-open-red`, `reviews-approved`, `reviews-coderabbit-changes`, `reviews-cubic-stale`, `reviews-none`, `threads-empty`), when compared with `plugins/react-frontend-sdlc/tests/fixtures/gh/pr-state/`, then each is a byte copy except that any repository identity reads `acme/billing-service`.
+- Given `pr-open-human-gated-red.json`, when read, then it is an open, mergeable PR whose only failing check run is named `Protected configuration` (a name with a space) and whose other checks are green.
+- Given `pr-open-service-check-red.json`, when read, then it is an open PR whose failing check run comes from a service-added workflow (a check name absent from the template's job tables).
+- Given all 19 files, when parsed, then the `.json` files are valid JSON and the `.ndjson` files hold one JSON object per line, and none contains the organization token.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/comments-quiet.ndjson`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/comments-requested.ndjson`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/comments-skips.ndjson`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-conflicting.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-merged.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-open-gate-failed.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-open-gate-pending.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-open-green-nogate.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-open-green.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-open-human-gated-red.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-open-nochecks.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-open-pending.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-open-red.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-open-service-check-red.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/reviews-approved.ndjson`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/reviews-coderabbit-changes.ndjson`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/reviews-cubic-stale.ndjson`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/reviews-none.ndjson`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/threads-empty.json`
+
+**Depends on:** none
+
+**FRs:** FR-38, FR-42
+
+**Verification:**
+
+- `v_json plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/*.json && v_ndjson plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/*.ndjson`
+- `test "$(ls plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state | wc -l)" -eq 19 && grep -q 'Protected configuration' plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state/pr-open-human-gated-red.json`
+- `v_gen plugins/rust-backend-sdlc/tests/fixtures/gh/pr-state`
+
+### Story 3.6: PR state sensor
+
+As a PR finisher,
+I want `pr-state.sh` to turn one snapshot of the PR into exactly one verdict with a next-step hint,
+So that the finish-pr loop and the workflow layer act on CI, the FR/NFR gate, reviewers, threads and human-gated checks without guessing.
+**Read:** § Script Contracts › `scripts/pr-state.sh`; `plugins/react-frontend-sdlc/scripts/pr-state.sh` (port source); § Degrade Matrix D8, D9; PRD FR-38 (amended: `url`), AC-21.3, AC-38.1. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given each gh fixture of `tests/fixtures/gh/pr-state/`, when `pr-state.sh --pr 7 --json` runs, then it prints exactly one verdict by the priority `BLOCKED > FIX > GATE > REQUEST > WAIT > READY` and the JSON keys, sorted, are exactly `ci, draft, fr_nfr, head, human_gated, mergeable, next, notes, pr, repo, reviewers, state, unresolved, url, verdict`; text mode prints `KEY: value` lines (`PR:`, `HEAD:`, `CI:`, `FR_NFR_GATE:`, `UNRESOLVED:`, `REVIEWER:`…, `HUMAN_GATED:`, `INFO:`…), then `VERDICT: <v>` and `NEXT: <hint>`.
+- Given `pr-open-human-gated-red.json` with `--human-gated-checks 'Protected configuration,OpenAPI breaking changes,GraphQL breaking changes'`, when it runs, then the verdict is `BLOCKED` and `NEXT:` names `approved-config-change` (mapped by `human_gated_labels`), not `FIX`; the same payload with the job id `validate-configuration` in the list is not matched; `pr-open-service-check-red.json` with that check in `--required-checks` yields `FIX`, never `READY`; when no label maps, `NEXT: apply the approval label named in docs/repository-settings.md` (AC-21.3, D9).
+- Given the golden profile and no list flags, when it runs, then the defaults come from `review.reviewers`, `ci.required_checks` and `ci.human_gated`; profile-listed required checks count as `missing` even when not passed, so zero reported checks with a non-empty `ci.required_checks` is `WAIT`; `CI: none` and `SKIPPED-NO-CI` apply only when `ci.provider` is null or both lists are empty and the PR reports no checks (D8); check names with spaces are parsed from `--required-checks` and matched exactly and case-sensitively against check-run `name`.
+- Given the snapshot, when judged, then the status context `BMAD FR/NFR Review Gate` is evaluated on its own (`success failure pending missing`; missing → `GATE`), reviewer states are `APPROVED NOT_APPROVED REQUESTED STALE NONE SKIPPED` against the current head, unresolved threads come from `get-pr-comments.sh --pr N --unresolved-only --json`, and the `NEXT:` hints name `rs-sdlc-fr-nfr-review` (GATE), `request-ai-reviews.sh …` (REQUEST), `pr-state.sh --pr <n> --wait-seconds 540` (WAIT) and `/rs-sdlc-review` (all reviewers skipped).
+- Given `--wait-seconds S --interval-seconds I --wait-verdicts LIST`, when it waits, then polling is bounded by S under the fixed clock `SDLC_NOW_EPOCH`; exit is 0 whenever a snapshot rendered and 1 on a usage error (react parity), an unresolvable repository or a gh failure; the script meets SC-SCRIPT and SC-SUITE (≥ 30 react cases ported).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/scripts/pr-state.sh`
+- `plugins/rust-backend-sdlc/tests/pr-state.bats`
+
+**Depends on:** 1.6, 1.7, 3.4, 3.5
+
+**FRs:** FR-38, FR-21 (NFR-3, NFR-6)
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/pr-state.sh && v_banned plugins/rust-backend-sdlc/scripts/pr-state.sh && v_gen plugins/rust-backend-sdlc/scripts/pr-state.sh`
+- `v_bats pr-state 33`
+
+### Story 3.7: AI review requester
+
+As a PR finisher,
+I want `request-ai-reviews.sh` to post each configured AI reviewer's mention while honouring its cadence,
+So that reviews are requested exactly when the sensor asks and never spammed.
+**Read:** § Script Contracts › `scripts/request-ai-reviews.sh`; `plugins/react-frontend-sdlc/scripts/request-ai-reviews.sh` (port source); NFR-5 P5 exemption; PRD FR-39, AC-39.1. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given `--reviewers` or else `review.reviewers` of the golden profile, when the list is validated, then only `coderabbit`, `cubic`, `qodo`, `qlty`, `sonarcloud` without duplicates or empty elements pass (harmonised with `pr-state.sh`); an unknown reviewer exits 1 (react parity).
+- Given a plan, when it runs, then it prints `REQUESTED: <r> <mention>`, `WOULD-POST: …` under `--dry-run` (no comment posted, asserted on the gh log), `WAIT: <r> <m>m (…)` inside the cadence window (CodeRabbit default 60 min, `--min-interval-minutes M` overrides, `--force` bypasses), `SKIPPED: <r> — <reason>` (incl. the CodeRabbit "Review skipped" comment of `pr-issue-comments-oversized.ndjson`), `INFO: …`, then `SUMMARY: requested=<n> waiting=<n> skipped=<n>` whose numbers add up; `--full` requests a full review where the bot supports it; the clock is `SDLC_NOW_EPOCH`.
+- Given an empty reviewer list, when it runs, then it prints `INFO: no reviewers configured` and exits 0; exit is 0 when the plan was computed and posts succeeded, 1 on usage, an unresolvable PR or repository or a failed gh call; the option `--force` is not a git or bmalph construct and matches none of P1–P5.
+- Given the fixtures `pr-issue-comments.ndjson` (prior requests and replies) and `pr-issue-comments-oversized.ndjson`, when the 17 react cases are ported, then they pass with the profile-default and harmonised-validation cases added, and the script meets SC-SCRIPT and SC-SUITE.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/scripts/request-ai-reviews.sh`
+- `plugins/rust-backend-sdlc/tests/request-ai-reviews.bats`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-issue-comments.ndjson`
+- `plugins/rust-backend-sdlc/tests/fixtures/gh/pr-issue-comments-oversized.ndjson`
+
+**Depends on:** 1.6, 1.7
+
+**FRs:** FR-39
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/request-ai-reviews.sh && v_banned plugins/rust-backend-sdlc/scripts/request-ai-reviews.sh && v_gen plugins/rust-backend-sdlc/scripts/request-ai-reviews.sh`
+- `v_ndjson plugins/rust-backend-sdlc/tests/fixtures/gh/pr-issue-comments.ndjson plugins/rust-backend-sdlc/tests/fixtures/gh/pr-issue-comments-oversized.ndjson`
+- `v_bats request-ai-reviews 17`
+
+### Story 3.8: Isolated AI review loop
+
+As a PR finisher without an AI reviewer app,
+I want `ai-review-loop.sh` to review the branch diff in a read-only, credential-free claude session until it passes or the cap is reached,
+So that findings exist even when no reviewer bot is configured, and the session can never change the tree.
+**Read:** § Script Contracts › `scripts/ai-review-loop.sh`; ADR-8; § Degrade Matrix D7; PRD FR-34, AC-34.1. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given agents from `--agents`, else `review.ai_review_agents` (which must be a YAML list), else `claude`, when an unsupported name appears, then it prints `[rust-sdlc][WARN] agent <a> is not supported in v0.1.0; skipped`, and a run where no supported agent remains exits 1.
+- Given the diff base `--diff-base` > `ci.base_ref` > `origin/main` and `--max-iterations` (default 5, `^[0-9]+$`, 1–20 by digit-string compare; a 20-digit value exits 2), when an iteration runs, then the prompt holds the Rust review rules (the FR-23 rule set and the P6 prohibitions), `git diff <base>...HEAD` capped at 50,000 bytes with a truncation note and fenced through `fence_safe`, and the demand for the last line `AI_REVIEW_VERDICT: PASS|FAIL`; it runs through `claude_run_isolated` (argv and env asserted on the stub) and prints `ITERATION: <i>/<max> agent=<a> verdict=<PASS|FAIL>` followed by the review text.
+- Given stub sequences, when they run, then PASS on iteration 1 exits 0, FAIL then PASS exits 0 after two iterations, five FAILs exit 1, a missing verdict line counts as a failed iteration without retry, a transport failure is retried exactly once, and the last line is always `AI_REVIEW_VERDICT: PASS|FAIL`.
+- Given a stub session that modifies a file, when the iteration ends, then the before/after `git status --porcelain` differ and the script exits 1 with `[rust-sdlc][ERROR] review session changed the working tree`; the script writes nothing, includes a parity case with `SDLC_FORCE_PYTHON_YAML=1`, and meets SC-SCRIPT and SC-SUITE (php cases ported).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/scripts/ai-review-loop.sh`
+- `plugins/rust-backend-sdlc/tests/ai-review-loop.bats`
+
+**Depends on:** 1.7, 3.1
+
+**FRs:** FR-34 (NFR-5, NFR-6, NFR-10)
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/ai-review-loop.sh && v_banned plugins/rust-backend-sdlc/scripts/ai-review-loop.sh && v_gen plugins/rust-backend-sdlc/scripts/ai-review-loop.sh`
+- `v_bats ai-review-loop 25`
+
+### Story 3.9: BMAD FR/NFR gate
+
+As a reviewer,
+I want `fr-nfr-gate.sh` to trace the change to its requirements in an isolated session and publish the `BMAD FR/NFR Review Gate` status on the head commit,
+So that no change merges without traceable, tested requirements, and contributor text cannot steer or forge the gate.
+**Read:** § Script Contracts › `scripts/fr-nfr-gate.sh`; ADR-8, ADR-26, ADR-27; `plugins/react-frontend-sdlc/scripts/fr-nfr-gate.sh` (port source); § Degrade Matrix D11, D15; PRD FR-35, AC-35.1. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given `--spec-path`, when it resolves (symlinks included) outside the repository, then the script exits 1 before any gh or claude call; sources are the bundle, the PR description, the PR's closing issues from `gh api graphql` `closingIssuesReferences(first: 50)` (more than 50 fails closed) and always the seven baseline ids `NFR-BASE-TEST`, `NFR-BASE-QUALITY`, `NFR-BASE-ARCH`, `NFR-BASE-CONTRACT`, `NFR-BASE-DATA`, `NFR-BASE-SEC`, `NFR-BASE-OBS`, all present in the prompt; no bundle and no PR text posts a failure status (unless `--advisory`), prints `cannot trace this change to any requirement` and exits 1.
+- Given the byte budgets (each source 12,000, all sources 40,000, diff 50,000, files list 16,000, prompt 120,000, comment 60,000), when inputs exceed them, then they are truncated with a note and contributor text is fenced through `fence_safe`.
+- Given `claude_supports_restricted` false, when the script runs, then it fails fast with `upgrade Claude Code to 2.1.248 or newer` and exit 1 (D15); otherwise it runs `claude_run_isolated`, every ADR-8 variable is asserted on the stub's env log, the temporary `GH_CONFIG_DIR` is gone after the call, a transport failure is retried once, and a last line not matching `^FR_NFR_NEW_FINDINGS: ([0-9]+)$` posts a failure status and exits 1.
+- Given a publishing run (no `--advisory`), when it ends, then a commit status with context exactly `BMAD FR/NFR Review Gate` is posted on `git rev-parse HEAD` (`success` for 0 findings, else `failure`) with 3 attempts spaced by `FR_NFR_STATUS_RETRY_DELAY × attempt` (unpostable → exit 1), and only when n > 0 a redacted comment with marker `<!-- rust-sdlc-fr-nfr-gate -->` and the iteration shown PATCHes the oldest marker comment authored by the posting identity (`--bot-login`, else `gh api user --jq .login`) or creates one; a forged gate comment by another author is ignored with a `DEGRADED:` line (ADR-26).
+- Given any run, when it prints, then stdout carries the review text, `STATUS_POSTED: <state> <sha7>` or `ADVISORY: no status or comment posted`, `COMMENT_POSTED: <url>` when posted, and the last line `FR_NFR_NEW_FINDINGS: <n>`; exit is 0 for zero findings, 1 otherwise, 2 on usage; the status context string is byte-identical with the php and react scripts (CC-30); react cases are ported and the script meets SC-SCRIPT and SC-SUITE.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/scripts/fr-nfr-gate.sh`
+- `plugins/rust-backend-sdlc/tests/fr-nfr-gate.bats`
+
+**Depends on:** 3.1
+
+**FRs:** FR-35 (NFR-3, NFR-10, NFR-15)
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/fr-nfr-gate.sh && v_banned plugins/rust-backend-sdlc/scripts/fr-nfr-gate.sh && v_gen plugins/rust-backend-sdlc/scripts/fr-nfr-gate.sh`
+- `v_bats fr-nfr-gate 54`
+- `grep -qF 'BMAD FR/NFR Review Gate' plugins/rust-backend-sdlc/scripts/fr-nfr-gate.sh && grep -qF 'BMAD FR/NFR Review Gate' plugins/react-frontend-sdlc/scripts/fr-nfr-gate.sh`
+
+### Story 3.10: Review findings poster
+
+As a reviewer reading the PR,
+I want exactly one up-to-date comment per review lens and one conclusion,
+So that findings are visible, deduplicated, redacted and never duplicated or forged.
+**Read:** § Script Contracts › `scripts/post-review-findings.sh`; ADR-16, ADR-23, ADR-26; `plugins/php-backend-sdlc/scripts/post-review-findings.sh` (port source); § Degrade Matrix D12; PRD FR-37, AC-37.1. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given `post-review-findings.sh <lens> --pr N` with lens ∈ `security fr-nfr code-review` and the default ledger `${SDLC_LEDGER_DIR:-target/rust-sdlc/review-ledgers}/<lens>.json`, when no marker comment of the posting identity exists, then it creates one with marker `<!-- rust-sdlc-review:<lens> -->` and prints `POSTED: <lens> created <url>`; a second post PATCHes the oldest comment carrying that marker and authored by the posting identity (`--bot-login`, else `gh api user --jq .login`) and prints `POSTED: <lens> updated <comment-id>`; nothing is ever deleted; a forged marker by another author (`pr-issue-comments-forged.ndjson`) is ignored, a new comment is created when the identity resolves and nothing is edited when it does not.
+- Given `--conclusion [--file F]...`, when it runs, then the conclusion marker `<!-- rust-sdlc-review:conclusion -->` is posted exactly once per PR (a conclusion by another author does not count), with `started_at`/`ended_at` taken from the ledgers (`with-times.json`) when `--started-at`/`--ended-at` are absent, and `--duration-seconds`/`--iterations` rendered when given.
+- Given the ledger fixtures, when rendered, then findings are deduplicated by `(file, line, rule)` with null read as empty (`dedup-pair`), same `file:line` with distinct rules kept and `|` escaped (`pipe-and-distinct`), sorted Critical → Info (`mixed-severity`), `dropped` rows filtered (`dropped-and-open`), requirement-level rows rendered (`null-location`), a 20-digit iteration printed verbatim, every `redact` pattern applied before rendering (`secret-laden`, one case per pattern), `--json` output parses with jq and python3, and `--dry-run` prints `WOULD: post <lens>`.
+- Given each degrade condition (`capabilities.publish_pr_comments: false` via `publish-off.yml`, gh absent, no PR, empty or all-dropped ledger, `schema_version` other than 1 via `wrong-schema-version.json` with a missing version read as 1, a malformed gh read, a base-repository mismatch, a write failure), when it runs, then it prints `DEGRADED: <reason>`, posts nothing and exits 0; a malformed ledger named with `--file` (`extra-key.json`) exits 1; usage errors exit 2; `grep -c $'\x00'` on the script is 0; the script meets SC-SCRIPT and SC-SUITE.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/scripts/post-review-findings.sh`
+- `plugins/rust-backend-sdlc/tests/post-review-findings.bats`
+
+**Depends on:** 3.1, 3.2
+
+**FRs:** FR-37 (NFR-3, NFR-9, NFR-10)
+
+**Verification:**
+
+- `v_sh plugins/rust-backend-sdlc/scripts/post-review-findings.sh && v_banned plugins/rust-backend-sdlc/scripts/post-review-findings.sh && v_gen plugins/rust-backend-sdlc/scripts/post-review-findings.sh`
+- `test "$(grep -c $'\x00' plugins/rust-backend-sdlc/scripts/post-review-findings.sh)" -eq 0`
+- `v_bats post-review-findings 46`
+
+## Epic 4: Rust skill library
+
+Agents and developers working in a template-derived service get 28 profile-driven Rust skills and the skill decision guide: each skill defers to the repository's own skill of the same name where one exists, reads every value through a profile key, and states its evidence, bounded loop, escalation and skip path, so review triage can record a verdict for all 28 without loading bodies; skills build only on the profile schema of Epic 1 and never invoke agents, commands or scripts, so all twelve skill stories run in parallel.
+
+### Story 4.1: API skills: `api-resource-development` and `api-contract-development`
+
+As a feature engineer adding or changing an endpoint,
+I want skills for the REST/GraphQL operation recipe and for contract snapshots and breaking-change policy,
+So that operations follow the template's extractors and error model and every contract change ships its regenerated snapshots.
+**Read:** § Skill Library › Skill anatomy, Final list rows 1–2; § Markdown component conventions › Skills; PRD FR-30, FR-23 (rule tokens), FR-19 Q12–Q14. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when `skills/api-resource-development/SKILL.md` and `skills/api-contract-development/SKILL.md` are checked, then each meets the skill contract with the exact keys of rows 1 and 2 and the `## Repository precedence` second H2 (both are counterparts).
+- Given `api-resource-development`, when read, then it covers adding a REST or GraphQL operation, command, query or subscriber inside `<group>/<context>`: handlers extract only through `ApiPath`, `ValidatedQuery`, `ValidatedJson`, `ApiJson`; errors map to `Problem` (`application/problem+json`); commands return no data; subscribers are idempotent; ports for I/O; the snapshot co-change through `make.generate_openapi_spec` and `make.generate_graphql_spec`; evidence from `make.tests_with_coverage` and `make.e2e_tests`; its GraphQL section names the skip path `SKIPPED: framework.graphql is false`.
+- Given `api-contract-development`, when read, then it covers regenerating and validating `service.openapi_snapshot` and `service.graphql_snapshot` through the mapped targets, the Spectral bar `quality.max_spectral_findings`, the diff targets against `ci.base_ref` with `quality.max_unapproved_breaking_changes`, snapshots never hand-edited, `BREAKING_CHANGE_APPROVED=true` only when the PR already carries `approved-breaking-change`, and that label applied only by a human (escalate, never "fix" by weakening the contract).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/api-resource-development/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/api-contract-development/SKILL.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30 (NFR-2, NFR-4)
+
+**Verification:**
+
+- `v_lint_wave 'skills/api-(resource|contract)-development/'`
+- `S="plugins/rust-backend-sdlc/skills/api-resource-development/SKILL.md plugins/rust-backend-sdlc/skills/api-contract-development/SKILL.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S`
+- `grep -q '^## Repository precedence' plugins/rust-backend-sdlc/skills/api-resource-development/SKILL.md && grep -q 'ValidatedJson' plugins/rust-backend-sdlc/skills/api-resource-development/SKILL.md`
+
+### Story 4.2: Architecture skills: `architecture-boundary-fixer`, `architecture-model-sync`, `clean-architecture-llm`
+
+As a feature engineer facing an architecture finding,
+I want skills that fix boundary violations by moving code, keep `workspace.dsl` equal to the crate graph and state the layer rules,
+So that architecture gates pass without ever editing the protected allow-lists.
+**Read:** § Skill Library › Final list rows 3, 4, 8; ADR-7, ADR-25; PRD FR-30. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when the three `SKILL.md` files are checked, then each meets the contract with the exact keys of rows 3, 4 and 8; `architecture-boundary-fixer` and `architecture-model-sync` carry `## Repository precedence`.
+- Given `architecture-boundary-fixer`, when read, then it resolves findings of `make.architecture`, `make.check_crate_isolation` and `make.unused_dependencies` by moving code between layers or contexts, holds `quality.max_architecture_violations` at 0, and never edits `architecture.toml` allow-lists: when `capabilities.protected_config` is true such a change escalates with `approved-config-change` and `ALLOW_PROTECTED_CONFIG_EDIT=1` named only in the escalation text.
+- Given `architecture-model-sync`, when read, then it keeps one `workspace.dsl` component per crate and one relationship per dependency edge, proves it with `make.validate_architecture_model`, and its gating section names `SKIPPED: capabilities.structurizr is false`.
+- Given `clean-architecture-llm`, when read, then it states the layer responsibilities from `architecture.layers`, the dependency rule (domain framework- and I/O-free), the composition root at `architecture.composition_root`, and verification through `make.architecture`.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/architecture-boundary-fixer/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/architecture-model-sync/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/clean-architecture-llm/SKILL.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30 (NFR-2, NFR-5)
+
+**Verification:**
+
+- `v_lint_wave 'skills/(architecture-boundary-fixer|architecture-model-sync|clean-architecture-llm)/'`
+- `S="plugins/rust-backend-sdlc/skills/architecture-boundary-fixer/SKILL.md plugins/rust-backend-sdlc/skills/architecture-model-sync/SKILL.md plugins/rust-backend-sdlc/skills/clean-architecture-llm/SKILL.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S`
+
+### Story 4.3: Domain and layout skills: `implementing-ddd-architecture` and `code-organization`
+
+As a feature engineer writing domain code,
+I want the DDD skill with its reference and the code-organization skill with its directory structure,
+So that aggregates, value objects, errors, ports, crates, modules and test files land where the template expects them.
+**Read:** § Skill Library › Final list rows 9, 15; PRD FR-30, FR-23 (rule tokens). **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when both `SKILL.md` files are checked, then each meets the contract with the exact keys of rows 9 and 15, and links its supporting file (`REFERENCE.md`, `DIRECTORY-STRUCTURE.md`) relatively.
+- Given `implementing-ddd-architecture` and `REFERENCE.md`, when read, then they cover aggregates, value objects, domain errors as `thiserror` enums (no type named `Error`), ports including `Clock` and `UuidGenerator` instead of `SystemTime::now`, `Instant::now` and `Uuid::new_v4`, pure domain crates (only `async-trait`, `thiserror`, `uuid`, shared domain), with every example written for `<group>/<context>` and `<Entity>`.
+- Given `code-organization` and `DIRECTORY-STRUCTURE.md`, when read, then they cover `<context>-<layer>` crate names under `architecture.crates_root`, the composition root, shared crates from `architecture.shared_crates`, sibling `tests.rs` unit tests, integration tests in `<crate>/tests/integration/main.rs`, no `mod.rs`, and the law "a directory named for a type holds only that type", with no template sample context name anywhere.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/implementing-ddd-architecture/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/implementing-ddd-architecture/REFERENCE.md`
+- `plugins/rust-backend-sdlc/skills/code-organization/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/code-organization/DIRECTORY-STRUCTURE.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30 (NFR-2)
+
+**Verification:**
+
+- `v_lint_wave 'skills/(implementing-ddd-architecture|code-organization)/'`
+- `S="plugins/rust-backend-sdlc/skills/implementing-ddd-architecture plugins/rust-backend-sdlc/skills/code-organization"; v_md $S/*.md && v_keys plugins/rust-backend-sdlc/skills/implementing-ddd-architecture/SKILL.md plugins/rust-backend-sdlc/skills/code-organization/SKILL.md && v_p17 $S/*.md && v_cmdtok $S/*.md`
+
+### Story 4.4: BMAD skills: `bmad-autonomous-planning` and `bmad-fr-nfr-review-gate`
+
+As a feature engineer driving the loop,
+I want the planning skill that writes a bmalph-ready bundle without prompts and the gate skill that drives the FR/NFR gate to zero new findings,
+So that the plan stage feeds Ralph through `## Constraints` and the review stage closes every requirement.
+**Read:** § Skill Library › Final list rows 5, 6; § Command Contracts › `/rs-sdlc-plan`; ADR-10, ADR-21; PRD FR-16, FR-35, FR-30. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when both `SKILL.md` files are checked, then each meets the contract with the exact keys of rows 5 and 6; `bmad-autonomous-planning` carries `## Repository precedence`.
+- Given `bmad-autonomous-planning`, when read, then it writes `specs/<N>-<kebab-title>/` (never under `_bmad-output/`, never through the BMAD wrapper commands, no interactive prompt) with `research.md`, `product-brief.md`, `prd.md` (H2s `Executive Summary`, `Functional Requirements`, `Non-Functional Requirements`, `Product Scope`), `architecture.md` (`## Tech Stack` naming only the Rust toolchain and crates; `## Constraints` at most 4,500 characters from its heading to the next level-2 heading, starting with part (a) the commit convention with the literal `(#<N>)` and the `story N.M` subject form, then part (b) the story-dispatch rule naming the DB-free keys `make.format`, `make.lint_code`, `make.unit_tests`, `make.architecture`, `make.complexity` and the DB-backed keys `make.setup_test_db`, `make.integration_tests`, `make.tests_with_coverage`, `make.e2e_tests`, `make.sqlx_prepare` with both ADR-21 branches), `epics.md` (`## Epic N: Title`, `### Story N.M: Title`, `**Acceptance Criteria:**` with Given/When/Then, one `Depends on:` line per story), `implementation-readiness.md` (verdict "ready" or "needs work", never matching `/NO[-\s]?GO/i` when ready) and `run-summary.md`, plus story 1 "Scaffold `<group>/<context>`" when a needed context is absent from `[workspace].members` (`architecture.bounded_contexts` is informational).
+- Given `bmad-fr-nfr-review-gate`, when read, then it drives the gate loop to `FR_NFR_NEW_FINDINGS: 0` within 5 iterations, uses the target mapped by `make.fr_nfr_gate` when non-null and otherwise the plugin's bundled gate run by the FR/NFR lens (no script path in the skill), names the seven baseline ids and the status context `BMAD FR/NFR Review Gate`, diffs against `ci.base_ref`, runs advisory when no PR exists (D11), and its publishing section names `SKIPPED: capabilities.publish_pr_comments is false`.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/bmad-autonomous-planning/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/bmad-fr-nfr-review-gate/SKILL.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30, FR-16 (NFR-2, NFR-6)
+
+**Verification:**
+
+- `v_lint_wave 'skills/bmad-(autonomous-planning|fr-nfr-review-gate)/'`
+- `S="plugins/rust-backend-sdlc/skills/bmad-autonomous-planning/SKILL.md plugins/rust-backend-sdlc/skills/bmad-fr-nfr-review-gate/SKILL.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S`
+- `grep -qF '4,500' plugins/rust-backend-sdlc/skills/bmad-autonomous-planning/SKILL.md`
+
+### Story 4.5: Review and quality skills: `code-review`, `quality-standards`, `complexity-management`
+
+As a reviewer,
+I want the review protocol with its finding format, the catalogue of the 12 bars and the complexity refactoring skill,
+So that findings are uniform, every bar is measured from its protected source, and complexity is fixed by refactoring, never by raising limits.
+**Read:** § Skill Library › Final list rows 10, 11, 18; § Project Profile Schema › Quality bars; ADR-7, ADR-16; PRD FR-30, NFR-4. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when the three `SKILL.md` files are checked, then each meets the contract with the exact keys of rows 10, 11 and 18; `complexity-management` and `quality-standards` carry `## Repository precedence`.
+- Given `code-review`, when read, then it defines the review protocol, the ADR-16 finding fields (`id`, `severity` ∈ `Critical High Medium Low Info`, `file`, `line`, `rule`, `summary`, `status`) with the final fenced `json` block, ledger and PR-comment publishing through the target mapped by `make.post_review_findings` or the bundled poster, `quality.max_clippy_findings` at 0, the diff against `ci.base_ref`, never proposing a suppression, and a publishing section naming `SKIPPED: capabilities.publish_pr_comments is false`.
+- Given `quality-standards`, when read, then it lists all 12 `quality.*` bars with their protected source, gate target and measurement method of § Quality bars, reads the gate order at runtime through `make.ci_list`, and states the tighten-only rule with P6 tokens only on prohibition lines.
+- Given `complexity-management`, when read, then it refactors to the `clippy.toml` limits quoted at runtime (cognitive complexity, function lines, arguments, nesting), holds `quality.max_complexity_violations` at 0 through `make.complexity`, and never raises a limit or adds an `#[expect]` for a complexity lint.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/code-review/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/quality-standards/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/complexity-management/SKILL.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30 (NFR-4, NFR-9)
+
+**Verification:**
+
+- `v_lint_wave 'skills/(code-review|quality-standards|complexity-management)/'`
+- `S="plugins/rust-backend-sdlc/skills/code-review/SKILL.md plugins/rust-backend-sdlc/skills/quality-standards/SKILL.md plugins/rust-backend-sdlc/skills/complexity-management/SKILL.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S`
+
+### Story 4.6: Testing and verification skills: `testing-workflow` and `verification-workflow`
+
+As a feature engineer proving a change,
+I want the testing skill (unit, integration, e2e, coverage, mutation) and the verification skill (stage-by-stage gates, container mode, background polling),
+So that every test level and gate runs the template's way without ever exceeding the tool-call limit.
+**Read:** § Skill Library › Final list rows 21, 22; ADR-13; § Command Contracts › Shared command contract (the two sentences); PRD FR-1 (raw call 3), FR-30. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when both `SKILL.md` files are checked, then each meets the contract with the exact keys of rows 21 and 22 and the `## Repository precedence` second H2.
+- Given `testing-workflow`, when read, then it covers sibling `tests.rs` unit tests, `<crate>/tests/integration/main.rs`, cucumber e2e under `features/`, coverage floors `quality.coverage_lines`/`quality.coverage_functions` through `make.tests_with_coverage`, deterministic seeds `TEST_SEED` and `PROPTEST_RNG_SEED`, the single raw form `env -u DATABASE_URL scripts/with-env.sh .env .env.test -- cargo nextest run -p <crate> <name>` after `make.setup_test_db`, DB-backed targets serialized, a mutation section (`make.mutation_tests_diff`, `quality.max_surviving_mutants`) naming `SKIPPED: capabilities.mutation_testing is false`, and a load section naming `SKIPPED: capabilities.load_testing is false`.
+- Given `verification-workflow`, when read, then it runs the gates stage by stage (`make.ci_preflight`, `make.ci_static_analysis`, `make.ci_tests`, `make.ci_contracts`, `make.ci_mutation`, `make.ci_delivery`), never `make ci` in one call, reads the order through `make.ci_list`, covers container mode from `capabilities.run_in_container`, classifies a Docker-less target by the template message as `not run (no Docker)` with `make.doctor` output, and carries the background sentence and the container-precondition sentence verbatim (never a bare `sleep` or a trailing `&`).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/testing-workflow/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/verification-workflow/SKILL.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30, FR-1 (NFR-4, NFR-14)
+
+**Verification:**
+
+- `v_lint_wave 'skills/(testing|verification)-workflow/'`
+- `S="plugins/rust-backend-sdlc/skills/testing-workflow/SKILL.md plugins/rust-backend-sdlc/skills/verification-workflow/SKILL.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S && v_suffix $S`
+- `v_sent plugins/rust-backend-sdlc/skills/verification-workflow/SKILL.md`
+
+### Story 4.7: Persistence skills: `database-migrations`, `query-performance-analysis`, `cache-management`
+
+As a feature engineer touching storage,
+I want skills for reversible sqlx migrations, PostgreSQL query performance and port-based caching with examples,
+So that schema changes ship with their metadata, queries stay fast, and caches never leak into the domain.
+**Read:** § Skill Library › Final list rows 7, 12, 19; § Degrade Matrix D13; PRD FR-30, FR-23 (co-change rules), NFR-5. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when the three `SKILL.md` files are checked, then each meets the contract with the exact keys of rows 7, 12 and 19, and `cache-management` links `examples/cache-implementation.md` and `examples/cache-testing.md` relatively.
+- Given `database-migrations`, when read, then it adds a reversible migration under `persistence.migrations_dir` with `make create-migration name=<snake_case>` (the target mapped by `make.create_migration`), applies it with `make.migrate`, runs `make.migrate_rollback` once (a template `ask` rule, recorded `not run (ask rule)` in headless runs, D13), regenerates `.sqlx/` with `make.sqlx_prepare` and commits it with the migration when `persistence.offline_metadata` is true, proves it with `make.validate_sqlx_metadata`, never edits an applied migration, and its gating section names `SKIPPED: persistence.engine is null`.
+- Given `query-performance-analysis`, when read, then it covers `EXPLAIN (ANALYZE, BUFFERS)` on PostgreSQL, indexes, N+1 avoidance, statement timeouts, compile-time-checked `query!` macros with offline metadata, evidence from `make.integration_tests`, and the skip path `SKIPPED: persistence.engine is null`.
+- Given `cache-management` and its two examples, when read, then a cache sits behind a port in the infrastructure layer, expiry goes through the `Clock` port, commands invalidate, the domain holds no cache, tests run through `make.unit_tests` and `make.tests_with_coverage`, and the examples use `<group>/<context>` and `<Entity>` only.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/database-migrations/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/query-performance-analysis/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/cache-management/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/cache-management/examples/cache-implementation.md`
+- `plugins/rust-backend-sdlc/skills/cache-management/examples/cache-testing.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30 (NFR-2, NFR-5)
+
+**Verification:**
+
+- `v_lint_wave 'skills/(database-migrations|query-performance-analysis|cache-management)/'`
+- `S="plugins/rust-backend-sdlc/skills/database-migrations/SKILL.md plugins/rust-backend-sdlc/skills/query-performance-analysis/SKILL.md plugins/rust-backend-sdlc/skills/cache-management/SKILL.md"; v_md $S plugins/rust-backend-sdlc/skills/cache-management/examples/*.md && v_keys $S && v_p17 $S && v_cmdtok $S`
+
+### Story 4.8: Documentation and configuration skills: `documentation-creation`, `documentation-sync`, `configuration-management`
+
+As a feature engineer changing behaviour or configuration,
+I want skills for writing new docs, keeping docs in step with the code and adding configuration the template's way,
+So that docs-check stays green and no setting bypasses the composition root.
+**Read:** § Skill Library › Final list rows 13, 14, 28; PRD FR-30, FR-31 (configuration-management tokens). **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when the three `SKILL.md` files are checked, then each meets the contract with the exact keys of rows 13, 14 and 28; `documentation-sync` carries `## Repository precedence`.
+- Given `documentation-creation`, when read, then it writes new service documentation named from `project.name` that passes the docs-check rules (cited targets exist, slash commands have files, backticked paths exist or are ignored, no gate-target lists outside the verification markers) proven by `make.docs_check`.
+- Given `documentation-sync`, when read, then it keeps docs in step with commands, make targets (service-owned targets in `make/service.mk` plus `docs/make-targets-service.md`, never the template Makefile), environment variables and endpoints, proven by `make.docs_check` and `make.validate_invariants`.
+- Given `configuration-management`, when read, then it contains the FR-31 tokens: configuration through `crates/service/src/{cli,config}.rs` (clap) under `architecture.composition_root`, `.env` and `.env.test`, never `std::env::var`, a `docs/environment.md` row for every `?=` variable and environment variable (docs-check rule 5), secrets never committed, `scripts/with-env.sh`, and the port from `service.port`.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/documentation-creation/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/documentation-sync/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/configuration-management/SKILL.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30, FR-31 (NFR-13, NFR-15)
+
+**Verification:**
+
+- `v_lint_wave 'skills/(documentation-creation|documentation-sync|configuration-management)/'`
+- `S="plugins/rust-backend-sdlc/skills/documentation-creation/SKILL.md plugins/rust-backend-sdlc/skills/documentation-sync/SKILL.md plugins/rust-backend-sdlc/skills/configuration-management/SKILL.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S`
+- `grep -qF 'std::env::var' plugins/rust-backend-sdlc/skills/configuration-management/SKILL.md && grep -qF 'docs/environment.md' plugins/rust-backend-sdlc/skills/configuration-management/SKILL.md`
+
+### Story 4.9: Load-testing skill with references
+
+As a feature engineer adding an endpoint with a latency budget,
+I want the K6 load-testing skill and its five reference files,
+So that scenarios and budgets are added the template's way and the smoke budget is never relaxed.
+**Read:** § Skill Library › Final list row 16; § Project Profile Schema › Quality bars row `quality.max_smoke_budget_breaches`; PRD FR-30. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when `skills/load-testing/SKILL.md` is checked, then it meets the contract with the exact keys of row 16, carries `## Repository precedence`, and links all five `reference/*.md` files relatively.
+- Given the skill, when read, then its gating section names `SKIPPED: capabilities.load_testing is false`; scenarios live under `tests/Load/`, smoke runs through `make.smoke_load_tests` (review records `not run (deferred to PR CI)`), `make.load_tests` is guidance only and never run by a command, and the budget is quoted from the protected `tests/Load/config.json.dist`, holding `quality.max_smoke_budget_breaches` at 0 and never relaxing a threshold.
+- Given `reference/configuration.md`, `reference/graphql-patterns.md`, `reference/rest-api-patterns.md`, `reference/troubleshooting.md` and `reference/utils-extensions.md`, when read, then each is generalized (endpoints written as `<path>`, values only in `# profile-example` fences), relative links resolve, and each passes markdownlint.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/load-testing/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/load-testing/reference/configuration.md`
+- `plugins/rust-backend-sdlc/skills/load-testing/reference/graphql-patterns.md`
+- `plugins/rust-backend-sdlc/skills/load-testing/reference/rest-api-patterns.md`
+- `plugins/rust-backend-sdlc/skills/load-testing/reference/troubleshooting.md`
+- `plugins/rust-backend-sdlc/skills/load-testing/reference/utils-extensions.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30 (NFR-4)
+
+**Verification:**
+
+- `v_lint_wave 'skills/load-testing/'`
+- `v_md plugins/rust-backend-sdlc/skills/load-testing/SKILL.md plugins/rust-backend-sdlc/skills/load-testing/reference/*.md && v_keys plugins/rust-backend-sdlc/skills/load-testing/SKILL.md && v_p17 plugins/rust-backend-sdlc/skills/load-testing/SKILL.md plugins/rust-backend-sdlc/skills/load-testing/reference/*.md && v_cmdtok plugins/rust-backend-sdlc/skills/load-testing`
+- `! grep -rniE 'vilnacrm|rust-service-template' plugins/rust-backend-sdlc/skills/load-testing/reference`
+
+### Story 4.10: Security and observability skills
+
+As a reviewer and a feature engineer,
+I want the OWASP-family security audit skill with its three references and the tracing observability skill,
+So that every Rust-specific attack family is checked by reproduction and every handler is traceable without leaking data.
+**Read:** § Skill Library › Final list rows 17, 20; § Agent Contracts row `security-auditor`; PRD FR-29 (families), FR-30, NFR-10. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when both `SKILL.md` files are checked, then each meets the contract with the exact keys of rows 17 and 20, and `security-audit` links `reference/attack-playbooks.md`, `reference/owasp-catalog.md` and `reference/remediation-patterns.md` relatively.
+- Given `security-audit`, when read, then it covers the families injection (sqlx `query!` macros versus string-built SQL), BOLA/IDOR, mass assignment (`deny_unknown_fields`), DoS (body limit, timeouts, GraphQL depth and complexity), information disclosure (problem details, logs), secrets in code and configuration, dependency advisories, and memory safety recorded N/A under `unsafe_code = "forbid"`; static lanes `make.check_security`, `make.secrets_scan`, `make.image_scan` with `quality.max_dependency_policy_findings` and `quality.max_image_vulnerabilities_high_critical` at 0; verification by reproduction, with dynamic probes only through `common.sh http_probe` on `service.base_url` and a gating section naming `SKIPPED: capabilities.dynamic_security_testing is false`.
+- Given `observability-instrumentation`, when read, then it covers `tracing` spans and structured fields, `request_id` correlation with the `x-request-id` header, no PII or secrets in logs, JSON logs through `tracing-subscriber`, the health probes at `service.liveness_path` and `service.readiness_path`, tests through `make.unit_tests`, and no metrics backend selector.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/security-audit/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/security-audit/reference/attack-playbooks.md`
+- `plugins/rust-backend-sdlc/skills/security-audit/reference/owasp-catalog.md`
+- `plugins/rust-backend-sdlc/skills/security-audit/reference/remediation-patterns.md`
+- `plugins/rust-backend-sdlc/skills/observability-instrumentation/SKILL.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30 (NFR-10)
+
+**Verification:**
+
+- `v_lint_wave 'skills/(security-audit|observability-instrumentation)/'`
+- `S="plugins/rust-backend-sdlc/skills/security-audit/SKILL.md plugins/rust-backend-sdlc/skills/observability-instrumentation/SKILL.md"; v_md $S plugins/rust-backend-sdlc/skills/security-audit/reference/*.md && v_keys $S && v_p17 $S plugins/rust-backend-sdlc/skills/security-audit/reference/*.md && v_cmdtok $S`
+- `! grep -rnE 'curl http' plugins/rust-backend-sdlc/skills/security-audit`
+
+### Story 4.11: Rust language skills: `rust-error-handling`, `async-runtime-safety`, `dependency-policy`
+
+As a feature engineer writing Rust,
+I want skills for the error model, async safety and dependency policy,
+So that errors reach clients as problem details, async code never blocks or deadlocks, and dependencies pass cargo-deny and cargo-shear.
+**Read:** § Skill Library › Final list rows 25, 26, 27; PRD FR-31 (tokens), FR-1 (raw call 1), FR-30. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when the three `SKILL.md` files are checked, then each meets the contract with the exact keys of rows 25, 26 and 27.
+- Given `rust-error-handling`, when read, then it contains the FR-31 tokens: domain `thiserror` enums with `property_path()` and `code()`, one application error enum per context, `BusError` → `Problem` with types `about:blank`, `/problems/validation-failed` (`violations[]`) and `/problems/dependency-unavailable` (`failures[]`), `?` propagation, banned `unwrap`, `expect`, `panic`, indexing and `as` in production code, no type named `Error`, the `#[expect(lint, reason = "…")]` policy (never in crate roots or for complexity lints), static analysis through `make.static_analysis`, and a GraphQL error section (`extensions.code` `VALIDATION_FAILED`, `INTERNAL_SERVER_ERROR`) naming `SKIPPED: framework.graphql is false`.
+- Given `async-runtime-safety`, when read, then it contains the FR-31 tokens: no blocking calls in async code (`std::fs`, `std::thread::sleep`, synchronous DNS) → `tokio` equivalents or `spawn_blocking`, no lock guard held across `.await`, cancellation safety and timeouts, `#[async_trait]` methods delegating to an inherent `async fn`, `Clock`/`UuidGenerator` ports, `Arc::clone(&x)`, verified through `make.static_analysis`, `make.unit_tests` and `make.integration_tests`.
+- Given `dependency-policy`, when read, then it contains the FR-31 tokens: `deny.toml` lanes (advisories, licences, bans, sources) through `make.check_security`, `cargo shear` through `make.unused_dependencies`, per-layer allow-lists in `architecture.toml` (protected: escalate when `capabilities.protected_config`), the domain dependency whitelist, RUSTSEC without a fixed version → escalate, diagnosis with `cargo tree -i <crate>`, workspace inheritance, and both ceilings at 0.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/rust-error-handling/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/async-runtime-safety/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/dependency-policy/SKILL.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-30, FR-31 (NFR-4, NFR-5)
+
+**Verification:**
+
+- `v_lint_wave 'skills/(rust-error-handling|async-runtime-safety|dependency-policy)/'`
+- `S="plugins/rust-backend-sdlc/skills/rust-error-handling/SKILL.md plugins/rust-backend-sdlc/skills/async-runtime-safety/SKILL.md plugins/rust-backend-sdlc/skills/dependency-policy/SKILL.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S`
+- `grep -qF 'property_path()' plugins/rust-backend-sdlc/skills/rust-error-handling/SKILL.md && grep -qF 'spawn_blocking' plugins/rust-backend-sdlc/skills/async-runtime-safety/SKILL.md && grep -qF 'cargo tree -i' plugins/rust-backend-sdlc/skills/dependency-policy/SKILL.md`
+
+### Story 4.12: Scaffolding skills: `service-scaffolding` and `bounded-context-scaffolding`
+
+As a service creator and as a feature engineer adding a context,
+I want skills that capture the new-service sequence with its traps and the bounded-context checklist with its gate set,
+So that the two lifecycle commands and in-loop scaffold stories follow one tested recipe.
+**Read:** § Skill Library › Final list rows 23, 24; § Command Contracts › `/rs-sdlc-new-service`, `/rs-sdlc-new-context`; product brief § Three entry points (S1–S14 and C1–C12 tables); PRD FR-31. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given SC-SKILL, when both `SKILL.md` files are checked, then each meets the contract with the exact keys of rows 23 and 24.
+- Given `service-scaffolding`, when read, then it contains the FR-31 tokens: S1–S14 in order with their EXECUTED/NEXT conditions, the `is_template` probe and clone-and-push, OpenAPI title `<description> API` (regenerate the snapshot through `make.generate_openapi_spec` before the first PR), checkout directory = Compose project (`project.name`), version only through `scripts/set-version.sh`, keep the example context with removal as a guided story (edit the three docs-check rule-3 lines, update `.templatesyncignore`, replace and never delete the GraphQL roots, regenerate snapshots), the sync flavour from `template.sync_flavour`, local mode with `base_ref=HEAD` until `origin/main` exists, and `make.bootstrap`/`make.doctor` under `capabilities.run_in_container`.
+- Given `bounded-context-scaffolding`, when read, then it contains the FR-31 tokens: name rules (`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, reserved context names `shared service xtask test-support e2e-tests`, reserved words legal as a group, the xtask existence rule over the live tree in any group: `crates/<c>`, member path or package name), C1–C12 with their evidence targets, one `workspace.dsl` component per crate and one relationship per dependency edge, `[workspace.dependencies]` entries added at first use (cargo-deny `unused = "deny"`), the composition-root wiring points including the `Adapters { .. }` literals and the contract-pinning tests, the context gate set `make.ci_preflight` … `make.ci_delivery` (never `ci-cli`) then `make.validate_configuration`, the branch rule, and the in-loop story-1 variant.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/service-scaffolding/SKILL.md`
+- `plugins/rust-backend-sdlc/skills/bounded-context-scaffolding/SKILL.md`
+
+**Depends on:** 1.9
+
+**FRs:** FR-31, FR-30 (NFR-2)
+
+**Verification:**
+
+- `v_lint_wave 'skills/(service|bounded-context)-scaffolding/'`
+- `S="plugins/rust-backend-sdlc/skills/service-scaffolding/SKILL.md plugins/rust-backend-sdlc/skills/bounded-context-scaffolding/SKILL.md"; v_md $S && v_keys $S && v_p17 $S && v_cmdtok $S`
+- `grep -qF 'Adapters { .. }' plugins/rust-backend-sdlc/skills/bounded-context-scaffolding/SKILL.md && grep -qF 'scripts/set-version.sh' plugins/rust-backend-sdlc/skills/service-scaffolding/SKILL.md`
+
+### Story 4.13: Skill decision guide
+
+As a reviewer running triage,
+I want one decision guide that maps every change class to the skills it needs,
+So that 28 verdicts are recorded from frontmatter and the guide alone and only the needed bodies are loaded.
+**Read:** § Skill Library › Meta-guides (`SKILL-DECISION-GUIDE.md`); ADR-5, ADR-11; PRD FR-32, AC-19.3, AC-32.1, AC-32.2, NFR-12. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given `skills/SKILL-DECISION-GUIDE.md`, when read, then it has no frontmatter (L5), contains the sentence "The gate contract is: every skill verdict recorded, no silent skips." (L30), and states the triage protocol: verdicts from frontmatter plus this guide, bodies and reference files only on `EXECUTE`, counterpart pairs counted once with source `repo+plugin`, `code-review` and `quality-standards` always `EXECUTE`.
+- Given the decision tree, when read, then it covers the change classes Rust source per layer, `crates/service` wiring, manifest/lock, migration, contract, workflow/docs-only, new context and new service, and the docs-only class marks exactly 6 skills `EXECUTE`: `documentation-sync`, `documentation-creation`, `code-review`, `quality-standards`, `verification-workflow`, `bmad-fr-nfr-review-gate` (AC-19.3, NFR-12).
+- Given the table `| skill | EXECUTE when | NOT APPLICABLE when |`, when compared with `skills/*/`, then it has exactly one row per skill directory (28 rows, names equal) (AC-32.2).
+- Given the whole skill wave, when lint runs over `skills/`, then it reports 0 findings including L21 (every relative link from a `SKILL.md`, e.g. `../SKILL-DECISION-GUIDE.md`, resolves) and L24, and the guide names no plugin agent as a backticked agent (the agent roster lives in `AI-AGENT-GUIDE.md`, Story 5.6).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/skills/SKILL-DECISION-GUIDE.md`
+
+**Depends on:** 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 4.10, 4.11, 4.12
+
+**FRs:** FR-32, FR-19 (NFR-12)
+
+**Verification:**
+
+- `v_lint 'skills/'`
+- `v_md plugins/rust-backend-sdlc/skills/SKILL-DECISION-GUIDE.md && v_cmdtok plugins/rust-backend-sdlc/skills/SKILL-DECISION-GUIDE.md`
+- `head -1 plugins/rust-backend-sdlc/skills/SKILL-DECISION-GUIDE.md | { ! grep -qx -- '---'; } && grep -qF 'every skill verdict recorded, no silent skips' plugins/rust-backend-sdlc/skills/SKILL-DECISION-GUIDE.md`
+- `for d in plugins/rust-backend-sdlc/skills/*/; do n=$(basename "$d"); grep -qE "^\| \`?$n\`? \|" plugins/rust-backend-sdlc/skills/SKILL-DECISION-GUIDE.md || echo "no row $n"; done | { ! grep .; }`
+
