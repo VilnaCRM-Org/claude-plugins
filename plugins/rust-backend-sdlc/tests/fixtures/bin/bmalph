@@ -91,7 +91,7 @@ run_implement() {
     fi
     exit "$STUB_BMALPH_EXIT"
   fi
-  template="$(stub_dir)/../ralph/AGENT.md.tpl"
+  template="$STUB_DIR/../ralph/AGENT.md.tpl"
   if [[ ! -f "$staged/epics.md" ]]; then
     printf 'Error: no epics.md in %s/\n' "$staged" >&2
     exit 1
@@ -121,6 +121,9 @@ run_implement() {
   fi
   exit 0
 }
+
+# Resolved before any -C changes the working directory (BASH_SOURCE may be relative).
+STUB_DIR="$(stub_dir)"
 
 # Global options precede the command, as in bmalph's CLI.
 while [[ $# -gt 0 ]]; do

@@ -6,9 +6,9 @@
 #                     call that exits 0 prints a canned `HTTP/1.1 200` response in
 #                     the `-i` form (CRLF header lines, then a JSON body) and a call
 #                     with a non-zero exit prints a connection error on stderr
-#   STUB_CURL_LOG     append-log (default: off): one `curl <argv>` line per call; a
-#                     call that sends `@-` as data (`--data-binary @-`, `--data @-`,
-#                     `-d @-`) then adds the stdin it read
+#   STUB_CURL_LOG     append-log of `curl <argv>` per call                 (default: off)
+# A call that sends `@-` as data (`--data-binary @-`, `--data @-`, `-d @-`) reads its
+# stdin to the end, as curl does, so a producer piping a body never dies of SIGPIPE.
 set -euo pipefail
 
 log="${STUB_CURL_LOG:-}"
@@ -30,10 +30,7 @@ for arg in "$@"; do
   prev="$arg"
 done
 if [[ "$reads_body" == 1 ]]; then
-  body="$(cat)"
-  if [[ -n "$log" ]]; then
-    printf '%s\n' "$body" >>"$log"
-  fi
+  cat >/dev/null
 fi
 
 code="${STUB_CURL_EXIT:-0}"
@@ -42,7 +39,7 @@ if [[ -n "${STUB_CURL_OUTPUT:-}" ]]; then
 elif [[ "$code" == 0 ]]; then
   printf 'HTTP/1.1 200 OK\r\n'
   printf 'content-type: application/json\r\n'
-  printf 'content-length: 15\r\n'
+  printf 'content-length: 16\r\n'
   printf '\r\n'
   printf '{"status":"ok"}\n'
 else

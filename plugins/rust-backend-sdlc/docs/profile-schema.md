@@ -266,19 +266,11 @@ Rule for every row: the review row is PASS when the gate target exits 0 **and** 
 | `quality.max_image_vulnerabilities_high_critical` | 0 | lower-only ceiling | `TRIVY_FLAGS = --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore` | `make.image_scan` | exit-based | `security-auditor` image lane; finish-pr via check `Production-image scan` |
 | `quality.max_smoke_budget_breaches` | 0 | lower-only ceiling | `tests/Load/config.json.dist` `/endpoints/health/smoke/threshold` (protected JSON value), `thresholdsBuilder.js` | `make.smoke_load_tests` | exit-based | finish-pr via check `Smoke load tests`; review records `not run (deferred to PR CI)` |
 
-**Looser-gate `WARN`.** `generate-profile.sh` always emits the defaults. When the repository's own gate is looser than the template value it keeps the default and prints on stderr
-
-```text
-[rust-sdlc][WARN] <file> <setting> is looser than the template value <v>; the profile keeps <default>
-```
-
-for: the `COVERAGE_GATE_CMD` floors in `make/gates.mk`, the four `clippy.toml` thresholds (`cognitive-complexity-threshold`, `too-many-lines-threshold`, `too-many-arguments-threshold`, `excessive-nesting-threshold`), `SPECTRAL_FLAGS`, `OASDIFF_FLAGS` and the `TRIVY_FLAGS` severities. The generator never lowers a bar; a relaxed repository gate is a protected-configuration change the plugin reports and never makes.
+**Looser-gate `WARN`.** `generate-profile.sh` always emits the defaults. When the repository's own gate is looser than the template value it keeps the default and prints `[rust-sdlc][WARN] <file> <setting> is looser than the template value <v>; the profile keeps <default>` on stderr for: the `COVERAGE_GATE_CMD` floors in `make/gates.mk`, the four `clippy.toml` thresholds (`cognitive-complexity-threshold`, `too-many-lines-threshold`, `too-many-arguments-threshold`, `excessive-nesting-threshold`), `SPECTRAL_FLAGS`, `OASDIFF_FLAGS` and the `TRIVY_FLAGS` severities. The generator never lowers a bar; a relaxed repository gate is a protected-configuration change the plugin reports and never makes.
 
 ## Refresh and user-owned keys
 
-```text
-generate-profile.sh [--refresh] [--stdout] [--run-in-container true|false] [TARGET_DIR]
-```
+Usage: `generate-profile.sh [--refresh] [--stdout] [--run-in-container true|false] [TARGET_DIR]` (`TARGET_DIR` defaults to `$PWD`).
 
 Five keys are user-owned and keep a valid existing value on `--refresh`; every other key is re-detected:
 
@@ -339,11 +331,7 @@ Every file `generate-profile.sh` reads, every protected file a quality bar is de
 
 ## Validation
 
-```text
-validate-profile.sh [PROFILE_FILE]
-```
-
-`PROFILE_FILE` defaults to `$PWD/.claude/rust-sdlc.yml`. The file is converted once to JSON (mikefarah `yq` v4, or python3 with PyYAML; both give byte-identical output) and every rule runs in python3 over that JSON, so YAML types survive. The rules are checked in this order and all violations are reported; the validator writes nothing.
+Usage: `validate-profile.sh [PROFILE_FILE]`; `PROFILE_FILE` defaults to `$PWD/.claude/rust-sdlc.yml`. The file is converted once to JSON (mikefarah `yq` v4, or python3 with PyYAML; both give byte-identical output) and every rule runs in python3 over that JSON, so YAML types survive. The rules are checked in this order and all violations are reported; the validator writes nothing.
 
 | # | Rule | Violation line |
 | --- | --- | --- |
@@ -361,6 +349,15 @@ validate-profile.sh [PROFILE_FILE]
 | V12 | every non-null `make.<key>` equals `<key>` with `_` replaced by `-` (the PA-2 identity mapping the generator emits; the four SUBST keys included, so a SUBST value can never name a template gate) | `VIOLATION: make.<k>: must be null or '<k with - for _>' (<value>)` |
 
 Output ends with `VALID: <path>` (exit 0) or `INVALID: <path>: <n> violation(s)` (exit 1). Usage errors exit 2. Every command except `/rs-sdlc-setup` and `/rs-sdlc-new-service` runs the validator as its first step and halts on `INVALID:`.
+
+## For component authors
+
+- Refer to a value only by its full dotted key in backticks (`service.port`, `make.tests_with_coverage`), never by a concrete value; concrete values appear only inside fences whose opening line carries `# profile-example`.
+- List every consumed key under the first H2 `## Profile keys consumed` of a skill or agent. The list holds keys only, never file names, and the body uses no other dotted key.
+- Read a `make.*` key before running its target; `null` means the capability is absent and the component takes its documented skip or degrade path. For the four `SUBST` keys, `null` routes to the bundled script.
+- Read lists the template defines (gate order, protected files, required checks) at runtime through `make.ci_list`, `cargo xtask config-guard --list` and `docs/repository-settings.md`; never restate them.
+- Placeholder forms `make.<key>`, `quality.<key>` and `capabilities.<key>` name any key of their group in generic prose, for example a gating section's skip path (`SKIPPED: <reason>` when `capabilities.<key>` is false). They are not keys and the generator never emits them.
+- A key consumed by a component but absent from this page fails `profile-keys-check` and `tests/component-counts.bats`; add a key only through the schema-change rule in [Conventions](#conventions).
 
 ## Annotated example
 
@@ -561,11 +558,3 @@ capabilities:
   protected_config: true
   template_sync: true
 ```
-
-## For component authors
-
-- Refer to a value only by its full dotted key in backticks (`service.port`, `make.tests_with_coverage`), never by a concrete value; concrete values appear only inside fences whose opening line carries `# profile-example`.
-- List every consumed key under the first H2 `## Profile keys consumed` of a skill or agent. The list holds keys only, never file names, and the body uses no other dotted key.
-- Read a `make.*` key before running its target; `null` means the capability is absent and the component takes its documented skip or degrade path. For the four `SUBST` keys, `null` routes to the bundled script.
-- Read lists the template defines (gate order, protected files, required checks) at runtime through `make.ci_list`, `cargo xtask config-guard --list` and `docs/repository-settings.md`; never restate them.
-- A key consumed by a component but absent from this page fails `profile-keys-check` and `tests/component-counts.bats`; add a key only through the schema-change rule in [Conventions](#conventions).
