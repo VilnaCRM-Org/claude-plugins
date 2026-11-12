@@ -382,47 +382,81 @@ function gatePrompt(iteration) {
   ].join('\n')
 }
 
+// The fields of a returned gate dispatch that the checks below read: the
+// runner as run, the non-blank degrade reasons and the blocking finding.
+function gateSignals(gate) {
+  const degraded = (Array.isArray(gate.degraded) ? gate.degraded : []).map((d) => clip(d)).filter(Boolean)
+  return {
+    blocked: gate.status === 'BLOCKED',
+    note: gate.note,
+    handle: gate.handle,
+    runner: clip(gate.gate_run || 'unknown runner', 120),
+    degraded,
+    reasons: degraded.join('; '),
+    blocking: gate.blocking_finding ? clip(gate.blocking_finding) : null,
+  }
+}
+
+const sourceMissing = ({ blocking, reasons }) => Boolean(blocking && /SPECS MISSING|REQUIREMENTS MISSING/.test(blocking)) || /planning bundle missing|no requirement source/i.test(reasons)
+const runnerNotRun = ({ blocking, reasons, runner }) => /gate runner unavailable/i.test(reasons) || Boolean(blocking && /\bnot run\b/.test(blocking)) || /^(SKIPPED|not run)/i.test(runner)
+
+// The halts of a returned dispatch, first match wins. A missing source is
+// checked before a missing runner: its "not run" runner text must not read as
+// a missing runner, and its remedy differs.
+const GATE_HALTS = [
+  {
+    applies: (s) => s.blocked,
+    halt: (s) => ({ what: 'BLOCKED', finding: `fr-nfr-reviewer BLOCKED — ${clip(s.note || 'plugin root not found')}`, action: 'install or enable the rust-backend-sdlc plugin (or set CLAUDE_PLUGIN_ROOT), then re-run' }),
+  },
+  {
+    applies: sourceMissing,
+    halt: ({ blocking, reasons }) => ({
+      what: `requirement source missing (${blocking || reasons})`,
+      finding: `fr-nfr-reviewer reported the requirement source ${requirementSource} missing or empty although the scope found it — ${blocking || reasons}`,
+      action: hasSpecs ? 'run /rs-sdlc-plan for the issue so the planning bundle is complete, then re-run' : 'restore the PR description or link the issue it implements (Closes #N), then re-run',
+    }),
+  },
+  {
+    applies: runnerNotRun,
+    halt: ({ blocking, runner }) => ({
+      what: `gate runner not run (${blocking || runner})`,
+      finding: `gate runner not run (${blocking || runner}) — no ${GATE_STATUS} status was posted, and the gate is mandatory and must be green on every PR`,
+      action: 'restore the gate runner (an executable fr-nfr-gate.sh under the plugin root, claude with --restricted and gh on PATH with gh auth, or the running container stack for a mapped make.fr_nfr_gate), then re-run; a manually built matrix never satisfies the gate',
+    }),
+  },
+]
+
+// The failed-run checks of a dispatch that did not halt, first match wins.
+// m is the parsed FR_NFR_REVIEWER line; the checks after the malformed-line
+// check run only on a parsed line.
+const RUN_FAILURES = [
+  {
+    applies: ({ blocking, reasons }) => Boolean(blocking) || /gate run failed/i.test(reasons),
+    failed: ({ blocking, reasons }) => (blocking ? `${reasons || 'gate run failed'} (${blocking})` : reasons),
+  },
+  { applies: ({ m }) => !m, failed: ({ handle }) => `malformed or missing FR_NFR_REVIEWER line "${clip(handle, 120)}"` },
+  { applies: ({ m, iteration }) => Number(m[1]) !== iteration, failed: ({ m, iteration }) => `FR_NFR_REVIEWER line names iteration ${m[1]}, expected ${iteration}` },
+  { applies: ({ m }) => (m[4] === 'PASS') !== (Number(m[3]) === 0), failed: ({ m }) => `contradictory FR_NFR_REVIEWER line (new_findings=${Number(m[3])} verdict=${m[4]})` },
+]
+
+// A dispatch that did not halt: a failed run, or the completed run with its
+// count and verdict (only a completed run turns its degrade reasons into notes).
+function gateRun(signals, iteration) {
+  const run = { ...signals, iteration, m: String(signals.handle ?? '').trim().match(HANDLE) }
+  const failure = RUN_FAILURES.find((check) => check.applies(run))
+  if (failure) return { failed: failure.failed(run) }
+  for (const d of signals.degraded) addNote(`iteration ${iteration}: ${d}`)
+  return { count: Number(run.m[3]), verdict: run.m[4] }
+}
+
 // Classifies one gate dispatch: a halt (escalation), a failed run (consumes
 // the iteration, never read as a count) or a completed run with its handle.
-// A missing source is checked first: its "not run" runner text must not read
-// as a missing runner, and its remedy differs.
 function gateOutcome(gate, iteration) {
   if (!gate) return { halt: { what: 'returned nothing', finding: 'fr-nfr-reviewer returned nothing', action: 're-run; if it repeats, check the rust-backend-sdlc:fr-nfr-reviewer agent definition' } }
-  const runner = clip(gate.gate_run || 'unknown runner', 120)
-  if (gate.status === 'BLOCKED') {
-    return { runner, halt: { what: 'BLOCKED', finding: `fr-nfr-reviewer BLOCKED — ${clip(gate.note || 'plugin root not found')}`, action: 'install or enable the rust-backend-sdlc plugin (or set CLAUDE_PLUGIN_ROOT), then re-run' } }
-  }
-  const degraded = (Array.isArray(gate.degraded) ? gate.degraded : []).map((d) => clip(d)).filter(Boolean)
-  const reasons = degraded.join('; ')
-  const blocking = gate.blocking_finding ? clip(gate.blocking_finding) : null
-  if ((blocking && /SPECS MISSING|REQUIREMENTS MISSING/.test(blocking)) || /planning bundle missing|no requirement source/i.test(reasons)) {
-    return {
-      runner,
-      halt: {
-        what: `requirement source missing (${blocking || reasons})`,
-        finding: `fr-nfr-reviewer reported the requirement source ${requirementSource} missing or empty although the scope found it — ${blocking || reasons}`,
-        action: hasSpecs ? 'run /rs-sdlc-plan for the issue so the planning bundle is complete, then re-run' : 'restore the PR description or link the issue it implements (Closes #N), then re-run',
-      },
-    }
-  }
-  if (/gate runner unavailable/i.test(reasons) || (blocking && /\bnot run\b/.test(blocking)) || /^(SKIPPED|not run)/i.test(runner)) {
-    return {
-      runner,
-      halt: {
-        what: `gate runner not run (${blocking || runner})`,
-        finding: `gate runner not run (${blocking || runner}) — no ${GATE_STATUS} status was posted, and the gate is mandatory and must be green on every PR`,
-        action: 'restore the gate runner (an executable fr-nfr-gate.sh under the plugin root, claude with --restricted and gh on PATH with gh auth, or the running container stack for a mapped make.fr_nfr_gate), then re-run; a manually built matrix never satisfies the gate',
-      },
-    }
-  }
-  if (blocking || /gate run failed/i.test(reasons)) return { runner, failed: blocking ? `${reasons || 'gate run failed'} (${blocking})` : reasons }
-  const m = String(gate.handle ?? '').trim().match(HANDLE)
-  if (!m) return { runner, failed: `malformed or missing FR_NFR_REVIEWER line "${clip(gate.handle, 120)}"` }
-  const count = Number(m[3])
-  if (Number(m[1]) !== iteration) return { runner, failed: `FR_NFR_REVIEWER line names iteration ${m[1]}, expected ${iteration}` }
-  if ((m[4] === 'PASS') !== (count === 0)) return { runner, failed: `contradictory FR_NFR_REVIEWER line (new_findings=${count} verdict=${m[4]})` }
-  for (const d of degraded) addNote(`iteration ${iteration}: ${d}`)
-  return { runner, count, verdict: m[4] }
+  const signals = gateSignals(gate)
+  const halting = GATE_HALTS.find((rule) => rule.applies(signals))
+  if (halting) return { runner: signals.runner, halt: halting.halt(signals) }
+  return { runner: signals.runner, ...gateRun(signals, iteration) }
 }
 
 function logConvergence(iteration, count) {
@@ -488,35 +522,61 @@ function verifyPrompt(keys, iteration) {
 }
 
 const BLOCKED_ACTION = 'resolve the blocker named above by hand (a protected configuration path needs approved-config-change and a session restarted with ALLOW_PROTECTED_CONFIG_EDIT=1), then re-run'
+const isBlocked = (r) => Boolean(r && r.status === 'BLOCKED')
+const isComplete = (r) => Boolean(r && r.status === 'COMPLETE')
 
-async function dispatchFixes(open, iteration) {
+// Groups the open findings by crates/<group>/<context> in first-seen order and
+// keeps the first MAX_GROUPS groups; the rest wait for the next gate iteration.
+function fixGroups(open, iteration) {
   const groups = new Map()
   for (const f of open) groups.set(groupKey(f), [...(groups.get(groupKey(f)) || []), f])
   const keys = [...groups.keys()].slice(0, MAX_GROUPS)
   if (groups.size > MAX_GROUPS) log(`iteration ${iteration}: fix fan-out capped at ${MAX_GROUPS} groups; ${groups.size - MAX_GROUPS} group(s) are left for the next gate iteration to re-detect`)
+  return { groups, keys }
+}
+
+function markDispatched(groups, keys) {
+  for (const key of keys) for (const f of groups.get(key)) dispatched.set(trackKey(f), labelOf(f))
+}
+
+// Journals a blocked fix group or verify step and escalates with its recommendation.
+function implementerBlocked(iteration, entry, step, reply) {
+  record(iteration, entry)
+  return escalate(iteration, `rust-implementer BLOCKED on ${step} — ${clip(reply.recommendation || 'no recommendation')}`, BLOCKED_ACTION)
+}
+
+// The end of a parallel round: the serialized verify step.
+async function verifyRoundEnd({ iteration, keys, ran, outcome }) {
+  const verify = await agent(verifyPrompt(keys, iteration), { label: `verify ${iteration}/${CAP}`, phase: 'Fix', agentType: IMPLEMENTER, schema: FIX_SCHEMA })
+  if (isBlocked(verify)) return { halt: implementerBlocked(iteration, `${ran}, verify -> ${outcome}, verify BLOCKED`, 'the serialized verify step', verify) }
+  if (!isComplete(verify)) log(`iteration ${iteration}: the verify step did not complete; the next gate iteration re-detects what is still unmet`)
+  return { journal: `${ran}, verify -> ${outcome}, verify ${verify ? verify.status : 'returned nothing'}` }
+}
+
+// The end of a serial round: the single group is the whole round.
+async function serialRoundEnd({ iteration, keys, ran, outcome, complete }) {
+  if (complete < keys.length) log(`iteration ${iteration}: the fix group did not complete; the next gate iteration re-detects what is still unmet`)
+  return { journal: `${ran} -> ${outcome}` }
+}
+
+// How a fix round ends, by mode: { halt } (an escalation) or { journal } (the
+// iteration's journal entry).
+const ROUND_END = { parallel: verifyRoundEnd, serial: serialRoundEnd }
+
+async function dispatchFixes(open, iteration) {
+  const { groups, keys } = fixGroups(open, iteration)
   const mode = keys.length > 1 ? 'parallel' : 'serial'
   const fixes = await parallel(
     keys.map((key) => () => agent(fixPrompt(groups.get(key), iteration, mode), { label: `fix:${key}`, phase: 'Fix', agentType: IMPLEMENTER, schema: FIX_SCHEMA })),
   )
   const ran = keys.map((k) => `fix:${k}`).join(', ')
-  const blockedAt = fixes.findIndex((r) => r && r.status === 'BLOCKED')
-  if (blockedAt >= 0) {
-    record(iteration, `${ran} -> BLOCKED on fix:${keys[blockedAt]}`)
-    return escalate(iteration, `rust-implementer BLOCKED on fix:${keys[blockedAt]} — ${clip(fixes[blockedAt].recommendation || 'no recommendation')}`, BLOCKED_ACTION)
-  }
-  for (const key of keys) for (const f of groups.get(key)) dispatched.set(trackKey(f), labelOf(f))
-  const complete = fixes.filter((r) => r && r.status === 'COMPLETE').length
-  let outcome = `${complete}/${keys.length} group(s) COMPLETE`
-  if (mode === 'parallel') {
-    const verify = await agent(verifyPrompt(keys, iteration), { label: `verify ${iteration}/${CAP}`, phase: 'Fix', agentType: IMPLEMENTER, schema: FIX_SCHEMA })
-    if (verify && verify.status === 'BLOCKED') {
-      record(iteration, `${ran}, verify -> ${outcome}, verify BLOCKED`)
-      return escalate(iteration, `rust-implementer BLOCKED on the serialized verify step — ${clip(verify.recommendation || 'no recommendation')}`, BLOCKED_ACTION)
-    }
-    outcome += `, verify ${verify ? verify.status : 'returned nothing'}`
-    if (!verify || verify.status !== 'COMPLETE') log(`iteration ${iteration}: the verify step did not complete; the next gate iteration re-detects what is still unmet`)
-  } else if (complete < keys.length) log(`iteration ${iteration}: the fix group did not complete; the next gate iteration re-detects what is still unmet`)
-  record(iteration, `${ran}${mode === 'parallel' ? ', verify' : ''} -> ${outcome}`)
+  const blockedAt = fixes.findIndex(isBlocked)
+  if (blockedAt >= 0) return implementerBlocked(iteration, `${ran} -> BLOCKED on fix:${keys[blockedAt]}`, `fix:${keys[blockedAt]}`, fixes[blockedAt])
+  markDispatched(groups, keys)
+  const complete = fixes.filter(isComplete).length
+  const end = await ROUND_END[mode]({ iteration, keys, ran, complete, outcome: `${complete}/${keys.length} group(s) COMPLETE` })
+  if (end.halt) return end.halt
+  record(iteration, end.journal)
   return null
 }
 
