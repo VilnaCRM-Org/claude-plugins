@@ -1,0 +1,918 @@
+#!/usr/bin/env bats
+# workflows.bats — cases of the four Workflow scripts under workflows/ (FR-44,
+# AC-44.1, AC-2.2, AC-3.4 b, AC-19.2, AC-21.2, ADR-18).
+#
+# Claude Code runs a workflow as a top-level-await script with agent(),
+# parallel(), pipeline(), phase(), log(), workflow(), args and budget in
+# scope. tests/lib/workflow-harness.mjs reproduces that contract in node and
+# answers every agent call from the scripted replies of one scenario file
+# under tests/fixtures/workflows/ (55 files: feat- 15, fnr- 15, pug- 17, rp- 8),
+# so every loop, counter, hand-back and escalation path is pinned without a
+# model in the loop. The suite proves control flow over mocked replies only:
+# it never observes what a real model does or how Ralph behaves.
+#
+# Layout: 11 static cases (the runtime rules every workflow file meets) and
+# one case per scenario file, which asserts the outcome the scenario's name
+# documents. Every scenario run also meets the shared contract of wf_contract
+# (exit 0, an outcome word, the 7-field block on ESCALATED and only there,
+# phases declared in meta.phases, agent types that name a file under agents/,
+# plugin-qualified nested names, the bmalph run note in every feature report).
+#
+# Hermetic: node is the only tool the suite needs (assertions run in node,
+# not jq); nothing touches the network and every file is written under
+# $BATS_TEST_TMPDIR. A workstation without node skips each case with the
+# reason; in CI (CI set) a missing node fails the case instead.
+
+bats_require_minimum_version 1.5.0
+
+setup() {
+  load lib/helpers
+  common_setup
+  WF="$PLUGIN_ROOT/workflows"
+  FX="$PLUGIN_ROOT/tests/fixtures/workflows"
+  HARNESS="$PLUGIN_ROOT/tests/lib/workflow-harness.mjs"
+  WF_RUNS=0
+  wf_require_node
+}
+
+# wf_require_node — skip without node on a workstation, fail without it in CI.
+wf_require_node() {
+  if command -v node >/dev/null 2>&1; then
+    return 0
+  fi
+  if [[ -n "${CI:-}" ]]; then
+    echo "node is required for the workflow harness in CI" >&2
+    return 1
+  fi
+  skip "node not installed (runs in CI)"
+}
+
+# The node side of the suite. `expect FILE ROOT EXPR...` loads one harness
+# output and evaluates each EXPR (a JavaScript expression over the helpers
+# below) to true, printing the failed expression and a summary otherwise.
+# `static CHECK ROOT` runs one source check over workflows/*.js.
+WF_JS="$(
+  cat <<'JS'
+const fs = require("fs")
+const path = require("path")
+const [mode, ...rest] = process.argv.slice(1)
+const STEMS = ["rs-sdlc-feature", "rs-sdlc-fr-nfr-review", "rs-sdlc-pr-until-green", "rs-sdlc-review-panel"]
+const PHASES = {
+  "rs-sdlc-feature": ["Setup check", "Resolve plan", "Stage", "Implement", "Review", "FR/NFR gate", "QA", "Finish PR"],
+  "rs-sdlc-fr-nfr-review": ["Scope", "Gate", "Fix"],
+  "rs-sdlc-pr-until-green": ["Snapshot", "Request reviews", "Wait", "Fix", "FR/NFR gate", "Publish"],
+  "rs-sdlc-review-panel": ["Scope", "Review", "Verify", "Fix"],
+}
+const AGENTS = {
+  "rs-sdlc-feature": ["qa-manual-tester", "rust-implementer"],
+  "rs-sdlc-fr-nfr-review": ["fr-nfr-reviewer", "rust-implementer"],
+  "rs-sdlc-pr-until-green": ["ci-fixer", "pr-comment-resolver"],
+  "rs-sdlc-review-panel": ["code-quality-reviewer", "fr-nfr-reviewer", "rust-implementer", "security-auditor"],
+}
+const BG = "Every `make` call except the foreground allowlist `make.ci_list`, `make help`, `make.check_commit_message`, `make.doctor`, `make.install_hooks`, and every `git commit` / `git push` and `bmalph run`, runs through the Bash tool with `run_in_background: true` (never a trailing `&`), logs to `target/rust-sdlc/logs/<stage>-<UTC>.log` and is polled with `common.sh wait_log` at most every 30 s."
+const CT = "In container mode, before the first make target, raw container-route call or hooked git call, check `docker compose ps --status running --quiet app`; empty output starts `make.start` in the background (≤ 900 s, one restart attempt); `docker info` failing or the stack not starting is D25."
+const FORMS = ["`git commit -F <file>`", "`RUN_IN_CONTAINER=1 git commit -F <file>`", "`git push -u origin HEAD`", "`RUN_IN_CONTAINER=1 git push -u origin HEAD`"]
+const P17 = [
+  /git (commit|push)\b.*(--no-verify|\s-n\b)/,
+  /git push\b.*(--force|--force-with-lease|\s-f\b)/,
+  /git -c core\.hooksPath/,
+  /git config ((--local|--global) )?core\.hooksPath/,
+  /bmalph implement.*--force/,
+  /#\[allow|#\[mutants::skip\]|#\[coverage\(off\)\]|exclude_re|exclude_globs|--ignore-filename-regex/,
+  /bypassPermissions/,
+]
+const PROHIBITION = /never|Never|forbidden|decline/
+const SUBJECT = /^(feat|fix|refactor|build|chore|ci|docs|style|perf|test)\(#[0-9]+\): .*/
+const BLOCK = ["=== SDLC ESCALATION ===", "stage: ", "iteration: ", "exit_condition: ", "status: NOT MET", "blocking_finding: ", "iteration_log: ", "recommended_action: ", "=== END ==="]
+const STRINGS = /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g
+const errors = []
+const fail = (message) => {
+  errors.push(message)
+}
+const has = (s, ...parts) => parts.every((p) => String(s ?? "").includes(p))
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+const p17clean = (text) => String(text).split("\n").every((l) => !P17.some((p) => p.test(l)) || PROHIBITION.test(l))
+const formsClean = (text) => String(text).split("\n").filter((l) => /git commit -F|git push -u origin HEAD/.test(l)).every((l) => !P17.some((p) => p.test(l)))
+const filled = (s) => s.replace(/<N>/g, "1").replace(/<[^<>]*>/g, "x").replace(/\$\{[^}]*\}/g, "x")
+const subjectOk = (s) => SUBJECT.test(filled(s))
+const agentFile = (root, type) => {
+  const m = /^rust-backend-sdlc:([a-z0-9-]+)$/.exec(type)
+  return Boolean(m) && fs.existsSync(path.join(root, "agents", `${m[1]}.md`))
+}
+
+function expectMode(file, root, exprs) {
+  const o = JSON.parse(fs.readFileSync(file, "utf8"))
+  const r = o.result || {}
+  const calls = o.calls || []
+  const labels = calls.map((c) => c.label)
+  const esc = String(r.escalation || "")
+  const notes = Array.isArray(r.degrade_notes) ? r.degrade_notes : []
+  const hit = (m, l) => (m instanceof RegExp ? m.test(l || "") : l === m)
+  const idx = (m) => labels.findIndex((l) => hit(m, l))
+  const count = (m) => labels.filter((l) => hit(m, l)).length
+  const pick = (m) => labels.filter((l) => hit(m, l))
+  const all = (m) => calls.filter((c) => hit(m, c.label))
+  const call = (m) => all(m)[0] || { prompt: "", args: null, agentType: null }
+  const seq = (...ls) => same(labels, ls)
+  const order = (...ms) => ms.every((m, i) => idx(m) >= 0 && (i === 0 || idx(ms[i - 1]) < idx(m)))
+  const field = (k) => (esc.match(new RegExp(`^${k}: (.*)$`, "m")) || [])[1] ?? null
+  const note = (...parts) => notes.some((n) => has(n, ...parts))
+  const seven = () => esc.split("\n").length === BLOCK.length && esc.split("\n").every((l, i) => l.startsWith(BLOCK[i]))
+  const stage = (ph) => (r.stages || []).filter((s) => s.phase === ph).pop() || {}
+  const subjects = () => calls.filter((c) => /^publish/.test(c.label || "")).flatMap((c) => [...c.prompt.matchAll(/^\s+\d+\. subject '([^']*)'/gm)].map((m) => m[1]))
+  const must = (ok, what) => {
+    if (!ok) throw new Error(what)
+  }
+  const contract = (stem) => {
+    const titles = (o.meta?.phases || []).map((p) => p.title)
+    must(o.meta?.name === stem && !("error" in o), `harness output of ${stem} without meta or with an error: ${o.error}`)
+    must(["SUCCESS", "SUCCESS-WITH-REPORT", "ESCALATED", "GATE"].includes(r.result), `unknown result word ${r.result}`)
+    must((r.result === "ESCALATED") === seven(), "the 7-field block belongs to ESCALATED and only there")
+    must(Array.isArray(r.degrade_notes), "degrade_notes is not an array")
+    must(r.result !== "SUCCESS" || notes.length === 0, "SUCCESS with a degrade note")
+    must(r.result !== "SUCCESS-WITH-REPORT" || notes.length > 0, "SUCCESS-WITH-REPORT without a degrade note")
+    must(r.result !== "GATE" || stem === "rs-sdlc-pr-until-green", "GATE returned outside pr-until-green")
+    must(o.phases.every((p) => titles.includes(p)), `a phase outside meta.phases: ${o.phases.join(", ")}`)
+    for (const c of calls.filter((x) => x.agentType)) must(agentFile(root, c.agentType), `agent type ${c.agentType} names no file under agents/`)
+    for (const l of pick(/^workflow:/)) must(STEMS.some((s) => l === `workflow:rust-backend-sdlc:${s}`), `nested name ${l} is not plugin-qualified`)
+    must(stem !== "rs-sdlc-feature" || notes.includes("bmalph run: not used (workflow path)"), "the feature report lacks the bmalph run note")
+    return true
+  }
+  const env = { o, r, calls, labels, esc, notes, idx, count, pick, all, call, seq, order, field, note, seven, stage, subjects, has, same, contract, p17clean, formsClean, subjectOk, BG, CT, FORMS }
+  for (const expr of exprs) {
+    let ok = false
+    try {
+      ok = Boolean(new Function(...Object.keys(env), `return (${expr})`)(...Object.values(env)))
+    } catch (e) {
+      console.error(`error: ${e.message}`)
+    }
+    if (!ok) {
+      console.error(`expectation failed: ${expr}`)
+      console.error(JSON.stringify({ result: r, labels, phases: o.phases }, null, 1).slice(0, 6000))
+      process.exit(1)
+    }
+  }
+}
+
+const read = (root, stem) => fs.readFileSync(path.join(root, "workflows", `${stem}.js`), "utf8")
+
+// meta: line 1 opens the literal, the first `}` at column 0 closes it, and
+// nothing but quoted strings, keys and punctuation sits in between.
+function metaOf(stem, text) {
+  const lines = text.split("\n")
+  const end = lines.findIndex((l) => l.startsWith("}"))
+  if (lines[0] !== "export const meta = {" || end < 1 || lines[end] !== "}") {
+    fail(`${stem}: meta must open with "export const meta = {" on line 1 and close with "}" alone at column 0`)
+    return null
+  }
+  const literal = lines.slice(0, end + 1).join("\n").slice("export const meta = ".length)
+  const rest = literal.replace(/'(?:[^'\\\n]|\\.)*'/g, "").replace(/\b[A-Za-z_]\w*\s*:/g, "").replace(/[\s{}[\],]/g, "")
+  if (rest) {
+    fail(`${stem}: meta is not a pure literal (left over: ${rest.slice(0, 40)})`)
+    return null
+  }
+  return new Function(`"use strict"; return (${literal})`)()
+}
+
+function metaShape(stem, meta) {
+  const titles = (meta.phases || []).map((p) => p.title)
+  if (Object.keys(meta).join() !== "name,description,whenToUse,phases") fail(`${stem}: meta keys are ${Object.keys(meta).join(", ")}`)
+  if (meta.name !== stem) fail(`${stem}: meta.name is ${meta.name}`)
+  for (const k of ["description", "whenToUse"]) if (typeof meta[k] !== "string" || meta[k].length < 40) fail(`${stem}: meta.${k} is missing or shorter than 40 characters`)
+  if (!(meta.phases || []).every((p) => Object.keys(p).join() === "title,detail" && p.title && p.detail)) fail(`${stem}: a phase is not {title, detail}`)
+  if (!same(titles, PHASES[stem])) fail(`${stem}: phases are ${titles.join(", ")}, expected ${PHASES[stem].join(", ")}`)
+  return titles
+}
+
+function checkMeta(root) {
+  const files = fs.readdirSync(path.join(root, "workflows")).sort()
+  if (!same(files, STEMS.map((s) => `${s}.js`))) fail(`workflows/ holds ${files.join(", ")}`)
+  for (const stem of STEMS) {
+    const text = read(root, stem)
+    const meta = metaOf(stem, text)
+    const titles = meta ? metaShape(stem, meta) : []
+    const body = text.slice(text.indexOf("\n}\n"))
+    for (const m of body.matchAll(/\bphase\(\s*'([^']*)'\s*\)|\b(?:ph|phase): '([^']*)'/g)) {
+      if (!titles.includes(m[1] ?? m[2])) fail(`${stem}: phase "${m[1] ?? m[2]}" is not declared in meta.phases`)
+    }
+  }
+}
+
+function checkAgents(root) {
+  for (const stem of STEMS) {
+    const names = [...read(root, stem).matchAll(/rust-backend-sdlc:([a-z0-9-]+)/g)].map((m) => m[1]).filter((n) => !n.startsWith("rs-sdlc-"))
+    for (const n of names) if (!fs.existsSync(path.join(root, "agents", `${n}.md`))) fail(`${stem}: rust-backend-sdlc:${n} names no file under agents/`)
+    if (!same([...new Set(names)].sort(), AGENTS[stem])) fail(`${stem}: agent types ${[...new Set(names)].sort().join(", ")}, expected ${AGENTS[stem].join(", ")}`)
+    if (/(react-frontend|php-backend)-sdlc:|general-purpose/.test(read(root, stem))) fail(`${stem}: names an agent of another plugin`)
+  }
+}
+
+const qualified = (name) => STEMS.some((s) => name === `rust-backend-sdlc:${s}`)
+
+function checkNames(root) {
+  for (const stem of STEMS) {
+    const text = read(root, stem)
+    for (const m of text.matchAll(/\bworkflow\(\s*([^,)]*)/g)) {
+      const arg = m[1].trim()
+      const lit = /^'([^']*)'$/.exec(arg)
+      if (lit && !qualified(lit[1])) fail(`${stem}: workflow(${arg}) is not rust-backend-sdlc:<one of the 4 stems>`)
+      if (!lit && !(stem === "rs-sdlc-feature" && arg === "nest.name")) fail(`${stem}: workflow(${arg}) names no literal`)
+    }
+    for (const m of text.matchAll(/rust-backend-sdlc:(rs-sdlc-[a-z0-9-]+)/g)) if (!STEMS.includes(m[1])) fail(`${stem}: rust-backend-sdlc:${m[1]} is not one of the 4 stems`)
+    if (/\bworkflow\(\s*['"`]rs-sdlc-/.test(text)) fail(`${stem}: an unqualified workflow() name`)
+  }
+  const fx = path.join(root, "tests", "fixtures", "workflows")
+  for (const f of fs.readdirSync(fx)) {
+    const keys = Object.keys(JSON.parse(fs.readFileSync(path.join(fx, f), "utf8")).workflows || {})
+    for (const k of keys) if (!qualified(k)) fail(`${f}: scenario workflows key ${k} is not plugin-qualified`)
+  }
+}
+
+// ADR-18: an edge is every literal naming a workflow; an edge of
+// pr-until-green is excluded only inside the OPTS.onGate === 'nested' branch.
+const GUARD = "if (OPTS.onGate === 'nested') {"
+function insideGuard(text, at) {
+  const from = text.lastIndexOf(GUARD, at)
+  if (from < 0) return false
+  let depth = 0
+  for (const ch of text.slice(from + GUARD.length - 1, at).replace(STRINGS, "")) {
+    if (ch === "{") depth += 1
+    if (ch === "}") depth -= 1
+    if (depth === 0) return false
+  }
+  return depth > 0
+}
+
+function edgesOf(root, stem) {
+  const text = read(root, stem)
+  return [...text.matchAll(/'rust-backend-sdlc:(rs-sdlc-[a-z0-9-]+)'/g)].map((m) => ({ from: stem, to: m[1], guarded: stem === "rs-sdlc-pr-until-green" && insideGuard(text, m.index) }))
+}
+
+function checkGraph(root) {
+  const raw = STEMS.flatMap((s) => edgesOf(root, s))
+  const edges = raw.filter((e) => !e.guarded)
+  for (const e of edges) {
+    if (e.from !== "rs-sdlc-feature") fail(`${e.from} nests ${e.to} outside a branch guarded by OPTS.onGate === 'nested'`)
+    if (edges.some((f) => f.from === e.to)) fail(`depth 2: ${e.from} -> ${e.to} -> ${edges.find((f) => f.from === e.to).to}`)
+  }
+  const pug = raw.filter((e) => e.from === "rs-sdlc-pr-until-green")
+  if (pug.length !== 1 || !pug[0].guarded || pug[0].to !== "rs-sdlc-fr-nfr-review") fail(`pr-until-green edges: ${JSON.stringify(pug)}`)
+  const targets = [...new Set(edges.map((e) => e.to))].sort()
+  if (!same(targets, ["rs-sdlc-fr-nfr-review", "rs-sdlc-pr-until-green", "rs-sdlc-review-panel"])) fail(`feature nests ${targets.join(", ")}`)
+  const calls = Object.fromEntries(STEMS.map((s) => [s, (read(root, s).match(/\bworkflow\(/g) || []).length]))
+  if (!same(calls, { "rs-sdlc-feature": 1, "rs-sdlc-fr-nfr-review": 0, "rs-sdlc-pr-until-green": 1, "rs-sdlc-review-panel": 0 })) fail(`workflow() call sites: ${JSON.stringify(calls)}`)
+  if (!/^ {2}onGate: 'nested',$/m.test(read(root, "rs-sdlc-pr-until-green"))) fail("pr-until-green: the onGate default is not 'nested'")
+}
+
+function checkHandBack(root) {
+  const text = read(root, "rs-sdlc-feature")
+  const lines = text.split("\n").filter((l) => l.includes("'rust-backend-sdlc:rs-sdlc-pr-until-green'"))
+  if (lines.length !== 1 || !/args: \{[^}]*onGate: 'return'/.test(lines[0])) fail(`feature: the pr-until-green call does not pass onGate: 'return': ${lines.join(" | ")}`)
+  for (const m of text.matchAll(/onGate:\s*([^,}\s]*)/g)) if (m[1] !== "'return'") fail(`feature: onGate: ${m[1]}`)
+}
+
+function checkCommits(root) {
+  let n = 0
+  for (const stem of STEMS) {
+    for (const m of read(root, stem).matchAll(/\b[A-Za-z]+\(#[^'"`\n]*/g)) {
+      n += 1
+      if (!subjectOk(m[0])) fail(`${stem}: commit literal "${m[0]}" becomes "${filled(m[0])}", which fails the template subject regex`)
+    }
+  }
+  if (n < 5) fail(`only ${n} commit literal(s) found`)
+}
+
+function checkP17(root) {
+  for (const stem of STEMS) {
+    read(root, stem).split("\n").forEach((line, i) => {
+      if (!p17clean(line)) fail(`${stem}.js:${i + 1}: a P1-P7 match outside a prohibition line`)
+    })
+  }
+}
+
+const CHECKS = { meta: checkMeta, agents: checkAgents, names: checkNames, graph: checkGraph, handback: checkHandBack, commits: checkCommits, p17: checkP17 }
+
+if (mode === "expect") expectMode(rest[0], rest[1], rest.slice(2))
+else if (CHECKS[rest[0]]) CHECKS[rest[0]](rest[1])
+else fail(`unknown check ${rest[0]}`)
+if (errors.length) {
+  console.error(errors.join("\n"))
+  process.exit(1)
+}
+JS
+)"
+
+# wf_stem_of SCENARIO — the workflow stem a scenario file belongs to.
+wf_stem_of() {
+  case "$(basename "$1")" in
+    feat-*) printf 'rs-sdlc-feature' ;;
+    fnr-*) printf 'rs-sdlc-fr-nfr-review' ;;
+    pug-*) printf 'rs-sdlc-pr-until-green' ;;
+    rp-*) printf 'rs-sdlc-review-panel' ;;
+    *) return 1 ;;
+  esac
+}
+
+# wf_run STEM SCENARIO [--as-child] — runs the harness; SCENARIO is a file
+# name under tests/fixtures/workflows/ (without .json) or a path. The JSON
+# output lands in $WF_OUT, the exit code in $status.
+wf_run() {
+  local stem="$1" scenario="$2"
+  shift 2
+  [[ "$scenario" == */* ]] || scenario="$FX/$scenario.json"
+  WF_RUNS=$((WF_RUNS + 1))
+  WF_OUT="$BATS_TEST_TMPDIR/run-$WF_RUNS.json"
+  run node "$HARNESS" "$@" "$WF/$stem.js" "$scenario"
+  printf '%s\n' "$output" >"$WF_OUT"
+}
+
+# wf_scenario STEM SCENARIO [--as-child] — one run that exits 0 and meets the
+# shared contract.
+wf_scenario() {
+  wf_run "$@"
+  if [[ "$status" -ne 0 ]]; then
+    printf 'harness exit %s for %s:\n%s\n' "$status" "$2" "${output:0:3000}" >&2
+    return 1
+  fi
+  wf_expect "contract(\"$1\")"
+}
+
+# wf_expect EXPR... — every JavaScript expression holds over $WF_OUT.
+wf_expect() {
+  node -e "$WF_JS" expect "$WF_OUT" "$PLUGIN_ROOT" "$@"
+}
+
+# wf_static CHECK — one source check over workflows/*.js.
+wf_static() {
+  node -e "$WF_JS" static "$1" "$PLUGIN_ROOT"
+}
+
+# wf_same_as_child SCENARIO — the run with --as-child exits 0 and prints the
+# same bytes as the plain run.
+wf_same_as_child() {
+  local stem plain child
+  stem="$(wf_stem_of "$1")" || return 1
+  plain="$(node "$HARNESS" "$WF/$stem.js" "$1")" || {
+    echo "plain run failed: $1" >&2
+    return 1
+  }
+  child="$(node "$HARNESS" --as-child "$WF/$stem.js" "$1")" || {
+    echo "--as-child run failed: $1" >&2
+    return 1
+  }
+  [[ "$plain" == "$child" ]] || {
+    echo "--as-child changed the outcome of $1" >&2
+    return 1
+  }
+}
+
+# --- static cases: the runtime rules of every workflow file ------------------
+
+@test "workflows: meta: the four files open with a pure meta literal (name = stem, description, whenToUse, phases) and every phase title is declared" {
+  wf_static meta
+}
+
+@test "workflows: determinism: no Date.now(), Math.random(), argless new Date() or filesystem API, and a rerun prints the same bytes" {
+  run grep -nE 'Date\.now|Math\.random|new Date[[:space:]]*\([[:space:]]*\)|new Date[[:space:]]*(;|$)' "$WF"/*.js
+  [ "$status" -eq 1 ]
+  run grep -nE '(^|[^[:alnum:]_.])require\(|^[[:space:]]*import[[:space:]]|import\(|(^|[^[:alnum:]_])process\.|readFileSync|writeFileSync|(^|[^[:alnum:]_])fs\.' "$WF"/*.js
+  [ "$status" -eq 1 ]
+  local first second
+  first="$(node "$HARNESS" "$WF/rs-sdlc-feature.js" "$FX/feat-happy.json")"
+  second="$(node "$HARNESS" "$WF/rs-sdlc-feature.js" "$FX/feat-happy.json")"
+  [ "$first" = "$second" ]
+}
+
+@test "workflows: agents: every rust-backend-sdlc:<agent> type names a file under agents/ and each workflow uses exactly its agents" {
+  wf_static agents
+}
+
+@test "workflows: names: every workflow() literal and scenario workflows key is rust-backend-sdlc:<one of the 4 stems>" {
+  wf_static names
+}
+
+@test "workflows: call graph: depth ≤ 1 under the ADR-18 rule (pr-until-green nests only inside OPTS.onGate === 'nested', default 'nested')" {
+  wf_static graph
+}
+
+@test "workflows: hand-back: rs-sdlc-feature calls pr-until-green with the literal onGate: 'return' and carry" {
+  wf_static handback
+  wf_scenario rs-sdlc-feature feat-gate-handback
+  wf_expect 'all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green").length === 2' \
+    'all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green").every((c) => c.args.onGate === "return" && "carry" in c.args)'
+}
+
+@test "workflows: --as-child: every leaf scenario runs unchanged under --as-child; pr-until-green needs onGate: 'return' there" {
+  local s returned=()
+  for s in "$FX"/fnr-*.json "$FX"/rp-*.json; do
+    wf_same_as_child "$s"
+  done
+  for s in "$FX"/pug-*.json; do
+    if grep -qE '"onGate"[[:space:]]*:[[:space:]]*"return"' "$s"; then
+      returned+=("$(basename "$s" .json)")
+      wf_same_as_child "$s"
+    fi
+  done
+  [ "${returned[*]}" = "pug-as-child pug-carry pug-return-gate" ]
+  wf_scenario rs-sdlc-pr-until-green pug-gate --as-child
+  wf_expect 'r.result === "ESCALATED" && count("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review") === 1' \
+    'has(field("blocking_finding"), "workflow() nesting is one level only", "(D21)")' \
+    'has(field("recommended_action"), "fr-nfr-gate.sh\" --pr 7", "/rs-sdlc-finish-pr --pr 7")'
+}
+
+@test "workflows: safety: P1–P7 match only prohibition lines and the generalization denylist matches nothing in workflows/" {
+  wf_static p17
+  # The denylist is assembled from halves so this suite never holds the tokens.
+  local u=us o=oa a=app m=mon pattern
+  pattern="vilna""crm|rust-service-""template|${u}er[-_ ]service|${m}go[a-z][a-z0-9_]*repository|${a}runner|src/${u}er|src/${o}uth"
+  run grep -rniE "$pattern" "$WF"
+  [ "$status" -eq 1 ]
+}
+
+@test "workflows: commits: every commit literal and every published subject matches the template subject regex (AC-2.2)" {
+  wf_static commits
+  local s
+  for s in feat-happy feat-gate-handback; do
+    wf_scenario rs-sdlc-feature "$s"
+    wf_expect 'subjects().length >= 2 && subjects().every(subjectOk)'
+  done
+  for s in pug-full-loop pug-gate; do
+    wf_scenario rs-sdlc-pr-until-green "$s"
+    wf_expect 'subjects().length >= 1 && subjects().every(subjectOk)'
+  done
+}
+
+@test "workflows: publish: the publish prompts carry the P1-clean commit and push forms, the background sentence and the RUN_IN_CONTAINER=1 prefix" {
+  local pair
+  for pair in rs-sdlc-pr-until-green:pug-full-loop rs-sdlc-feature:feat-happy; do
+    wf_scenario "${pair%%:*}" "${pair#*:}"
+    wf_expect 'all(/^publish /).length >= 1' \
+      'all(/^publish /).every((c) => has(c.prompt, ...FORMS, BG))' \
+      'all(/^publish /).every((c) => has(c.prompt, "commit_msg_file", "protected_changes <merge-base-sha>", "hooks_active", "publish-<UTC>.log", "wait_log"))' \
+      'all(/^publish /).every((c) => formsClean(c.prompt) && p17clean(c.prompt))' \
+      'all(/^publish /).every((c) => !/RUN_IN_CONTAINER=1 make|git commit -m|git commit -a/.test(c.prompt))'
+  done
+}
+
+@test "workflows: container: the implement, verify and publish prompts carry the container-precondition and background sentences verbatim" {
+  wf_scenario rs-sdlc-feature feat-verify-serialized
+  wf_expect 'count(/^story /) >= 3 && count(/^verify /) === 1 && count(/^publish /) >= 1' \
+    'all(/^(story |verify |publish )/).every((c) => has(c.prompt, CT, BG))'
+  wf_scenario rs-sdlc-feature feat-happy
+  wf_expect 'all(/^(story |verify |publish )/).length >= 6 && all(/^(story |verify |publish )/).every((c) => has(c.prompt, CT, BG))'
+  wf_scenario rs-sdlc-pr-until-green pug-full-loop
+  wf_expect 'all(/^(ci-fixer |pr-comment-resolver |publish )/).length === 3 && all(/^(ci-fixer |pr-comment-resolver |publish )/).every((c) => has(c.prompt, CT, BG))'
+  wf_scenario rs-sdlc-fr-nfr-review fnr-converges
+  wf_expect 'all(/^(fix:|verify )/).length === 4 && all(/^(fix:|verify |fr-nfr-reviewer )/).every((c) => has(c.prompt, CT, BG))'
+  wf_scenario rs-sdlc-review-panel rp-converges
+  wf_expect 'all(/^fix:/).length === 3 && all(/^fix:/).every((c) => has(c.prompt, CT, BG))'
+}
+
+# --- rs-sdlc-fr-nfr-review (fnr-, 15) -----------------------------------------
+
+@test "workflows: fnr-advisory: no pull request and a dirty tree run the gate advisory and end SUCCESS-WITH-REPORT (D11)" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-advisory
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.advisory === true && r.iterations === 2 && r.new_findings === 0 && r.fixed.length === 2' \
+    'seq("scope", "fr-nfr-reviewer 1/5", "fix:crates/billing/invoicing", "fr-nfr-reviewer 2/5")' \
+    'note("advisory gate run", "no pull request (D11)", "uncommitted changes")' \
+    'all(/^fr-nfr-reviewer /).every((c) => has(c.prompt, "Advisory run (", "--advisory"))'
+}
+
+@test "workflows: fnr-bad-pr: a malformed --pr value escalates before any agent runs" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-bad-pr
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && calls.length === 0' \
+    'field("stage") === "review" && field("iteration") === "0/5"' \
+    'field("blocking_finding") === "malformed --pr value \"repo/pull/456-invalid123\""'
+}
+
+@test "workflows: fnr-converges: finding counts 3 → 1 → 0 end the loop SUCCESS, the fixes split by context with one verify step (AC-19.2)" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-converges
+  wf_expect 'r.result === "SUCCESS" && r.iterations === 3 && r.new_findings === 0 && r.advisory === false && r.fixed.length === 4' \
+    'seq("scope", "fr-nfr-reviewer 1/5", "fix:crates/billing/invoicing", "fix:requirement-level", "verify 1/5", "fr-nfr-reviewer 2/5", "fix:crates/billing/invoicing", "fr-nfr-reviewer 3/5")' \
+    'has(call("fr-nfr-reviewer 1/5").prompt, "No prior ledger", "exactly once")' \
+    'has(call("fr-nfr-reviewer 3/5").prompt, "iteration 1: new_findings=3 verdict=FAIL", "iteration 2: new_findings=1 verdict=FAIL")' \
+    'all(/^fr-nfr-reviewer /).every((c) => c.agentType === "rust-backend-sdlc:fr-nfr-reviewer") && all(/^(fix:|verify )/).every((c) => c.agentType === "rust-backend-sdlc:rust-implementer")' \
+    'r.requirement_source === "specs/42-invoice-totals/ + PR #7 description and linked issue(s) #42"'
+}
+
+@test "workflows: fnr-degraded: a reviewer that finds the planning bundle missing escalates with the plan remedy" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-degraded
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && count(/^fix:/) === 0' \
+    'has(field("blocking_finding"), "SPECS MISSING: specs/42-invoice-totals/")' \
+    'has(field("recommended_action"), "/rs-sdlc-plan")'
+}
+
+@test "workflows: fnr-exhausted: 5 non-zero gate iterations end ESCALATED with the 7-field block (AC-19.2)" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-exhausted
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 5 && r.new_findings === 1 && seven()' \
+    'field("stage") === "review" && field("iteration") === "5/5" && field("status") === "NOT MET"' \
+    'count(/^fr-nfr-reviewer /) === 5 && count(/^fix:/) === 4' \
+    'has(field("blocking_finding"), "5 gate iteration(s) ended without new_findings=0 verdict=PASS")' \
+    'field("iteration_log").split(" | ").length === 5 && o.logs.some((l) => has(l, "not converging"))'
+}
+
+@test "workflows: fnr-fail-no-findings: a FAIL verdict without an open finding escalates instead of looping" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-fail-no-findings
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && r.new_findings === 2 && count(/^fix:/) === 0' \
+    'has(field("blocking_finding"), "verdict FAIL with new_findings=2 but no open finding to act on")'
+}
+
+@test "workflows: fnr-fix-blocked: a BLOCKED rust-implementer fix group escalates with its recommendation" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-fix-blocked
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 1' \
+    'seq("scope", "fr-nfr-reviewer 1/5", "fix:crates/billing/invoicing")' \
+    'has(field("blocking_finding"), "rust-implementer BLOCKED on fix:crates/billing/invoicing")' \
+    'has(field("recommended_action"), "ALLOW_PROTECTED_CONFIG_EDIT=1")'
+}
+
+@test "workflows: fnr-head-mismatch: --head pins the scope; a checkout off the PR head runs advisory and ends SUCCESS-WITH-REPORT" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-head-mismatch
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.advisory === true && r.iterations === 1 && r.new_findings === 0' \
+    'has(call("scope").prompt, "starts with bbbb2222cccc")' \
+    'note("HEAD is not the PR head bbbb222")' \
+    'has(call("fr-nfr-reviewer 1/5").prompt, "--advisory")'
+}
+
+@test "workflows: fnr-no-source: no bundle and no PR requirements record the fail-closed status once, then escalate" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-no-source
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && r.requirement_source === "none"' \
+    'seq("scope", "record-no-source")' \
+    'has(call("record-no-source").prompt, "fr-nfr-gate.sh\" --pr 7", "exactly once")' \
+    'has(field("blocking_finding"), "no requirement source", "a failure \"BMAD FR/NFR Review Gate\" status was posted on HEAD", "mandatory")'
+}
+
+@test "workflows: fnr-no-specs: a named bundle that does not exist escalates after the scope, the gate never skipped" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-no-specs
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && seq("scope")' \
+    'has(call("scope").prompt, "specs/ghost/")' \
+    'has(field("blocking_finding"), "specs/ghost/") && has(field("recommended_action"), "/rs-sdlc-plan")'
+}
+
+@test "workflows: fnr-pr-source: without a bundle the PR description and linked issues are the requirement source and the gate passes" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-pr-source
+  wf_expect 'r.result === "SUCCESS" && r.iterations === 1 && r.advisory === false' \
+    'r.requirement_source === "PR #7 description and linked issue(s) #12"' \
+    'has(call("fr-nfr-reviewer 1/5").prompt, "SPECS_DIR: none", "PR: #7", "Authoritative run")'
+}
+
+@test "workflows: fnr-scope-blocked: an invalid profile escalates with the setup halt before the gate" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-scope-blocked
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && seq("scope")' \
+    'has(field("blocking_finding"), "validate-profile.sh exit 1")' \
+    'has(field("recommended_action"), "run /rs-sdlc-setup on the default branch and commit the result")'
+}
+
+@test "workflows: fnr-skipped-runner: a gate runner that did not run never passes the mandatory gate" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-skipped-runner
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && r.new_findings === null && count(/^fix:/) === 0' \
+    'has(field("blocking_finding"), "gate runner not run", "mandatory")' \
+    'has(field("recommended_action"), "restore the gate runner", "a manually built matrix never satisfies the gate")'
+}
+
+@test "workflows: fnr-transport: one failed gate run consumes an iteration and the rerun passes SUCCESS-WITH-REPORT" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-transport
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.iterations === 2 && r.new_findings === 0' \
+    'seq("scope", "fr-nfr-reviewer 1/5", "fr-nfr-reviewer 2/5")' \
+    'note("iteration 1:", "consumed one iteration without a findings count")'
+}
+
+@test "workflows: fnr-transport-twice: two failed gate runs in a row escalate" {
+  wf_scenario rs-sdlc-fr-nfr-review fnr-transport-twice
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 2 && r.new_findings === null' \
+    'seq("scope", "fr-nfr-reviewer 1/5", "fr-nfr-reviewer 2/5")' \
+    'has(field("blocking_finding"), "the gate run failed in 2 consecutive iterations")' \
+    'has(field("recommended_action"), "restore the gate transport")'
+}
+
+# --- rs-sdlc-review-panel (rp-, 8) ---------------------------------------------
+
+@test "workflows: rp-all-refuted: a finding the three refuters reject is dropped and the panel ends after one iteration" {
+  wf_scenario rs-sdlc-review-panel rp-all-refuted
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.iterations === 1 && r.findings.length === 0 && r.fixed.length === 0' \
+    'count(/^verify:/) === 3 && ["correctness", "standards", "remedy"].every((l) => idx("verify:" + l + ":CQ-1") >= 0)' \
+    'count(/^fix:/) === 0' \
+    'note("verdict FAIL rests only on findings the refuters rejected")'
+}
+
+@test "workflows: rp-carry: the fix fan-out is capped at 4 groups and the rest is carried into the next iteration" {
+  wf_scenario rs-sdlc-review-panel rp-carry
+  wf_expect 'r.result === "SUCCESS" && r.iterations === 3 && r.findings.length === 5 && r.fixed.length === 5 && r.carried.length === 0' \
+    'same(pick(/^fix:/), ["fix:crates/billing/invoice", "fix:crates/billing/payment", "fix:crates/service/src", "fix:crates/internal/health-check", "fix:crates/service/src", "fix:crates/shared/domain"])' \
+    'o.logs.some((l) => has(l, "fix fan-out capped at 4 groups")) && o.logs.some((l) => has(l, "carried to iteration 2"))' \
+    'labels.indexOf("fix:crates/shared/domain") > labels.indexOf("code-quality-reviewer", idx("fix:crates/billing/invoice"))'
+}
+
+@test "workflows: rp-converges: three lenses in parallel, three refuters per finding, fixes by crates/<group>/<context>, SUCCESS in 3 iterations" {
+  wf_scenario rs-sdlc-review-panel rp-converges
+  wf_expect 'r.result === "SUCCESS" && r.iterations === 3 && r.findings.length === 4 && r.fixed.length === 4 && r.carried.length === 0' \
+    'count("code-quality-reviewer") === 3 && count("fr-nfr-reviewer") === 3 && count("security-auditor:all") === 3' \
+    'count(/^verify:/) === 12 && ["CQ-1", "FRN-1", "SEC-1", "CQ-2"].every((id) => ["correctness", "standards", "remedy"].every((l) => idx("verify:" + l + ":" + id) >= 0))' \
+    'same(pick(/^fix:/), ["fix:crates/billing/invoice", "fix:crates/service/src", "fix:crates/billing/invoice"])' \
+    'call("security-auditor:all").agentType === "rust-backend-sdlc:security-auditor" && all(/^fix:/).every((c) => c.agentType === "rust-backend-sdlc:rust-implementer")' \
+    'has(call("fix:crates/billing/invoice").prompt, "mode: parallel") && has(all("fix:crates/billing/invoice")[1].prompt, "mode: serial")' \
+    'same(o.phases, ["Scope", "Review", "Verify", "Fix", "Review", "Verify", "Fix", "Review", "Verify"])'
+}
+
+@test "workflows: rp-exhausted: 5 iterations that still confirm findings end ESCALATED with the 7-field block" {
+  wf_scenario rs-sdlc-review-panel rp-exhausted
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 5 && r.carried.length === 1 && seven()' \
+    'field("stage") === "review" && field("iteration") === "5/5"' \
+    'count("code-quality-reviewer") === 5 && count(/^fix:/) === 5' \
+    'o.logs.includes("maxIterations 9 capped at 5")' \
+    'has(field("blocking_finding"), "5 iterations still produced confirmed findings", "CQ-5")'
+}
+
+@test "workflows: rp-missing-lens: a lens that returns nothing escalates instead of vanishing" {
+  wf_scenario rs-sdlc-review-panel rp-missing-lens
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 1 && count(/^verify:/) === 0' \
+    'has(field("blocking_finding"), "lens returned no result: rust-backend-sdlc:fr-nfr-reviewer")'
+}
+
+@test "workflows: rp-scope-blocked: an invalid profile escalates before any lens runs" {
+  wf_scenario rs-sdlc-review-panel rp-scope-blocked
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && seq("scope")' \
+    'has(field("blocking_finding"), "run /rs-sdlc-setup on the default branch and commit the result")' \
+    'has(field("recommended_action"), "run /rs-sdlc-setup")'
+}
+
+@test "workflows: rp-security-skipped: a diff without a PA-5 path runs two lenses and no security-auditor" {
+  wf_scenario rs-sdlc-review-panel rp-security-skipped
+  wf_expect 'r.result === "SUCCESS" && r.iterations === 2 && count(/^security-auditor/) === 0' \
+    'o.logs.includes("security lens: not applicable, the diff touches no PA-5 path")' \
+    'seq("scope", "code-quality-reviewer", "fr-nfr-reviewer", "verify:correctness:CQ-1", "verify:standards:CQ-1", "verify:remedy:CQ-1", "fix:docs/invoices.md", "code-quality-reviewer", "fr-nfr-reviewer")'
+}
+
+@test "workflows: rp-unverified: a finding with a missing refuter vote is kept unverified and reported" {
+  wf_scenario rs-sdlc-review-panel rp-unverified
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.iterations === 2 && r.findings.length === 1 && r.findings[0].unverified === true && r.fixed.length === 1' \
+    'note("kept unverified", "CQ-1")' \
+    'count(/^fix:/) === 1'
+}
+
+# --- rs-sdlc-pr-until-green (pug-, 17) -----------------------------------------
+
+@test "workflows: pug-as-child: under --as-child with onGate: 'return' a GATE verdict returns without nesting" {
+  wf_scenario rs-sdlc-pr-until-green pug-as-child --as-child
+  wf_expect 'r.result === "GATE" && r.pr === 7 && r.head === "a1b2c3d" && same(r.counters, {fix: 0, wait: 1, request: 1, gate: 1})' \
+    'seq("pr-state", "request 1/3", "pr-state", "wait 540s") && count(/^workflow:/) === 0' \
+    'Object.keys(r).sort().join() === "counters,degrade_notes,head,journal,pr,result"' \
+    'has(r.journal[r.journal.length - 1], "hand-back (gate 1/3)", "GATE on a1b2c3d returned to the caller")'
+}
+
+@test "workflows: pug-blocked: a merged pull request escalates on the first snapshot" {
+  wf_scenario rs-sdlc-pr-until-green pug-blocked
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "BLOCKED" && seq("pr-state")' \
+    'field("stage") === "finish-pr" && field("blocking_finding") === "PR #7 is MERGED"' \
+    'same(r.counters, {fix: 0, wait: 0, request: 0, gate: 0})'
+}
+
+@test "workflows: pug-carry: a re-entry with carry resumes every counter and the journal, resetting none (AC-3.4 b)" {
+  wf_scenario rs-sdlc-pr-until-green pug-carry
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.verdict === "READY"' \
+    'same(r.counters, {fix: 3, wait: 5, request: 1, gate: 1})' \
+    'o.logs.some((l) => has(l, "resumed from carry: fix 2/5, wait 4/6, request 1/3, gate 1/3"))' \
+    'r.journal.length === 6 && has(r.journal[0], "1: FIX -> ci-fixer") && has(r.journal[2], "hand-back (gate 1/3)") && has(r.journal[3], "fix 3/5")' \
+    'note("FR/NFR review: iteration 1: gate run failed (transport)")' \
+    'seq("pr-state", "pr-comment-resolver 3/5", "publish 1", "pr-state", "wait 540s", "pr-state confirm")'
+}
+
+@test "workflows: pug-coderabbit-interval: inside the CodeRabbit interval it waits through REQUEST instead of re-mentioning" {
+  wf_scenario rs-sdlc-pr-until-green pug-coderabbit-interval
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.verdict === "READY" && same(r.counters, {fix: 0, wait: 2, request: 2, gate: 0})' \
+    'seq("pr-state", "request 1/3", "wait 540s", "request 2/3", "pr-state", "wait 540s", "pr-state confirm")' \
+    'has(call("request 1/3").prompt, "request-ai-reviews.sh\" --pr 7 --reviewers coderabbit,qodo")' \
+    'has(call("wait 540s").prompt, "--wait-verdicts WAIT,REQUEST")' \
+    'note("qodo: SKIPPED", "reported, not passed")'
+}
+
+@test "workflows: pug-fix-exhausted: the fix counter is bounded at 5 rounds" {
+  wf_scenario rs-sdlc-pr-until-green pug-fix-exhausted
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "FIX" && same(r.counters, {fix: 5, wait: 0, request: 0, gate: 0})' \
+    'count(/^ci-fixer /) === 5 && count(/^publish /) === 5' \
+    'all(/^ci-fixer /).every((c) => c.agentType === "rust-backend-sdlc:ci-fixer")' \
+    'field("iteration") === "5/5 (fix)" && has(field("blocking_finding"), "fix budget exhausted")'
+}
+
+@test "workflows: pug-full-loop: FIX → GATE → READY succeeds with every counter spent once (AC-21.2)" {
+  wf_scenario rs-sdlc-pr-until-green pug-full-loop
+  wf_expect 'r.result === "SUCCESS" && r.verdict === "READY" && same(r.counters, {fix: 1, wait: 1, request: 1, gate: 1})' \
+    'seq("pr-state", "ci-fixer 1/5", "pr-comment-resolver 1/5", "publish 1", "pr-state", "workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review", "pr-state", "request 1/3", "pr-state", "wait 540s", "pr-state confirm")' \
+    'same(call("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review").args, {pr: 7, head: "b2c3d4e"})' \
+    'call("ci-fixer 1/5").agentType === "rust-backend-sdlc:ci-fixer" && call("pr-comment-resolver 1/5").agentType === "rust-backend-sdlc:pr-comment-resolver"' \
+    'has(call("publish 1").prompt, "fix(#<N>): resolve Static analysis failure", "fix(#<N>): address review comment on")'
+}
+
+@test "workflows: pug-gate: GATE runs the nested FR/NFR review on the head, publishes its fixes and re-gates the new head" {
+  wf_scenario rs-sdlc-pr-until-green pug-gate
+  wf_expect 'r.result === "SUCCESS" && same(r.counters, {fix: 0, wait: 0, request: 0, gate: 2})' \
+    'seq("pr-state", "workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review", "publish 1", "pr-state", "workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review", "pr-state", "pr-state confirm")' \
+    'same(all(/^workflow:/).map((c) => c.args), [{pr: 7, head: "a1b2c3d"}, {pr: 7, head: "b2c3d4e"}])' \
+    'has(call("publish 1").prompt, "fix(#<N>): address review gate iteration 1 findings")'
+}
+
+@test "workflows: pug-gate-escalated: an escalated nested FR/NFR review escalates the PR, the gate never skipped" {
+  wf_scenario rs-sdlc-pr-until-green pug-gate-escalated
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "GATE" && r.counters.gate === 1' \
+    'seq("pr-state", "workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review")' \
+    'field("iteration") === "1/3 (fr_nfr_gate)" && has(field("blocking_finding"), "FR/NFR gate escalated on head a1b2c3d")' \
+    'has(field("recommended_action"), "cannot be skipped")'
+}
+
+@test "workflows: pug-gate-exhausted: a gate that never turns green is bounded at 3 gate rounds" {
+  wf_scenario rs-sdlc-pr-until-green pug-gate-exhausted
+  wf_expect 'r.result === "ESCALATED" && r.counters.gate === 3' \
+    'count("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review") === 3 && count(/^publish /) === 3' \
+    'field("iteration") === "3/3 (fr_nfr_gate)" && has(field("blocking_finding"), "still failure on head d4e5f6a after 3 gate rounds")'
+}
+
+@test "workflows: pug-human-gated-blocked: a failing human-gated check ends ESCALATED naming its label, never fixed (AC-21.2, D9)" {
+  wf_scenario rs-sdlc-pr-until-green pug-human-gated-blocked
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "BLOCKED" && seq("pr-state")' \
+    'field("blocking_finding") === "Protected configuration failed (human-gated)"' \
+    'has(field("recommended_action"), "applies the label approved-config-change", "never applies or removes a label")'
+}
+
+@test "workflows: pug-malformed-ready: a READY payload without the sensor fields is malformed and escalates" {
+  wf_scenario rs-sdlc-pr-until-green pug-malformed-ready
+  wf_expect 'r.result === "ESCALATED" && r.verdict === null && seq("pr-state")' \
+    'has(field("blocking_finding"), "malformed sensor payload", "verdict READY")'
+}
+
+@test "workflows: pug-not-approved: a reviewer that reviewed the head without approving escalates after 3 requests" {
+  wf_scenario rs-sdlc-pr-until-green pug-not-approved
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "REQUEST" && same(r.counters, {fix: 0, wait: 0, request: 3, gate: 0})' \
+    'count(/^request /) === 3 && notes.length === 0' \
+    'field("iteration") === "3/3 (request)"' \
+    'field("blocking_finding") === "coderabbit reviewed head a1b2c3d and did not approve after 3 review requests"'
+}
+
+@test "workflows: pug-ready: a READY snapshot confirmed by a second read on the same head ends SUCCESS" {
+  wf_scenario rs-sdlc-pr-until-green pug-ready
+  wf_expect 'r.result === "SUCCESS" && r.verdict === "READY" && r.head === "a1b2c3d" && same(r.counters, {fix: 0, wait: 0, request: 0, gate: 0})' \
+    'seq("pr-state", "pr-state confirm")' \
+    'has(call("pr-state").prompt, "pr-state.sh\" --pr 7 --json")'
+}
+
+@test "workflows: pug-ready-without-gate: READY without a green FR/NFR gate is a contradiction, never SUCCESS" {
+  wf_scenario rs-sdlc-pr-until-green pug-ready-without-gate
+  wf_expect 'r.result === "ESCALATED" && seq("pr-state")' \
+    'has(field("blocking_finding"), "contradicting facts", "BMAD FR/NFR Review Gate missing")' \
+    'has(field("recommended_action"), "never passed with a report")'
+}
+
+@test "workflows: pug-return-gate: with onGate: 'return' a GATE verdict is handed back to the caller" {
+  wf_scenario rs-sdlc-pr-until-green pug-return-gate
+  wf_expect 'r.result === "GATE" && r.pr === 7 && r.head === "a1b2c3d" && r.counters.gate === 1' \
+    'seq("pr-state") && count(/^workflow:/) === 0' \
+    '!("verdict" in r) && !("escalation" in r)'
+}
+
+@test "workflows: pug-silent-reviewer: a reviewer silent for 6 waits is dropped with a note and the D7 pass is the comment source" {
+  wf_scenario rs-sdlc-pr-until-green pug-silent-reviewer
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && same(r.counters, {fix: 1, wait: 6, request: 1, gate: 0})' \
+    'count("wait 540s") === 6 && idx("pr-comment-resolver 1/5 D7") > idx("wait 540s")' \
+    'note("coderabbit never reviewed head a1b2c3d within 6 wait rounds", "reported as missing, not passed")' \
+    'note("no AI reviewer", "(D7)")' \
+    'has(call("pr-comment-resolver 1/5 D7").prompt, "ai-review-loop.sh", "(D7)")'
+}
+
+@test "workflows: pug-wait-exhausted: 6 WAIT verdicts exhaust the wait counter and escalate (AC-21.2)" {
+  wf_scenario rs-sdlc-pr-until-green pug-wait-exhausted
+  wf_expect 'r.result === "ESCALATED" && r.verdict === "WAIT" && same(r.counters, {fix: 0, wait: 6, request: 0, gate: 0})' \
+    'count("wait 540s") === 6 && field("iteration") === "6/6 (wait)"' \
+    'has(field("blocking_finding"), "wait budget exhausted")'
+}
+
+# --- rs-sdlc-feature (feat-, 15) -----------------------------------------------
+
+@test "workflows: feat-happy: a fresh run ends SUCCESS-WITH-REPORT, a QA FAIL hands its rows to one implementer round (AC-3.4 b)" {
+  wf_scenario rs-sdlc-feature feat-happy
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && r.branch === "feat/12-invoice-due-date" && r.specs_dir === "specs/12-invoice-due-date/" && r.pr_url === "https://github.com/acme/billing-service/pull/34"' \
+    'same(o.phases, ["Setup check", "Resolve plan", "Stage", "Implement", "Implement", "Implement", "Review", "FR/NFR gate", "QA", "Implement", "Review", "FR/NFR gate", "QA", "Finish PR"])' \
+    'order("setup-check", "resolve-plan", "stage", "story 1.1", "verify 2", "story 1.4", "publish implement", "workflow:rust-backend-sdlc:rs-sdlc-review-panel", "qa-manual-tester", "story QA-1", "publish qa-fix 1", "publish finish-pr", "pr create/update", "workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")' \
+    'count("workflow:rust-backend-sdlc:rs-sdlc-review-panel") === 2 && count("qa-manual-tester") === 2' \
+    'has(call("story QA-1").prompt, "Fix QA findings 1") && (r.stages || []).some((s) => s.stage === "qa" && s.iterations === "1/2 (qa_loops)" && s.met === "no")' \
+    'call("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green").args.onGate === "return" && stage("Finish PR").met === "yes"'
+}
+
+@test "workflows: feat-setup-fails: a failed setup check halts with the /rs-sdlc-setup instruction" {
+  wf_scenario rs-sdlc-feature feat-setup-fails
+  wf_expect 'r.result === "ESCALATED" && seq("setup-check") && same(o.phases, ["Setup check"])' \
+    'field("stage") === "setup-check" && field("iteration") === "1/1"' \
+    'has(field("blocking_finding"), "VIOLATION: quality.coverage_lines")' \
+    'field("recommended_action") === "run /rs-sdlc-setup on the default branch and commit the result"'
+}
+
+@test "workflows: feat-null-slug: a plan without a specs slug escalates at stage plan before staging" {
+  wf_scenario rs-sdlc-feature feat-null-slug
+  wf_expect 'r.result === "ESCALATED" && seq("setup-check", "resolve-plan") && r.specs_dir === null' \
+    'field("stage") === "plan" && has(field("blocking_finding"), "no planning bundle: slug null")' \
+    'has(field("recommended_action"), "/rs-sdlc-plan #12")'
+}
+
+@test "workflows: feat-incomplete-story: COMPLETE without EXIT_SIGNAL never marks a story done; 5 rounds escalate" {
+  wf_scenario rs-sdlc-feature feat-incomplete-story
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "implement" && field("iteration") === "5/5"' \
+    'count("story 1.1") === 5 && count(/^publish/) === 0' \
+    'field("blocking_finding") === "stories still open: 1.1"' \
+    'has(field("iteration_log"), "1.1 COMPLETE without EXIT_SIGNAL", "not started: the round cap is spent")'
+}
+
+@test "workflows: feat-no-nested: an unresolved nested workflow escalates with the manual command line (D21)" {
+  wf_scenario rs-sdlc-feature feat-no-nested
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "review"' \
+    'seq("setup-check", "resolve-plan", "stage", "workflow:rust-backend-sdlc:rs-sdlc-review-panel")' \
+    'has(field("blocking_finding"), "nested workflow rust-backend-sdlc:rs-sdlc-review-panel unavailable", "(D21)")' \
+    'has(field("recommended_action"), "/rs-sdlc-review specs/12-invoice-due-date/", "/rs-sdlc-qa", "/rs-sdlc-finish-pr")'
+}
+
+@test "workflows: feat-gate-escalated: an escalated FR/NFR review stops the feature before QA" {
+  wf_scenario rs-sdlc-feature feat-gate-escalated
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "review" && field("iteration") === "5/5"' \
+    'same(o.phases, ["Setup check", "Resolve plan", "Stage", "Implement", "Implement", "Review", "FR/NFR gate"])' \
+    'has(field("blocking_finding"), "FR/NFR gate escalated — 5 gate iteration(s)")' \
+    'count(/^qa-/) === 0 && count(/pr-until-green/) === 0'
+}
+
+@test "workflows: feat-qa-skipped-accepted: a QA skip is accepted only when the profile maps no make.start (D1)" {
+  wf_scenario rs-sdlc-feature feat-qa-skipped-accepted
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && note("make.start absent: black-box QA not run")' \
+    'order("qa-boot", "qa-skip-check", "publish finish-pr", "workflow:rust-backend-sdlc:rs-sdlc-pr-until-green") && count("qa-manual-tester") === 0' \
+    'stage("QA").met === "yes (degraded)"'
+}
+
+@test "workflows: feat-qa-skipped-rejected: a QA skip with make.start mapped escalates instead of passing" {
+  wf_scenario rs-sdlc-feature feat-qa-skipped-rejected
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "qa"' \
+    'has(field("blocking_finding"), "returned SKIPPED although the profile maps make.start")' \
+    'count("qa-manual-tester") === 0 && labels[labels.length - 1] === "qa-skip-check"'
+}
+
+@test "workflows: feat-implementer-blocked: an implementer reply status BLOCKED ends ESCALATED with the 7 fields (AC-3.4 b, D22)" {
+  wf_scenario rs-sdlc-feature feat-implementer-blocked
+  wf_expect 'r.result === "ESCALATED" && seven()' \
+    'field("stage") === "implement" && field("iteration") === "1/5" && field("status") === "NOT MET"' \
+    'field("exit_condition") === "all stories done with EXIT_SIGNAL true, every commit subject valid, coverage green"' \
+    'has(field("blocking_finding"), "rust-implementer BLOCKED on story 1.1", "BLOCKED: protected configuration deny.toml")' \
+    'has(field("recommended_action"), "(D22)") && has(field("iteration_log"), "story 1.1 BLOCKED")' \
+    'labels[labels.length - 1] === "story 1.1" && count("publish implement") === 0'
+}
+
+@test "workflows: feat-staging-order: stage-planning-artifacts.sh runs before bmalph implement and nothing runs bmalph run (AC-44.1)" {
+  wf_scenario rs-sdlc-feature feat-staging-order
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && note("bmalph run: not used (workflow path)")' \
+    'has(stage("Stage").detail, "steps: ralph_fix_plan_prepare → stage-planning-artifacts.sh → bmalph implement → ralph_fix_plan_restore → state_cache_update → ralph_agent_md_patch → PROJECT_CONTEXT.md check")' \
+    '((p) => p.indexOf("ralph_fix_plan_prepare") < p.indexOf("stage-planning-artifacts.sh") && p.indexOf("stage-planning-artifacts.sh") < p.indexOf("bmalph implement") && p.indexOf("bmalph implement") < p.indexOf("ralph_fix_plan_restore"))(call("stage").prompt)' \
+    'has(call("stage").prompt, "never with --force")' \
+    'calls.every((c) => !/bmalph\s+run/.test(String(c.prompt ?? "").split(BG).join(""))) && labels.every((l) => !/bmalph/.test(l))' \
+    'seq("setup-check", "resolve-plan", "stage", "story 1.3", "publish implement", "workflow:rust-backend-sdlc:rs-sdlc-review-panel", "workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review", "qa-boot", "qa-manual-tester", "publish finish-pr", "pr create/update", "workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")'
+}
+
+@test "workflows: feat-staging-context-missing: a PROJECT_CONTEXT.md without part (b) escalates before any story" {
+  wf_scenario rs-sdlc-feature feat-staging-context-missing
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "implement" && field("iteration") === "0/5"' \
+    'seq("setup-check", "resolve-plan", "stage")' \
+    'has(field("blocking_finding"), ".ralph/PROJECT_CONTEXT.md lacks part (b)", "make.tests_with_coverage")' \
+    'has(field("recommended_action"), "/rs-sdlc-plan #12", "4,500")'
+}
+
+@test "workflows: feat-staging-rerun: FIX_PLAN: current skips staging; ARCHIVED: … discard-progress stages and implements again" {
+  wf_scenario rs-sdlc-feature feat-staging-rerun
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT"' \
+    'has(stage("Stage").detail, "FIX_PLAN: current; steps: ralph_fix_plan_prepare → ralph_agent_md_patch → PROJECT_CONTEXT.md check;", "1 done")' \
+    '!has(stage("Stage").detail, "bmalph implement") && same(pick(/^story /), ["story 1.2"])'
+  # The second reply of the staging rule is the discard-progress variant.
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); for (const r of s.replies) if (r.match === "^stage$") r.reply = [r.reply[1]]; fs.writeFileSync(process.argv[2], JSON.stringify(s))' \
+    "$FX/feat-staging-rerun.json" "$BATS_TEST_TMPDIR/feat-staging-rerun-discard.json"
+  wf_scenario rs-sdlc-feature "$BATS_TEST_TMPDIR/feat-staging-rerun-discard.json"
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT"' \
+    'has(stage("Stage").detail, "discard-progress; steps: ralph_fix_plan_prepare → stage-planning-artifacts.sh → bmalph implement → state_cache_update → ralph_agent_md_patch → PROJECT_CONTEXT.md check;", "0 done")' \
+    '!has(stage("Stage").detail, "ralph_fix_plan_restore") && same(pick(/^story /), ["story 1.1", "story 1.2"])'
+}
+
+@test "workflows: feat-gate-handback: a GATE hand-back runs the FR/NFR review, publishes and re-enters pr-until-green with carry" {
+  wf_scenario rs-sdlc-feature feat-gate-handback
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && stage("Finish PR").met === "yes"' \
+    'order("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green", "publish gate 1/3") && labels.lastIndexOf("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green") > idx("publish gate 1/3")' \
+    'all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")[0].args.carry === null' \
+    'same(all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green")[1].args.carry.counters, {fix: 0, wait: 1, request: 1, gate: 1})' \
+    'same(all("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review")[1].args, {pr: 34, head: "b2c3d4e5f60718293a4b5c6d7e8f901234567890"})' \
+    'has(call("publish gate 1/3").prompt, "fix(#12): address review gate iteration 1 findings")'
+}
+
+@test "workflows: feat-gate-handback-exhausted: a fourth GATE hand-back escalates after the feature-owned 3 gate rounds" {
+  wf_scenario rs-sdlc-feature feat-gate-handback-exhausted
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "finish-pr" && field("iteration") === "3/3 (fr_nfr_gate)"' \
+    'count("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green") === 4 && count(/^publish gate /) === 3 && count("workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review") === 4' \
+    'same(all("workflow:rust-backend-sdlc:rs-sdlc-pr-until-green").map((c) => c.args.carry && c.args.carry.counters.gate), [null, 1, 2, 3])' \
+    'has(field("blocking_finding"), "after 3 hand-back rounds")'
+}
+
+@test "workflows: feat-verify-serialized: parallel stories run DB-free targets and one serialized verify step runs the DB-backed ones" {
+  wf_scenario rs-sdlc-feature feat-verify-serialized
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && stage("Implement").iterations === "2/5"' \
+    'same(pick(/^(story |verify )/), ["story 1.1", "story 1.2", "story 1.3", "verify 1", "story 1.3"])' \
+    '["story 1.1", "story 1.2", "story 1.3"].every((l) => has(call(l).prompt, "mode: parallel", "Run only the DB-free targets"))' \
+    'has(call("verify 1").prompt, "mode: verify", "make.integration_tests", "make.sqlx_prepare") && call("verify 1").agentType === "rust-backend-sdlc:rust-implementer"' \
+    'has(all("story 1.3")[1].prompt, "mode: serial", "ended STATUS: IN_PROGRESS")'
+}
