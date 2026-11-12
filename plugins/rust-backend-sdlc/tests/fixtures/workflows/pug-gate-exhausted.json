@@ -1,0 +1,255 @@
+{
+  "args": "7",
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": [
+        {
+          "verdict": "GATE",
+          "next": "rs-sdlc-fr-nfr-review --pr 7 --head a1b2c3d — the BMAD FR/NFR Review Gate status is failure on head a1b2c3d; the gate is mandatory for every PR",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "a1b2c3d",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "failure"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "APPROVED"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        },
+        {
+          "verdict": "GATE",
+          "next": "rs-sdlc-fr-nfr-review --pr 7 --head b2c3d4e — the BMAD FR/NFR Review Gate status is failure on head b2c3d4e; the gate is mandatory for every PR",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "b2c3d4e",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "failure"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "APPROVED"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        },
+        {
+          "verdict": "GATE",
+          "next": "rs-sdlc-fr-nfr-review --pr 7 --head c3d4e5f — the BMAD FR/NFR Review Gate status is failure on head c3d4e5f; the gate is mandatory for every PR",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "c3d4e5f",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "failure"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "APPROVED"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        },
+        {
+          "verdict": "GATE",
+          "next": "rs-sdlc-fr-nfr-review --pr 7 --head d4e5f6a — the BMAD FR/NFR Review Gate status is failure on head d4e5f6a; the gate is mandatory for every PR",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "d4e5f6a",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "failure"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "APPROVED"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        }
+      ]
+    },
+    {
+      "match": "^publish ",
+      "reply": [
+        {
+          "pushed": true,
+          "head": "b2c3d4e",
+          "issue": 42,
+          "commits": [
+            "fix(#42): address review gate iteration 1 findings"
+          ],
+          "reason": null,
+          "protected": null,
+          "profile_changed": false,
+          "log_tail": null,
+          "degrade_notes": []
+        },
+        {
+          "pushed": true,
+          "head": "c3d4e5f",
+          "issue": 42,
+          "commits": [
+            "fix(#42): address review gate iteration 2 findings"
+          ],
+          "reason": null,
+          "protected": null,
+          "profile_changed": false,
+          "log_tail": null,
+          "degrade_notes": []
+        },
+        {
+          "pushed": true,
+          "head": "d4e5f6a",
+          "issue": 42,
+          "commits": [
+            "fix(#42): address review gate iteration 3 findings"
+          ],
+          "reason": null,
+          "protected": null,
+          "profile_changed": false,
+          "log_tail": null,
+          "degrade_notes": []
+        }
+      ]
+    }
+  ],
+  "workflows": {
+    "rust-backend-sdlc:rs-sdlc-fr-nfr-review": [
+      {
+        "result": "SUCCESS",
+        "iterations": 1,
+        "new_findings": 0,
+        "fixed": [
+          "FRN-1 FR-3 crates/billing/invoicing/domain/src/invoice.rs:57: half-even rounding"
+        ],
+        "requirement_source": "specs/42-invoice-totals/ + PR #7 description and linked issue(s) #42",
+        "advisory": false,
+        "degrade_notes": []
+      },
+      {
+        "result": "SUCCESS",
+        "iterations": 1,
+        "new_findings": 0,
+        "fixed": [
+          "FRN-2 FR-4 crates/billing/invoicing/application/src/create_invoice.rs:31: zero-line invoice"
+        ],
+        "requirement_source": "specs/42-invoice-totals/ + PR #7 description and linked issue(s) #42",
+        "advisory": false,
+        "degrade_notes": []
+      },
+      {
+        "result": "SUCCESS",
+        "iterations": 1,
+        "new_findings": 0,
+        "fixed": [
+          "FRN-3 NFR-BASE-OBS crates/service/src/routes.rs:12: no tracing span"
+        ],
+        "requirement_source": "specs/42-invoice-totals/ + PR #7 description and linked issue(s) #42",
+        "advisory": false,
+        "degrade_notes": []
+      }
+    ]
+  }
+}

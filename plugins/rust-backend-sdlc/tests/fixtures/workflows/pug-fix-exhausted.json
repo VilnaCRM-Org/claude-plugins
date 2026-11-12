@@ -1,0 +1,83 @@
+{
+  "args": {
+    "pr": 7
+  },
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": {
+        "verdict": "FIX",
+        "next": "fix failing checks Static analysis (ci-fixer); then commit and push",
+        "pr": 7,
+        "url": "https://github.com/acme/billing-service/pull/7",
+        "head": "a1b2c3d",
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "ci": {
+          "status": "red",
+          "failing": [
+            "Static analysis"
+          ],
+          "pending": [],
+          "missing": []
+        },
+        "fr_nfr": {
+          "status": "success"
+        },
+        "unresolved": {
+          "total": 0
+        },
+        "reviewers": [
+          {
+            "name": "coderabbit",
+            "status": "APPROVED"
+          }
+        ],
+        "human_gated": {
+          "checks": [
+            "Protected configuration",
+            "OpenAPI breaking changes",
+            "GraphQL breaking changes"
+          ],
+          "failing": [],
+          "labels": {
+            "Protected configuration": "approved-config-change",
+            "OpenAPI breaking changes": "approved-breaking-change",
+            "GraphQL breaking changes": "approved-breaking-change"
+          }
+        },
+        "notes": []
+      }
+    },
+    {
+      "match": "^ci-fixer ",
+      "reply": {
+        "status": "FIXES-READY",
+        "changed_files": [
+          "crates/billing/invoicing/domain/src/invoice.rs"
+        ],
+        "fixed_check": "Static analysis",
+        "blocking_finding": null,
+        "recommended_action": null,
+        "summary": "clippy finding fixed locally; the check still fails on the next head",
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^publish ",
+      "reply": {
+        "pushed": true,
+        "head": "b2c3d4e",
+        "issue": 42,
+        "commits": [
+          "fix(#42): resolve Static analysis failure"
+        ],
+        "reason": null,
+        "protected": null,
+        "profile_changed": false,
+        "log_tail": null,
+        "degrade_notes": []
+      }
+    }
+  ]
+}

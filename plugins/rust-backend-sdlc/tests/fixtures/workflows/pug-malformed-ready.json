@@ -1,0 +1,21 @@
+{
+  "args": "7",
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": {
+        "verdict": "READY",
+        "next": "exit condition met — hand the PR to its human merger",
+        "pr": 7,
+        "head": "",
+        "ci": {
+          "status": "green"
+        },
+        "fr_nfr": {},
+        "unresolved": {},
+        "reviewers": [],
+        "notes": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "args": "7 --reviewers coderabbit,qodo",
+  "replies": [
+    {
+      "match": "^(pr-state|wait )",
+      "reply": [
+        {
+          "verdict": "REQUEST",
+          "next": "request-ai-reviews.sh --pr 7 --reviewers coderabbit,qodo",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "a1b2c3d",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "STALE",
+              "reason": "last live review is on 9f8e7d6"
+            },
+            {
+              "name": "qodo",
+              "status": "STALE",
+              "reason": "last live review is on 9f8e7d6"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        },
+        {
+          "verdict": "REQUEST",
+          "next": "request-ai-reviews.sh --pr 7 --reviewers coderabbit",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "a1b2c3d",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "STALE",
+              "reason": "last live review is on 9f8e7d6"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        },
+        {
+          "verdict": "WAIT",
+          "next": "pr-state.sh --pr 7 --wait-seconds 540 — waiting for reviews from coderabbit",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "a1b2c3d",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "REQUESTED",
+              "ack": true,
+              "reason": "mention posted 1m ago"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        },
+        {
+          "verdict": "READY",
+          "next": "exit condition met — hand the PR to its human merger",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "a1b2c3d",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "APPROVED"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        }
+      ]
+    },
+    {
+      "match": "^request ",
+      "reply": [
+        {
+          "requested": [],
+          "waiting": [
+            {
+              "name": "coderabbit",
+              "minutes": 25
+            }
+          ],
+          "skipped": [
+            {
+              "name": "qodo",
+              "reason": "reviews are paused for this account (lapsed subscription)"
+            }
+          ],
+          "error": null
+        },
+        {
+          "requested": [
+            "coderabbit"
+          ],
+          "waiting": [],
+          "skipped": [],
+          "error": null
+        }
+      ]
+    }
+  ]
+}
