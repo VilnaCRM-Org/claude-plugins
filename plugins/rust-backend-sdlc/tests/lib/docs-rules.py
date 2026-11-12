@@ -23,12 +23,15 @@ plain prose, as in the template's scripts/check-docs.sh:
   (e) a line holding the template's own repository name (the literal is
       assembled from two halves below) or the repository name of the sync
       workflows' TEMPLATE_REPOSITORY: line; that line of the two sync
-      workflows is the one allowed place.
+      workflows is the one allowed place. (e) checks every FILE named: the
+      caller picks the files (the template's rule covers CLAUDE.md, AGENTS.md
+      and its code and workflow directories, not README.md or docs/).
 
 The template's run-time parts (the verification block against make ci-list,
 service commands from the binary's help) are out of scope: nothing is
-executed except git. "Tracked" means git ls-files when --root has a .git
-entry, else every file under --root.
+executed except git. Rule 1 knows only the targets documented with ``##``,
+the set ``make help`` lists in a template-derived repository. "Tracked" means
+git ls-files when --root has a .git entry, else every file under --root.
 
 Exit: 0 no finding; 1 at least one finding; 2 usage error.
 """
