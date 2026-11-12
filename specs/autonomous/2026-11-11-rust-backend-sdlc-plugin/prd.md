@@ -1073,6 +1073,9 @@ Non-blocking; each has a recommended default.
 3. **Ledger schema versioning:** add `schema_version` to ledger JSON; default: `1`, validated by the poster.
 4. **Template-detection evolution:** when the template renames a marker file, default to WARN (not FAIL) and record `capabilities.template_derived: false` until the plugin updates.
 5. **Workflow ↔ script data exchange:** default: workflows call scripts and parse their `--json` output; no shared JS module.
+6. **Upstream template suggestion (PA-20):** `docs/extension-seams.md:82` should cite the sync guides by bare file name, like `docs/new-service.md` and both guides already do, so that deleting a flavour needs no edit; default: the plugin repairs it in `new-service.sh` and the suggestion is filed against the template; when the template fixes it, the repair step finds nothing and prints `UNCHANGED: docs-check citations`.
+7. **Plugin agents inside Ralph's sessions (PA-17):** whether `rust-backend-sdlc:rust-implementer` resolves inside the claude-code sessions `bmalph run` starts depends on the plugin's install scope; default: a user-scope install makes it available, otherwise Ralph implements stories sequentially under the same DB rule (the `## Constraints` text covers both).
+8. **Container-route permission spelling (FR-1, FR-9):** verify how Claude Code's `Bash(<prefix>:*)` matching treats `docker compose exec -T --user "$(id -u):$(id -g)" app …` (command substitution may force a prompt); default: resolve the uid/gid once into literals before the call and allow the literal prefix.
 
 ## Traceability
 
