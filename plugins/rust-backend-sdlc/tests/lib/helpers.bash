@@ -36,7 +36,7 @@ common_setup() {
   export PATH
   mkdir -p "$tmp/stub-logs" || return 1
   for name in CLAUDE GH BMALPH CURL CARGO MAKE DOCKER; do
-    lower="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+    lower="${name,,}"
     export "STUB_${name}_LOG=$tmp/stub-logs/$lower.log"
     : >"$tmp/stub-logs/$lower.log" || return 1
   done
@@ -47,8 +47,9 @@ common_setup() {
       STUB_CLAUDE_LOG | STUB_GH_LOG | STUB_BMALPH_LOG | STUB_CURL_LOG) ;;
       STUB_CARGO_LOG | STUB_MAKE_LOG | STUB_DOCKER_LOG) ;;
       STUB_*_LOG)
-        lower="$(printf '%s' "${var%_LOG}" | tr '[:upper:]' '[:lower:]')"
-        export "$var=$tmp/stub-logs/${lower#stub_}.log"
+        lower="${var%_LOG}"
+        lower="${lower#STUB_}"
+        export "$var=$tmp/stub-logs/${lower,,}.log"
         ;;
       *) ;;
     esac
