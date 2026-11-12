@@ -2486,6 +2486,562 @@ ledger_write() {
   printf 'WROTE: %s\n' "$path"
 }
 
+# section: stage state and resume
+
+# Durable stage state (ADR-14): the JSON cache
+# target/rust-sdlc/state/<N>-<slug>.json written by state_cache_update, the
+# issue state comment (`<!-- rust-sdlc-state -->` and the table
+# `| stage | result | head_sha | iteration | at |`) rendered by
+# state_comment_body, and resume_point, which applies the PA-7 validity rules
+# to that comment (only one authored by the posting identity, ADR-26) or to
+# the cache and reports where the orchestrator resumes, with every counter.
+# All three are dispatcher names (ADR-15); none calls gh (the orchestrator
+# reads and writes the comment). Private helpers carry the _sr_ prefix.
+
+# _sr_state_py MODE ARG... — the python3 side of the state helpers. The cache
+# document is checked strictly: exactly the keys schema_version (1), issue and
+# slug (equal to the file name's), staged_specs_dir (a single-line path or
+# null) and stages, whose elements hold exactly stage, result, head_sha (40
+# lower-case hex), iteration (an integer >= 0, or for finish-pr the cell
+# A<n>.B<n>.C<n>.W<n>.R<n>) and at (YYYY-MM-DDTHH:MM:SSZ), one element per
+# stage. Modes:
+#   update FILE ISSUE SLUG STAGE RESULT SHA ITERATION AT SET_SPECS SPECS
+#          print the updated cache document (FILE is read when it exists): the
+#          row of STAGE replaced or added, rows in stage order, and with
+#          SET_SPECS=1 the top-level staged_specs_dir set to SPECS
+#   body FILE ISSUE SLUG      print the state comment body of the cache
+#   rows FILE ISSUE SLUG      print `ROW<TAB>stage<TAB>result<TAB>sha<TAB>iteration`
+#                             per cached stage, in stage order
+#   comments LOGIN            read the issue comments JSON on stdin (arrays,
+#                             concatenated pages, an array of pages or NDJSON),
+#                             print `DEGRADED: ignored state comment by <login>`
+#                             per marker comment of another author, then the
+#                             ROW lines of the oldest marker comment by LOGIN
+# Iterations are printed without leading zeros. A malformed cache, comments
+# document or state table exits 1, a malformed argument exits 2; the reason
+# goes to stderr.
+_sr_state_py() {
+  _sdlc_py -c '
+import json
+import os
+import re
+import sys
+
+if hasattr(sys, "set_int_max_str_digits"):
+    sys.set_int_max_str_digits(0)
+
+MARKER = "<!-- rust-sdlc-state -->"
+STAGES = ("issue", "plan", "implement", "review", "qa", "finish-pr")
+RESULTS = ("PASS", "IN_PROGRESS", "ESCALATED")
+COLUMNS = ("stage", "result", "head_sha", "iteration", "at")
+TOP = ("schema_version", "issue", "slug", "staged_specs_dir", "stages")
+SHA = re.compile(r"[0-9a-f]{40}")
+UINT = re.compile(r"[0-9]+")
+CELL = re.compile(r"A([0-9]+)\.B([0-9]+)\.C([0-9]+)\.W([0-9]+)\.R([0-9]+)")
+AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+RULE = re.compile(r":?-{3,}:?")
+CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def fail(message, code=1):
+    sys.stderr.write("[rust-sdlc][ERROR] %s\n" % CTRL.sub("?", message))
+    sys.exit(code)
+
+
+def digits(text):
+    return text.lstrip("0") or "0"
+
+
+def shown(value):
+    return json.dumps(value, ensure_ascii=False)
+
+
+def check_row(where, stage, result, sha, iteration, at, cached, code=1):
+    """The validated row (stage, result, sha, iteration text, at)."""
+    if stage not in STAGES:
+        fail("%s: stage %s is not one of %s" % (where, shown(stage), " ".join(STAGES)), code)
+    if result not in RESULTS:
+        fail("%s: result %s is not one of %s" % (where, shown(result), " ".join(RESULTS)), code)
+    if not isinstance(sha, str) or not SHA.fullmatch(sha):
+        fail("%s: head_sha %s is not 40 lower-case hex digits" % (where, shown(sha)), code)
+    if stage == "finish-pr":
+        match = CELL.fullmatch(iteration) if isinstance(iteration, str) else None
+        if match is None:
+            fail("%s: the finish-pr iteration %s is not the cell A<n>.B<n>.C<n>.W<n>.R<n>"
+                 % (where, shown(iteration)), code)
+        iteration = "A%s.B%s.C%s.W%s.R%s" % tuple(digits(group) for group in match.groups())
+    elif cached:
+        if type(iteration) is not int or iteration < 0:
+            fail("%s: iteration %s is not an integer >= 0" % (where, shown(iteration)), code)
+        iteration = str(iteration)
+    else:
+        if not isinstance(iteration, str) or not UINT.fullmatch(iteration):
+            fail("%s: iteration %s is not an integer >= 0" % (where, shown(iteration)), code)
+        iteration = digits(iteration)
+    if not isinstance(at, str) or not AT.fullmatch(at):
+        fail("%s: at %s is not YYYY-MM-DDTHH:MM:SSZ" % (where, shown(at)), code)
+    return (stage, result, sha, iteration, at)
+
+
+def unique_keys(pairs):
+    seen = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError("duplicate key %s" % json.dumps(key))
+        seen[key] = value
+    return seen
+
+
+def no_constant(name):
+    raise ValueError("%s is not JSON" % name)
+
+
+def first_line(exc):
+    return (str(exc).splitlines() or ["invalid JSON"])[0]
+
+
+def load_cache(path, issue, slug):
+    """The cache document and its rows by stage; exit 1 when malformed."""
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read()
+    except OSError as exc:
+        fail("%s: cannot read the state cache: %s" % (path, exc.strerror or exc))
+    try:
+        doc = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_keys,
+                         parse_constant=no_constant)
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        fail("%s: not a state cache JSON document: %s" % (path, first_line(exc)))
+    if not isinstance(doc, dict) or sorted(doc) != sorted(TOP):
+        fail("%s: the state cache must hold exactly the keys %s" % (path, " ".join(TOP)))
+    if type(doc["schema_version"]) is not int or doc["schema_version"] != 1:
+        fail("%s: schema_version %s is not 1" % (path, shown(doc["schema_version"])))
+    if type(doc["issue"]) is not int or str(doc["issue"]) != issue:
+        fail("%s: issue %s does not match the file name (%s)" % (path, shown(doc["issue"]), issue))
+    if doc["slug"] != slug:
+        fail("%s: slug %s does not match the file name (%s)" % (path, shown(doc["slug"]), slug))
+    specs = doc["staged_specs_dir"]
+    if specs is not None and (not isinstance(specs, str) or not specs or CTRL.search(specs)):
+        fail("%s: staged_specs_dir %s is not a single-line path or null" % (path, shown(specs)))
+    if not isinstance(doc["stages"], list):
+        fail("%s: stages is not an array" % path)
+    rows = {}
+    for index, element in enumerate(doc["stages"]):
+        where = "%s: stages[%d]" % (path, index)
+        if not isinstance(element, dict) or sorted(element) != sorted(COLUMNS):
+            fail("%s: an element must hold exactly the keys %s" % (where, " ".join(COLUMNS)))
+        row = check_row(where, *(element[key] for key in COLUMNS), cached=True)
+        if row[0] in rows:
+            fail("%s: a second %s element" % (where, row[0]))
+        rows[row[0]] = row
+    return doc, rows
+
+
+def element(row):
+    stage, result, sha, iteration, at = row
+    return {"stage": stage, "result": result, "head_sha": sha,
+            "iteration": iteration if stage == "finish-pr" else int(iteration), "at": at}
+
+
+def emit(text):
+    sys.stdout.buffer.write(text.encode("utf-8"))
+
+
+def print_rows(rows):
+    for stage in STAGES:
+        if stage in rows:
+            emit("ROW\t%s\n" % "\t".join(rows[stage][:4]))
+
+
+def cells(line):
+    if len(line) < 2 or not line.startswith("|") or not line.endswith("|"):
+        return None
+    return [cell.strip() for cell in line[1:-1].split("|")]
+
+
+def parse_table(body):
+    """The rows by stage of a state comment body; exit 1 when malformed."""
+    lines = body.splitlines()
+    if lines[0].rstrip() != MARKER:
+        fail("resume_point: the state comment must start with a line holding only %s" % MARKER)
+    rest = [line.strip() for line in lines[1:]]
+    while rest and not rest[0]:
+        rest.pop(0)
+    while rest and not rest[-1]:
+        rest.pop()
+    if len(rest) < 2 or cells(rest[0]) != list(COLUMNS):
+        fail("resume_point: the state comment holds no | %s | table" % " | ".join(COLUMNS))
+    rule = cells(rest[1])
+    if rule is None or len(rule) != len(COLUMNS) or not all(RULE.fullmatch(cell) for cell in rule):
+        fail("resume_point: the state table has no | --- | separator row")
+    rows = {}
+    for number, line in enumerate(rest[2:], 1):
+        values = cells(line)
+        where = "resume_point: state table row %d" % number
+        if values is None or len(values) != len(COLUMNS):
+            fail("%s is not a row of %d cells" % (where, len(COLUMNS)))
+        row = check_row(where, *values, cached=False)
+        if row[0] in rows:
+            fail("%s: a second %s row" % (where, row[0]))
+        rows[row[0]] = row
+    return rows
+
+
+def comments(login):
+    try:
+        text = sys.stdin.buffer.read().decode("utf-8")
+    except UnicodeDecodeError:
+        fail("resume_point: stdin is not UTF-8")
+    decoder = json.JSONDecoder(parse_constant=no_constant)
+    values = []
+    index = 0
+    while index < len(text):
+        if text[index] in " \t\r\n":
+            index += 1
+            continue
+        try:
+            value, index = decoder.raw_decode(text, index)
+        except (ValueError, RecursionError) as exc:
+            fail("resume_point: stdin is not the issue comments JSON: %s" % first_line(exc))
+        values.append(value)
+    if not values:
+        fail("resume_point: stdin holds no issue comments JSON")
+    found = []
+    for value in values:
+        for page in (value if isinstance(value, list) else [value]):
+            for comment in (page if isinstance(page, list) else [page]):
+                if not isinstance(comment, dict):
+                    fail("resume_point: stdin holds %s where a comment object belongs"
+                         % type(comment).__name__)
+                found.append(comment)
+    trusted = []
+    for position, comment in enumerate(found):
+        body = comment.get("body")
+        if not isinstance(body, str) or not body.startswith(MARKER):
+            continue
+        user = comment.get("user")
+        author = user.get("login") if isinstance(user, dict) else None
+        if author == login:
+            created = comment.get("created_at")
+            trusted.append((created if isinstance(created, str) else "", position, body))
+            continue
+        name = CTRL.sub("", author) if isinstance(author, str) else ""
+        emit("DEGRADED: ignored state comment by %s\n" % (name or "(unknown)"))
+    if trusted:
+        print_rows(parse_table(min(trusted)[2]))
+
+
+mode, args = sys.argv[1], sys.argv[2:]
+if mode == "comments":
+    comments(args[0])
+elif mode in ("rows", "body"):
+    rows = load_cache(*args)[1]
+    if mode == "rows":
+        print_rows(rows)
+    else:
+        lines = [MARKER, "", "| %s |" % " | ".join(COLUMNS), "|%s" % (" --- |" * len(COLUMNS))]
+        lines += ["| %s |" % " | ".join(rows[stage]) for stage in STAGES if stage in rows]
+        emit("\n".join(lines) + "\n")
+elif mode == "update":
+    path, issue, slug, stage, result, sha, iteration, at, set_specs, specs = args
+    new = check_row("state_cache_update", stage, result, sha, iteration, at, cached=False, code=2)
+    if set_specs == "1":
+        try:
+            specs.encode("utf-8")
+        except UnicodeEncodeError:
+            fail("state_cache_update: --staged-specs-dir is not UTF-8", 2)
+        if not specs or CTRL.search(specs):
+            fail("state_cache_update: --staged-specs-dir must be a single-line path", 2)
+    if os.path.lexists(path):
+        doc, rows = load_cache(path, issue, slug)
+    else:
+        doc = {"staged_specs_dir": None}
+        rows = {}
+    rows[new[0]] = new
+    out = {
+        "schema_version": 1,
+        "issue": int(issue),
+        "slug": slug,
+        "staged_specs_dir": specs if set_specs == "1" else doc["staged_specs_dir"],
+        "stages": [element(rows[name]) for name in STAGES if name in rows],
+    }
+    emit(json.dumps(out, indent=2, ensure_ascii=False) + "\n")
+else:
+    fail("_sr_state_py: unknown mode %s" % mode, 2)
+' "$@"
+}
+
+# _sr_cache_name FILE — `<issue> <slug>` from FILE's base name
+# ^([1-9][0-9]*)-([a-z0-9-]+)\.json$; status 1 with no output for any other
+# name (a path ending in `/` included).
+_sr_cache_name() {
+  local file="${1-}" base
+  [[ -n "$file" && "$file" != */ ]] || return 1
+  base="${file##*/}"
+  [[ "$base" =~ ^([1-9][0-9]*)-([a-z0-9-]+)\.json$ ]] || return 1
+  printf '%s %s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+}
+
+# _sr_counts STAGE HEAD RESULT SHA — the PA-7 rule for one recorded stage:
+# issue, plan and implement count when RESULT is PASS and SHA is an ancestor of
+# (or equal to) HEAD (`git merge-base --is-ancestor`); review and qa only when
+# RESULT is PASS and SHA equals HEAD; finish-pr never counts (it is re-derived
+# from a live pr-state.sh snapshot). An unknown SHA does not count.
+_sr_counts() {
+  local stage="$1" head="$2" result="$3" sha="$4"
+  [[ "$result" == PASS && "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  case "$stage" in
+    issue | plan | implement) git merge-base --is-ancestor "$sha" "$head" 2>/dev/null ;;
+    review | qa) [[ "$sha" == "$head" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+# _sr_breaker — the `.state` of Ralph's breaker file in the working directory
+# (ADR-10c), read with python3 json: CLOSED, OPEN or HALF_OPEN; nothing when
+# the file is absent, unreadable or holds another value. Read only.
+_sr_breaker() {
+  local state_file=.ralph/.circuit_breaker_state
+  [[ -f "$state_file" ]] || return 0
+  _sdlc_py -c '
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        state = json.load(handle).get("state")
+except Exception:
+    sys.exit(0)
+if state in ("CLOSED", "OPEN", "HALF_OPEN"):
+    print(state)
+' "$state_file" 2>/dev/null || true
+}
+
+# state_cache_update FILE STAGE RESULT HEAD_SHA ITERATION
+# [--staged-specs-dir DIR] — creates or updates the cache FILE atomically:
+# {"schema_version": 1, "issue": <N>, "slug": "<slug>", "staged_specs_dir":
+# <path|null>, "stages": [{"stage", "result", "head_sha", "iteration", "at"}]}
+# with issue and slug parsed from FILE's base name
+# ^([1-9][0-9]*)-([a-z0-9-]+)\.json$ and at = utc_now. One element per stage:
+# STAGE's element is replaced or added, elements stay in stage order (issue
+# plan implement review qa finish-pr) and the other elements are kept.
+# STAGE ∈ issue plan implement review qa finish-pr; RESULT ∈ PASS IN_PROGRESS
+# ESCALATED; HEAD_SHA 40 lower-case hex; ITERATION a digit string (stored as
+# an integer), for finish-pr the cell ^A[0-9]+\.B[0-9]+\.C[0-9]+\.W[0-9]+\.R[0-9]+$
+# (stored as a string). --staged-specs-dir sets the top-level staged_specs_dir
+# (ADR-10a); without it the cached value is kept (null for a new cache).
+# Prints `WROTE: <FILE>`. A relative FILE must stay inside the working
+# directory (safe_write_target), an absolute one gets its directory created.
+# Exit 2 on a malformed argument (any other file name included), nothing
+# written; exit 1 when the existing cache is malformed or the path is refused,
+# the file unchanged.
+state_cache_update() {
+  local usage='(usage: state_cache_update FILE STAGE RESULT HEAD_SHA ITERATION [--staged-specs-dir DIR])'
+  local cell='^A[0-9]+\.B[0-9]+\.C[0-9]+\.W[0-9]+\.R[0-9]+$'
+  local -a pos=()
+  local specs="" have_specs=0 file stage result sha iteration name root at doc
+  while (($#)); do
+    case "$1" in
+      --staged-specs-dir)
+        if (($# < 2)) || [[ -z "$2" ]]; then
+          log_error "state_cache_update: --staged-specs-dir needs a value $usage"
+          return 2
+        fi
+        if ((have_specs)); then
+          log_error "state_cache_update: --staged-specs-dir given twice $usage"
+          return 2
+        fi
+        have_specs=1
+        specs="$2"
+        shift 2
+        ;;
+      --*)
+        log_error "state_cache_update: unknown argument: $(_ch_clean "$1") $usage"
+        return 2
+        ;;
+      *)
+        pos+=("$1")
+        shift
+        ;;
+    esac
+  done
+  if ((${#pos[@]} != 5)); then
+    log_error "state_cache_update: needs FILE, STAGE, RESULT, HEAD_SHA and ITERATION $usage"
+    return 2
+  fi
+  file="${pos[0]}"
+  stage="${pos[1]}"
+  result="${pos[2]}"
+  sha="${pos[3]}"
+  iteration="${pos[4]}"
+  if ! name="$(_sr_cache_name "$file")"; then
+    log_error "state_cache_update: FILE must be named <N>-<slug>.json: $(_ch_clean "$file")"
+    return 2
+  fi
+  case "$stage" in
+    issue | plan | implement | review | qa | finish-pr) ;;
+    *)
+      log_error "state_cache_update: STAGE must be one of issue plan implement review qa finish-pr: $(_ch_clean "$stage")"
+      return 2
+      ;;
+  esac
+  case "$result" in
+    PASS | IN_PROGRESS | ESCALATED) ;;
+    *)
+      log_error "state_cache_update: RESULT must be one of PASS IN_PROGRESS ESCALATED: $(_ch_clean "$result")"
+      return 2
+      ;;
+  esac
+  if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+    log_error "state_cache_update: HEAD_SHA must be 40 lower-case hex digits: $(_ch_clean "$sha")"
+    return 2
+  fi
+  if [[ "$stage" == finish-pr && ! "$iteration" =~ $cell ]]; then
+    log_error "state_cache_update: the finish-pr ITERATION must be the cell A<n>.B<n>.C<n>.W<n>.R<n>: $(_ch_clean "$iteration")"
+    return 2
+  fi
+  if [[ "$stage" != finish-pr ]] && ! is_uint "$iteration"; then
+    log_error "state_cache_update: ITERATION must be a non-negative integer: $(_ch_clean "$iteration")"
+    return 2
+  fi
+  if ((have_specs)) && [[ "$(_ch_clean "$specs")" != "$specs" ]]; then
+    log_error "state_cache_update: --staged-specs-dir must be a single-line path"
+    return 2
+  fi
+  if [[ "$file" == /* ]]; then
+    root="$(dirname -- "$file")"
+    mkdir -p -- "$root" || return 1
+  else
+    root="$PWD"
+  fi
+  safe_write_target "$file" "$root" || return 1
+  at="$(utc_now)" || return 1
+  doc="$(_sr_state_py update "$file" "${name%% *}" "${name#* }" \
+    "$stage" "$result" "$sha" "$iteration" "$at" "$have_specs" "$specs")" || return
+  printf '%s\n' "$doc" | atomic_write "$file" || return 1
+  printf 'WROTE: %s\n' "$file"
+}
+
+# state_comment_body FILE — prints the issue state comment of the cache FILE:
+# `<!-- rust-sdlc-state -->`, a blank line and the table
+# `| stage | result | head_sha | iteration | at |` with its `| --- |` row and
+# one row per cached stage in stage order (head_sha in full, so resume_point
+# can check it), passed through the redaction list of redact
+# (_pm_redact_stream, NFR-10), which keeps 40-hex shas. Exit 2 when FILE is
+# not named <N>-<slug>.json or the arguments are wrong; exit 1 when FILE is
+# missing or malformed.
+state_comment_body() {
+  local usage='(usage: state_comment_body FILE)' name body
+  if (($# != 1)); then
+    log_error "state_comment_body: needs exactly one FILE $usage"
+    return 2
+  fi
+  if ! name="$(_sr_cache_name "$1")"; then
+    log_error "state_comment_body: FILE must be named <N>-<slug>.json: $(_ch_clean "$1")"
+    return 2
+  fi
+  body="$(_sr_state_py body "$1" "${name%% *}" "${name#* }")" || return 1
+  printf '%s\n' "$body" | _pm_redact_stream
+}
+
+# resume_point --comments LOGIN | --cache FILE — where /rs-sdlc resumes (FR-3,
+# PA-7). --comments reads the issue comments JSON on stdin (the
+# `gh api …/comments --paginate` output: arrays or NDJSON) and takes the oldest
+# comment whose body starts with `<!-- rust-sdlc-state -->` and whose
+# user.login equals LOGIN; every marker comment of another author prints
+# `DEGRADED: ignored state comment by <login>` and is never read (ADR-26).
+# --cache reads the cache FILE. In the working directory's repository, each
+# stage in order counts by _sr_counts and only while every earlier stage
+# counts (stages run in order); each counting stage prints
+# `DONE_STAGE: <stage> <sha7> <iteration>`. Then `RESUME_STAGE: <stage>` (the
+# first stage that does not count; finish-pr is always re-derived live), or
+# `BLOCKED_STAGE: implement breaker=<OPEN|HALF_OPEN>` when the implement row
+# is ESCALATED and .ralph/.circuit_breaker_state is OPEN or HALF_OPEN
+# (ADR-10c), and last `COUNTERS: issue=<n>,plan=<n>,implement=<n>,review=<n>,
+# qa=<n>,finish-pr=A<n>.B<n>.C<n>.W<n>.R<n>` from every recorded row, valid or
+# stale (0 and A0.B0.C0.W0.R0 when unrecorded). No record means
+# `RESUME_STAGE: issue`. Never calls gh. Exit 1 on malformed input (comments
+# JSON, state table or cache, a missing cache) or without a HEAD commit,
+# nothing on stdout; exit 2 on a malformed argument.
+resume_point() {
+  local usage='(usage: resume_point --comments LOGIN | --cache FILE)'
+  local mode="" value="" name records head line tag stage result sha iteration s
+  local resume="" valid=1 breaker=""
+  local -A got_result=() got_sha=() got_iter=()
+  while (($#)); do
+    case "$1" in
+      --comments | --cache)
+        if (($# < 2)) || [[ -z "$2" ]]; then
+          log_error "resume_point: $1 needs a value $usage"
+          return 2
+        fi
+        if [[ -n "$mode" ]]; then
+          log_error "resume_point: takes one of --comments and --cache $usage"
+          return 2
+        fi
+        mode="$1"
+        value="$2"
+        shift 2
+        ;;
+      *)
+        log_error "resume_point: unknown argument: $(_ch_clean "$1") $usage"
+        return 2
+        ;;
+    esac
+  done
+  if [[ -z "$mode" ]]; then
+    log_error "resume_point: needs --comments LOGIN or --cache FILE $usage"
+    return 2
+  fi
+  if [[ "$mode" == --cache ]]; then
+    if ! name="$(_sr_cache_name "$value")"; then
+      log_error "resume_point: the cache must be named <N>-<slug>.json: $(_ch_clean "$value")"
+      return 2
+    fi
+    records="$(_sr_state_py rows "$value" "${name%% *}" "${name#* }")" || return 1
+  else
+    if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$ ]]; then
+      log_error "resume_point: LOGIN is not a GitHub login: $(_ch_clean "$value")"
+      return 2
+    fi
+    records="$(_sr_state_py comments "$value")" || return 1
+  fi
+  if ! head="$(git rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"; then
+    log_error "resume_point: no HEAD commit in the working directory (run it at the repository root)"
+    return 1
+  fi
+  while IFS= read -r line; do
+    case "$line" in
+      ROW$'\t'*)
+        IFS=$'\t' read -r tag stage result sha iteration <<<"$line"
+        got_result["$stage"]="$result"
+        got_sha["$stage"]="$sha"
+        got_iter["$stage"]="$iteration"
+        ;;
+      'DEGRADED: '*) printf '%s\n' "$line" ;;
+      *) ;;
+    esac
+  done <<<"$records"
+  for s in issue plan implement review qa finish-pr; do
+    if ((valid)) && _sr_counts "$s" "$head" "${got_result[$s]-}" "${got_sha[$s]-}"; then
+      printf 'DONE_STAGE: %s %s %s\n' "$s" "${got_sha[$s]:0:7}" "${got_iter[$s]}"
+    else
+      valid=0
+      resume="${resume:-$s}"
+    fi
+  done
+  if [[ "${got_result[implement]-}" == ESCALATED ]]; then
+    breaker="$(_sr_breaker)"
+  fi
+  case "$breaker" in
+    OPEN | HALF_OPEN) printf 'BLOCKED_STAGE: implement breaker=%s\n' "$breaker" ;;
+    *) printf 'RESUME_STAGE: %s\n' "$resume" ;;
+  esac
+  printf 'COUNTERS: issue=%s,plan=%s,implement=%s,review=%s,qa=%s,finish-pr=%s\n' \
+    "${got_iter[issue]:-0}" "${got_iter[plan]:-0}" "${got_iter[implement]:-0}" \
+    "${got_iter[review]:-0}" "${got_iter[qa]:-0}" "${got_iter[finish-pr]:-A0.B0.C0.W0.R0}"
+}
+
 # section: dispatch (keep last)
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   _sdlc_dispatch "$@"

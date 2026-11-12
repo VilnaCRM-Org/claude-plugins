@@ -724,7 +724,7 @@ Usage `post-review-findings.sh <lens> [--pr N] [--file F]... [--dry-run] [--json
 - Redaction before render (`redact`); `--json` emits valid JSON; no literal NUL bytes in the script (X16); writes only to the origin repository's own PR.
 
 **Acceptance criteria**
-- AC-37.1 `post-review-findings.bats` (≥ 41 cases): every degrade path exits 0 with its note; marker idempotence (second post edits); conclusion once; each redaction rule; `--json` parses with `jq`/python; `grep -c $'\x00'` on the script = 0; mismatched base repo refused.
+- AC-37.1 `post-review-findings.bats` (≥ 41 cases): every degrade path exits 0 with its note; marker idempotence (second post edits); conclusion once; each redaction rule; `--json` parses with `jq`/python; no NUL byte in the script (`tr -cd '\000' < script | wc -c` is 0); mismatched base repo refused.
 
 #### FR-38 — `scripts/pr-state.sh` (G2)
 
@@ -1208,3 +1208,5 @@ Reviser pass of 2026-11-12 over 41 findings (in the order received). Each was ve
 | 39 | QA never migrates a running stack; liveness flaps | applied | verified compose `migrate` service and watchexec CMD; `make migrate` before probes, bounded double-200 liveness poll (FR-20, AC-20.2, NFR-6) |
 | 40 | Ralph vs fan-out actor; workflow without bmalph | applied | duplicate of 9 and 10; wording pinned in AC-18.1 and AC-44.1 |
 | 41 | NFR-3 outcome words outside the vocabulary | applied | Outcome column normalised to SUCCESS / SUCCESS-WITH-REPORT / ESCALATED with notes in Behaviour; AC asserts the closed set |
+
+- 2026-11-12 (Phase 4, orchestrator): AC-37.1: `grep -c $'\x00'` replaced by a `tr -cd '\000' | wc -c` NUL-byte count. Bash cannot pass a NUL byte in an argument, so `$'\x00'` expanded to an empty pattern and the check counted every line; it could never pass.

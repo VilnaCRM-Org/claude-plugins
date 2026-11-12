@@ -1027,7 +1027,7 @@ So that findings are visible, deduplicated, redacted and never duplicated or for
 - Given `post-review-findings.sh <lens> --pr N` with lens ∈ `security fr-nfr code-review` and the default ledger `${SDLC_LEDGER_DIR:-target/rust-sdlc/review-ledgers}/<lens>.json`, when no marker comment of the posting identity exists, then it creates one with marker `<!-- rust-sdlc-review:<lens> -->` and prints `POSTED: <lens> created <url>`; a second post PATCHes the oldest comment carrying that marker and authored by the posting identity (`--bot-login`, else `gh api user --jq .login`) and prints `POSTED: <lens> updated <comment-id>`; nothing is ever deleted; a forged marker by another author (`pr-issue-comments-forged.ndjson`) is ignored, a new comment is created when the identity resolves and nothing is edited when it does not.
 - Given `--conclusion [--file F]...`, when it runs, then the conclusion marker `<!-- rust-sdlc-review:conclusion -->` is posted exactly once per PR (a conclusion by another author does not count), with `started_at`/`ended_at` taken from the ledgers (`with-times.json`) when `--started-at`/`--ended-at` are absent, and `--duration-seconds`/`--iterations` rendered when given.
 - Given the ledger fixtures, when rendered, then findings are deduplicated by `(file, line, rule)` with null read as empty (`dedup-pair`), same `file:line` with distinct rules kept and `|` escaped (`pipe-and-distinct`), sorted Critical → Info (`mixed-severity`), `dropped` rows filtered (`dropped-and-open`), requirement-level rows rendered (`null-location`), a 20-digit iteration printed verbatim, every `redact` pattern applied before rendering (`secret-laden`, one case per pattern), `--json` output parses with jq and python3, and `--dry-run` prints `WOULD: post <lens>`.
-- Given each degrade condition (`capabilities.publish_pr_comments: false` via `publish-off.yml`, gh absent, no PR, empty or all-dropped ledger, `schema_version` other than 1 via `wrong-schema-version.json` with a missing version read as 1, a malformed gh read, a base-repository mismatch, a write failure), when it runs, then it prints `DEGRADED: <reason>`, posts nothing and exits 0; a malformed ledger named with `--file` (`extra-key.json`) exits 1; usage errors exit 2; `grep -c $'\x00'` on the script is 0; the script meets SC-SCRIPT and SC-SUITE.
+- Given each degrade condition (`capabilities.publish_pr_comments: false` via `publish-off.yml`, gh absent, no PR, empty or all-dropped ledger, `schema_version` other than 1 via `wrong-schema-version.json` with a missing version read as 1, a malformed gh read, a base-repository mismatch, a write failure), when it runs, then it prints `DEGRADED: <reason>`, posts nothing and exits 0; a malformed ledger named with `--file` (`extra-key.json`) exits 1; usage errors exit 2; the script contains no NUL byte (`tr -cd '\000' < script | wc -c` is 0); the script meets SC-SCRIPT and SC-SUITE.
 
 **Files owned:**
 
@@ -1041,7 +1041,7 @@ So that findings are visible, deduplicated, redacted and never duplicated or for
 **Verification:**
 
 - `v_sh plugins/rust-backend-sdlc/scripts/post-review-findings.sh && v_banned plugins/rust-backend-sdlc/scripts/post-review-findings.sh && v_gen plugins/rust-backend-sdlc/scripts/post-review-findings.sh`
-- `test "$(grep -c $'\x00' plugins/rust-backend-sdlc/scripts/post-review-findings.sh)" -eq 0`
+- `test "$(tr -cd '\000' < plugins/rust-backend-sdlc/scripts/post-review-findings.sh | wc -c)" -eq 0`
 - `v_bats post-review-findings 46`
 
 ## Epic 4: Rust skill library
@@ -2466,3 +2466,5 @@ Revision 2 (2026-11-12, implementation readiness): the story-side changes for th
 | IR-9 | story `**FRs:**` lines and the FR Coverage Map disagreed in 30 places (e.g. 3.1 claimed FR-34/FR-35 absent from their rows; the map listed 8.6 under 18 FRs its line omitted; 5.10 listed under FR-2 although QA never commits) | applied | lines of 1.9, 5.3, 5.4, 5.5, 7.3 and 8.6 extended; rows FR-6, FR-27, FR-38 (1.4 fixtures), FR-34, FR-35 (3.1), FR-44 (5.2) extended; FR-2 row lists 5.7–5.9, 5.11, 5.12; a re-check finds every story claim in its row and every row entry in the story's line |
 
 - 2026-11-12 (Phase 4, orchestrator): Story 4.3 Verification line 2 fixed. `S="<dir1> <dir2>"; ... $S/*.md` word-split so the first directory reached `v_p17` unglobbed (IsADirectoryError); the line now globs each directory through `F`. No other story uses the pattern.
+
+- 2026-11-12 (Phase 4, orchestrator): Story 3.10 AC4 and Verification line 2: `grep -c $'\x00'` replaced by a `tr -cd '\000' | wc -c` NUL-byte count. Bash cannot pass a NUL byte in an argument, so `$'\x00'` expanded to an empty pattern and the check counted every line; it could never pass.

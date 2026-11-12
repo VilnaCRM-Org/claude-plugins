@@ -3180,3 +3180,816 @@ PY
   [ ! -e target/rust-sdlc/review-ledgers ]
   [ ! -e a ]
 }
+
+# section: stage state and resume
+
+# The AC-3.4 (a) story the cases below share: issue 12 was opened at c1, its
+# planning bundle committed at c2, the implementation at c3 and a review
+# remediation at c4 (HEAD). The state cache is
+# target/rust-sdlc/state/12-add-invoice-export.json; the posting identity is
+# acme-sdlc-bot and mallory-forger is the forger of the gh fixture.
+
+# sr_git DIR ARG... — git -C DIR with the suite identity and signing off.
+sr_git() {
+  local dir="$1"
+  shift
+  git -C "$dir" -c user.name=acme -c user.email=ci@example.invalid -c commit.gpgsign=false "$@"
+}
+
+# sr_commit DIR MESSAGE — one empty commit in DIR; prints its sha.
+sr_commit() {
+  sr_git "$1" commit -q --allow-empty -m "$2"
+  git -C "$1" rev-parse HEAD
+}
+
+# sr_repo DIR — a repository on main holding the empty commits c1..c4;
+# SR_SHA[i] is the sha of ci (SR_SHA[4] is HEAD).
+sr_repo() {
+  local i
+  SR_SHA=(none)
+  git init -q -b main "$1"
+  for i in 1 2 3 4; do
+    SR_SHA+=("$(sr_commit "$1" "c$i")")
+  done
+}
+
+# sr_workdir — sr_repo at $BATS_TEST_TMPDIR/billing-service, the working
+# directory of the case; SR_CACHE is issue 12's state cache (relative) and
+# SDLC_NOW_EPOCH fixes `at` to 2026-11-12T10:00:00Z.
+sr_workdir() {
+  sr_repo "$BATS_TEST_TMPDIR/billing-service"
+  cd "$BATS_TEST_TMPDIR/billing-service"
+  SR_CACHE=target/rust-sdlc/state/12-add-invoice-export.json
+  export SDLC_NOW_EPOCH=1794477600
+}
+
+# sr_fresh_clone — the fresh clone of AC-3.4 (a): sr_repo at
+# $BATS_TEST_TMPDIR/sr-origin cloned to $BATS_TEST_TMPDIR/billing-service (no
+# target/, so no state cache), the working directory of the case.
+sr_fresh_clone() {
+  sr_repo "$BATS_TEST_TMPDIR/sr-origin"
+  git clone -q "$BATS_TEST_TMPDIR/sr-origin" "$BATS_TEST_TMPDIR/billing-service"
+  cd "$BATS_TEST_TMPDIR/billing-service"
+}
+
+# sr_comments [FILE] — FILE (default tests/fixtures/gh/issue-state-comments.json)
+# with its stand-in head_sha values 1111…, 2222…, 3333… and 4444… (40 digits
+# each) replaced by SR_SHA[1..4], the commits they stand for.
+sr_comments() {
+  local file="${1:-$PLUGIN_ROOT/tests/fixtures/gh/issue-state-comments.json}" i stand
+  local -a expr=()
+  for i in 1 2 3 4; do
+    stand="$(printf '%040d' 0 | tr 0 "$i")"
+    expr+=(-e "s/$stand/${SR_SHA[i]}/g")
+  done
+  sed "${expr[@]}" "$file"
+}
+
+# sr_record ARG... — `common.sh state_cache_update SR_CACHE ARG...` through
+# the dispatcher; stdout is dropped and a failure fails the case.
+sr_record() {
+  "$LIB" state_cache_update "$SR_CACHE" "$@" >/dev/null
+}
+
+# sr_as_comment LOGIN — stdin (a state comment body) as a one-comment issue
+# comments array authored by LOGIN.
+sr_as_comment() {
+  python3 -I -c '
+import json
+import sys
+
+print(json.dumps([{"id": 4001, "user": {"login": sys.argv[1], "type": "User"},
+                   "body": sys.stdin.read(), "created_at": "2026-11-12T10:00:00Z"}]))
+' "$1"
+}
+
+# sr_resume INPUT ARG... — `common.sh resume_point ARG...` through the
+# dispatcher with the file INPUT on stdin (`-` for none), under
+# `run --separate-stderr`.
+sr_resume() {
+  local input="$1"
+  shift
+  if [[ "$input" == - ]]; then
+    run --separate-stderr "$LIB" resume_point "$@" </dev/null
+  else
+    run --separate-stderr "$LIB" resume_point "$@" <"$input"
+  fi
+}
+
+# sr_expect LINE... — the last run exited 0 and printed exactly the LINEs.
+sr_expect() {
+  local want
+  want="$(printf '%s\n' "$@")"
+  if [[ "$status" != 0 || "$output" != "$want" ]]; then
+    printf -- 'status %s\n--- want\n%s\n--- got\n%s\n--- stderr\n%s\n' "$status" "$want" "$output" "${stderr-}"
+    return 1
+  fi
+}
+
+# sr_done STAGE N ITERATION — the DONE_STAGE line of STAGE recorded at
+# SR_SHA[N].
+sr_done() {
+  printf 'DONE_STAGE: %s %s %s\n' "$1" "${SR_SHA[$2]:0:7}" "$3"
+}
+
+# sr_update_refused CODE ARG... — `common.sh state_cache_update ARG...` exits
+# CODE with an [rust-sdlc][ERROR] line on stderr and nothing on stdout, and
+# SR_CACHE is left as it was (absent, the same bytes, or the same kind of
+# non-regular entry).
+sr_update_refused() {
+  local code="$1" before=absent after=absent
+  shift
+  if [[ -f "$SR_CACHE" ]]; then
+    before="$(cksum <"$SR_CACHE")"
+  elif [[ -e "$SR_CACHE" || -L "$SR_CACHE" ]]; then
+    before="other $(perms "$SR_CACHE")"
+  fi
+  run --separate-stderr "$LIB" state_cache_update "$@"
+  if [[ -f "$SR_CACHE" ]]; then
+    after="$(cksum <"$SR_CACHE")"
+  elif [[ -e "$SR_CACHE" || -L "$SR_CACHE" ]]; then
+    after="other $(perms "$SR_CACHE")"
+  fi
+  if [[ "$status" != "$code" || -n "$output" || "$stderr" != '[rust-sdlc][ERROR] '* || "$before" != "$after" ]]; then
+    printf 'state_cache_update %s: status %s (want %s), stdout %s, stderr %s, cache %s -> %s\n' \
+      "$*" "$status" "$code" "$output" "$stderr" "$before" "$after"
+    return 1
+  fi
+}
+
+# sr_element STAGE ITERATION_JSON [SHA] — one cache element (at fixed).
+sr_element() {
+  printf '{"stage": "%s", "result": "PASS", "head_sha": "%s", "iteration": %s, "at": "2026-11-12T10:00:00Z"}' \
+    "$1" "${3:-${SR_SHA[1]}}" "$2"
+}
+
+# sr_doc SCHEMA ISSUE SLUG_JSON SPECS_JSON ELEMENTS [EXTRA] — a cache document
+# from its parts (EXTRA is appended inside the object).
+sr_doc() {
+  printf '{"schema_version": %s, "issue": %s, "slug": %s, "staged_specs_dir": %s, "stages": [%s]%s}\n' \
+    "$1" "$2" "$3" "$4" "$5" "${6-}"
+}
+
+# sr_summary FILE — the cache FILE as text: the line `issue=<repr>
+# slug=<repr> staged_specs_dir=<repr> keys=<sorted top-level keys>`, then
+# `<stage> <result> <head_sha> <repr(iteration)> <at>` per element, in order
+# (an integer iteration prints bare, a string one quoted).
+sr_summary() {
+  python3 -I -c '
+import json
+import sys
+
+d = json.load(open(sys.argv[1]))
+print("issue=%r slug=%r staged_specs_dir=%r keys=%s"
+      % (d.get("issue"), d.get("slug"), d.get("staged_specs_dir"), ",".join(sorted(d))))
+for e in d.get("stages", []):
+    print("%s %s %s %r %s" % (e["stage"], e["result"], e["head_sha"], e["iteration"], e["at"]))
+' "$1"
+}
+
+@test "common-lib: stage state and resume: the section follows publishing and model sessions above the dispatch trailer (A3)" {
+  local sections start end fn line names
+  sections="$(sed -n 's/^# section: //p' "$LIB" | tr '\n' '|')"
+  case "$sections" in
+    'core|command helpers|publishing and model sessions|stage state and resume|dispatch (keep last)|') ;;
+    'core|command helpers|publishing and model sessions|stage state and resume|Ralph helpers|dispatch (keep last)|') ;;
+    *)
+      printf 'unexpected section order: %s\n' "$sections"
+      return 1
+      ;;
+  esac
+  start="$(grep -nxF '# section: stage state and resume' "$LIB" | cut -d: -f1)"
+  end="$(awk -v s="$start" 'NR > s && /^# section: / { print NR; exit }' "$LIB")"
+  for fn in state_cache_update state_comment_body resume_point; do
+    line="$(grep -nxF "$fn() {" "$LIB" | cut -d: -f1)"
+    [ "$line" -gt "$start" ]
+    [ "$line" -lt "$end" ]
+  done
+  # Every function of the section is one of the three dispatcher names or an
+  # _sr_ helper.
+  names="$(sed -n "${start},${end}p" "$LIB" | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)() {$/\1/p')"
+  run grep -vxE 'state_cache_update|state_comment_body|resume_point|_sr_[a-z_]+' <<<"$names"
+  [ "$status" -eq 1 ]
+  # This suite's part defines only sr_ helpers.
+  start="$(grep -nxF '# section: stage state and resume' "$BATS_TEST_FILENAME" | cut -d: -f1)"
+  end="$(awk -v s="$start" 'NR > s && /^# section: / { print NR; exit }' "$BATS_TEST_FILENAME")"
+  names="$(sed -n "${start},${end:-\$}p" "$BATS_TEST_FILENAME" | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)() {$/\1/p')"
+  [ -n "$names" ]
+  run grep -vE '^sr_' <<<"$names"
+  [ "$status" -eq 1 ]
+}
+
+@test "common-lib: state_cache_update: creates the cache with issue and slug from the file name, null staged_specs_dir and at from utc_now" {
+  sr_workdir
+  run --separate-stderr "$LIB" state_cache_update "$SR_CACHE" issue PASS "${SR_SHA[1]}" 1
+  [ "$status" -eq 0 ]
+  [ "$output" = "WROTE: $SR_CACHE" ]
+  cat >"$BATS_TEST_TMPDIR/want.json" <<EOF
+{
+  "schema_version": 1,
+  "issue": 12,
+  "slug": "add-invoice-export",
+  "staged_specs_dir": null,
+  "stages": [
+    {
+      "stage": "issue",
+      "result": "PASS",
+      "head_sha": "${SR_SHA[1]}",
+      "iteration": 1,
+      "at": "2026-11-12T10:00:00Z"
+    }
+  ]
+}
+EOF
+  diff "$BATS_TEST_TMPDIR/want.json" "$SR_CACHE"
+  # Atomic write: no temporary file is left next to the cache.
+  [ "$(ls -A target/rust-sdlc/state)" = 12-add-invoice-export.json ]
+  # The sourced function writes the same document.
+  rm -rf target
+  run lib_shell 'state_cache_update "$@"' "$SR_CACHE" issue PASS "${SR_SHA[1]}" 1
+  [ "$status" -eq 0 ]
+  diff "$BATS_TEST_TMPDIR/want.json" "$SR_CACHE"
+}
+
+@test "common-lib: state_cache_update: one element per stage, replaced in place and kept in stage order" {
+  sr_workdir
+  sr_record review IN_PROGRESS "${SR_SHA[4]}" 1
+  sr_record issue PASS "${SR_SHA[1]}" 1
+  sr_record implement PASS "${SR_SHA[3]}" 007
+  sr_record plan PASS "${SR_SHA[2]}" 2
+  SDLC_NOW_EPOCH=1794481200 sr_record review PASS "${SR_SHA[4]}" 3
+  run sr_summary "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 5 ]
+  [ "${lines[0]}" = "issue=12 slug='add-invoice-export' staged_specs_dir=None keys=issue,schema_version,slug,staged_specs_dir,stages" ]
+  [ "${lines[1]}" = "issue PASS ${SR_SHA[1]} 1 2026-11-12T10:00:00Z" ]
+  [ "${lines[2]}" = "plan PASS ${SR_SHA[2]} 2 2026-11-12T10:00:00Z" ]
+  [ "${lines[3]}" = "implement PASS ${SR_SHA[3]} 7 2026-11-12T10:00:00Z" ]
+  [ "${lines[4]}" = "review PASS ${SR_SHA[4]} 3 2026-11-12T11:00:00Z" ]
+}
+
+@test "common-lib: state_cache_update: the finish-pr counter cell is accepted and stored as a string" {
+  sr_workdir
+  sr_record finish-pr IN_PROGRESS "${SR_SHA[4]}" A2.B0.C1.W3.R0
+  run sr_summary "$SR_CACHE"
+  [ "${lines[1]}" = "finish-pr IN_PROGRESS ${SR_SHA[4]} 'A2.B0.C1.W3.R0' 2026-11-12T10:00:00Z" ]
+  sr_record finish-pr PASS "${SR_SHA[4]}" A02.B0.C1.W6.R10
+  run sr_summary "$SR_CACHE"
+  [ "${#lines[@]}" -eq 2 ]
+  [ "${lines[1]}" = "finish-pr PASS ${SR_SHA[4]} 'A2.B0.C1.W6.R10' 2026-11-12T10:00:00Z" ]
+}
+
+@test "common-lib: state_cache_update: a malformed finish-pr cell is refused with exit 2 and nothing written" {
+  local cell
+  sr_workdir
+  for cell in A2.B0.C1.W3 A2.B0.C1.W3.R0.X1 a2.b0.c1.w3.r0 A2.B0.C1.W3.R A-1.B0.C1.W3.R0 \
+    2 A2,B0,C1,W3,R0 'A2.B0.C1.W3.R0 ' ' A2.B0.C1.W3.R0' "$(printf 'A2.B0.C1.W3.R0\nA1')" \
+    B0.A2.C1.W3.R0 A2.B0.C1.W3.R0.; do
+    sr_update_refused 2 "$SR_CACHE" finish-pr PASS "${SR_SHA[4]}" "$cell"
+  done
+  sr_update_refused 2 "$SR_CACHE" finish-pr PASS "${SR_SHA[4]}" ''
+  # A single-counter stage takes no cell.
+  sr_update_refused 2 "$SR_CACHE" review PASS "${SR_SHA[4]}" A2.B0.C1.W3.R0
+  [ ! -e target ]
+}
+
+@test "common-lib: state_cache_update: a file name other than <N>-<slug>.json exits 2 with nothing written" {
+  local name
+  sr_workdir
+  for name in 12.json 0-add.json 012-add.json 12-Add.json 12-add.yml 12_add.json add-12.json \
+    12-add.json.bak 12-.json 12-add_export.json '12-add export.json' 12-add.JSON .json \
+    -12-add.json 12-add.json/; do
+    sr_update_refused 2 "target/rust-sdlc/state/$name" issue PASS "${SR_SHA[1]}" 1
+  done
+  sr_update_refused 2 '' issue PASS "${SR_SHA[1]}" 1
+  [ ! -e target ]
+  # Any directory is fine: only the base name is parsed.
+  run "$LIB" state_cache_update "$BATS_TEST_TMPDIR/elsewhere/7-a-b-c.json" issue PASS "${SR_SHA[1]}" 1
+  [ "$status" -eq 0 ]
+  run sr_summary "$BATS_TEST_TMPDIR/elsewhere/7-a-b-c.json"
+  [[ "${lines[0]}" == "issue=7 slug='a-b-c' staged_specs_dir=None "* ]]
+}
+
+@test "common-lib: state_cache_update: a bad stage, result, head_sha, iteration or argument list exits 2 with nothing written" {
+  local sha bad
+  sr_workdir
+  sha="${SR_SHA[1]}"
+  for bad in build Issue finish_pr 'qa ' ''; do
+    sr_update_refused 2 "$SR_CACHE" "$bad" PASS "$sha" 1
+  done
+  for bad in FAIL pass PASSED ''; do
+    sr_update_refused 2 "$SR_CACHE" issue "$bad" "$sha" 1
+  done
+  for bad in "${sha:0:39}" "${sha}0" "$(tr a-f A-F <<<"$sha")" "$(printf 'g%.0s' {1..40})" "${sha:0:7}" ''; do
+    sr_update_refused 2 "$SR_CACHE" issue PASS "$bad" 1
+  done
+  for bad in -1 1.0 x 1e3 ' 1' $'1\n' ''; do
+    sr_update_refused 2 "$SR_CACHE" issue PASS "$sha" "$bad"
+  done
+  sr_update_refused 2
+  sr_update_refused 2 "$SR_CACHE" issue PASS "$sha"
+  sr_update_refused 2 "$SR_CACHE" issue PASS "$sha" 1 extra
+  sr_update_refused 2 "$SR_CACHE" issue PASS "$sha" 1 --force
+  sr_update_refused 2 "$SR_CACHE" issue PASS "$sha" 1 --staged-specs-dir
+  sr_update_refused 2 "$SR_CACHE" issue PASS "$sha" 1 --staged-specs-dir ''
+  sr_update_refused 2 "$SR_CACHE" issue PASS "$sha" 1 --staged-specs-dir a --staged-specs-dir b
+  sr_update_refused 2 "$SR_CACHE" issue PASS "$sha" 1 --staged-specs-dir "$(printf 'specs/12\nx')"
+  [ ! -e target ]
+}
+
+@test "common-lib: state_cache_update: --staged-specs-dir sets the top-level key and later updates keep it" {
+  sr_workdir
+  sr_record issue PASS "${SR_SHA[1]}" 1
+  run sr_summary "$SR_CACHE"
+  [[ "${lines[0]}" == *' staged_specs_dir=None '* ]]
+  sr_record implement IN_PROGRESS "${SR_SHA[2]}" 1 --staged-specs-dir specs/12-add-invoice-export
+  run sr_summary "$SR_CACHE"
+  [[ "${lines[0]}" == *" staged_specs_dir='specs/12-add-invoice-export' "* ]]
+  sr_record implement PASS "${SR_SHA[3]}" 2
+  run sr_summary "$SR_CACHE"
+  [[ "${lines[0]}" == *" staged_specs_dir='specs/12-add-invoice-export' "* ]]
+  # The flag may come first; a new value replaces the old one.
+  run "$LIB" state_cache_update --staged-specs-dir specs/12-add-invoice-export-v2 "$SR_CACHE" implement PASS "${SR_SHA[3]}" 2
+  [ "$status" -eq 0 ]
+  [ "$output" = "WROTE: $SR_CACHE" ]
+  run sr_summary "$SR_CACHE"
+  [[ "${lines[0]}" == *" staged_specs_dir='specs/12-add-invoice-export-v2' "* ]]
+  [ "${#lines[@]}" -eq 3 ]
+  [ "${lines[1]%% *}" = issue ]
+  [ "${lines[2]}" = "implement PASS ${SR_SHA[3]} 2 2026-11-12T10:00:00Z" ]
+}
+
+@test "common-lib: state_cache_update: a malformed existing cache exits 1 and is left unchanged" {
+  local e doc
+  sr_workdir
+  e="$(sr_element issue 1)"
+  mkdir -p target/rust-sdlc/state
+  # The well-formed document of the parts is accepted.
+  sr_doc 1 12 '"add-invoice-export"' null "$e" >"$SR_CACHE"
+  sr_record plan PASS "${SR_SHA[2]}" 1
+  for doc in 'not json' '[]' '' "$(sr_doc 2 12 '"add-invoice-export"' null "$e")" \
+    "$(sr_doc true 12 '"add-invoice-export"' null "$e")" \
+    "$(sr_doc 1 13 '"add-invoice-export"' null "$e")" \
+    "$(sr_doc 1 '"12"' '"add-invoice-export"' null "$e")" \
+    "$(sr_doc 1 12 '"add-other"' null "$e")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' '""' "$e")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' 7 "$e")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null "$e" ', "extra": 1')" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null "$e, $e")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null "$(sr_element build 1)")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null "$(sr_element review '"1"')")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null "$(sr_element review true)")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null "$(sr_element review -1)")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null "$(sr_element finish-pr 3)")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null "$(sr_element review 1 ABC)")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null "$(sr_element review NaN)")" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null '{"stage": "issue"}')" \
+    "$(sr_doc 1 12 '"add-invoice-export"' null '{"stage": "issue", "result": "PASS", "head_sha": "'"${SR_SHA[1]}"'", "iteration": 1, "at": "2026-11-12T10:00:00Z", "note": 1}')" \
+    '{"schema_version": 1, "schema_version": 1, "issue": 12, "slug": "add-invoice-export", "staged_specs_dir": null, "stages": []}'; do
+    printf '%s\n' "$doc" >"$SR_CACHE"
+    sr_update_refused 1 "$SR_CACHE" qa PASS "${SR_SHA[4]}" 1
+  done
+}
+
+@test "common-lib: state_cache_update: a symbolic link, a path with .. or a non-regular file is refused with exit 1" {
+  sr_workdir
+  mkdir -p target/rust-sdlc/state "$BATS_TEST_TMPDIR/outside"
+  ln -s "$BATS_TEST_TMPDIR/outside/12-add-invoice-export.json" "$SR_CACHE"
+  sr_update_refused 1 "$SR_CACHE" issue PASS "${SR_SHA[1]}" 1
+  [ ! -e "$BATS_TEST_TMPDIR/outside/12-add-invoice-export.json" ]
+  rm -f "$SR_CACHE"
+  mkdir "$SR_CACHE"
+  sr_update_refused 1 "$SR_CACHE" issue PASS "${SR_SHA[1]}" 1
+  rmdir "$SR_CACHE"
+  sr_update_refused 1 ../12-add-invoice-export.json issue PASS "${SR_SHA[1]}" 1
+  [ ! -e "$BATS_TEST_TMPDIR/12-add-invoice-export.json" ]
+  rm -rf target/rust-sdlc/state
+  ln -s "$BATS_TEST_TMPDIR/outside" target/rust-sdlc/state
+  sr_update_refused 1 "$SR_CACHE" issue PASS "${SR_SHA[1]}" 1
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/outside")" ]
+}
+
+@test "common-lib: state_comment_body: prints the marker, a blank line and the 5-column table in stage order" {
+  sr_workdir
+  sr_record review IN_PROGRESS "${SR_SHA[4]}" 2
+  sr_record issue PASS "${SR_SHA[1]}" 1
+  sr_record implement ESCALATED "${SR_SHA[3]}" 5
+  sr_record finish-pr IN_PROGRESS "${SR_SHA[4]}" A1.B0.C0.W2.R0
+  "$LIB" state_comment_body "$SR_CACHE" >"$BATS_TEST_TMPDIR/body.md"
+  printf '%s\n' '<!-- rust-sdlc-state -->' '' \
+    '| stage | result | head_sha | iteration | at |' \
+    '| --- | --- | --- | --- | --- |' \
+    "| issue | PASS | ${SR_SHA[1]} | 1 | 2026-11-12T10:00:00Z |" \
+    "| implement | ESCALATED | ${SR_SHA[3]} | 5 | 2026-11-12T10:00:00Z |" \
+    "| review | IN_PROGRESS | ${SR_SHA[4]} | 2 | 2026-11-12T10:00:00Z |" \
+    "| finish-pr | IN_PROGRESS | ${SR_SHA[4]} | A1.B0.C0.W2.R0 | 2026-11-12T10:00:00Z |" |
+    diff - "$BATS_TEST_TMPDIR/body.md"
+  # The sourced function prints the same bytes; a cache without stages prints
+  # the header rows only.
+  run lib_shell 'state_comment_body "$1"' "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(cat "$BATS_TEST_TMPDIR/body.md")" ]
+  sr_doc 1 12 '"add-invoice-export"' null '' >"$SR_CACHE"
+  run "$LIB" state_comment_body "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf '%s\n' '<!-- rust-sdlc-state -->' '' '| stage | result | head_sha | iteration | at |' '| --- | --- | --- | --- | --- |')" ]
+}
+
+@test "common-lib: state_comment_body: the body passes through the redaction list and keeps every head_sha" {
+  local sha
+  sr_workdir
+  sr_record issue PASS "${SR_SHA[1]}" 1
+  sr_record review PASS "${SR_SHA[4]}" 3
+  # A stand-in redaction list marks every line it receives.
+  run lib_shell '_pm_redact_stream() { sed "s/^/redacted: /"; }; state_comment_body "$1"' "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 6 ]
+  [ "${lines[0]}" = 'redacted: <!-- rust-sdlc-state -->' ]
+  [ "${lines[1]}" = 'redacted: ' ]
+  [ "${lines[5]}" = "redacted: | review | PASS | ${SR_SHA[4]} | 3 | 2026-11-12T10:00:00Z |" ]
+  # The real list leaves the 40-hex shas intact, so resume_point reads them back.
+  run "$LIB" state_comment_body "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  for sha in "${SR_SHA[1]}" "${SR_SHA[4]}"; do
+    [[ "$output" == *"| $sha |"* ]]
+  done
+  [[ "$output" != *REDACTED* ]]
+}
+
+@test "common-lib: state_comment_body: a missing or malformed cache exits 1, a bad file name or argument list exits 2" {
+  sr_workdir
+  run --separate-stderr "$LIB" state_comment_body "$SR_CACHE"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  mkdir -p target/rust-sdlc/state
+  printf '{}\n' >"$SR_CACHE"
+  run --separate-stderr "$LIB" state_comment_body "$SR_CACHE"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == '[rust-sdlc][ERROR] '* ]]
+  run --separate-stderr "$LIB" state_comment_body target/rust-sdlc/state/12.json
+  [ "$status" -eq 2 ]
+  run --separate-stderr "$LIB" state_comment_body
+  [ "$status" -eq 2 ]
+  run --separate-stderr "$LIB" state_comment_body "$SR_CACHE" extra
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+}
+
+@test "common-lib: resume_point: AC-3.4 (a) a fresh clone without the cache resumes at qa from the state comment with no stage repeated" {
+  sr_fresh_clone
+  [ ! -e target ]
+  sr_comments >"$BATS_TEST_TMPDIR/comments.json"
+  sr_resume "$BATS_TEST_TMPDIR/comments.json" --comments acme-sdlc-bot
+  sr_expect 'DEGRADED: ignored state comment by mallory-forger' \
+    "$(sr_done issue 1 1)" "$(sr_done plan 2 2)" "$(sr_done implement 3 1)" "$(sr_done review 4 3)" \
+    'RESUME_STAGE: qa' \
+    'COUNTERS: issue=1,plan=2,implement=1,review=3,qa=0,finish-pr=A0.B0.C0.W0.R0'
+  # It never calls gh and writes nothing.
+  [ ! -s "$STUB_GH_LOG" ]
+  [ ! -e target ]
+  [ -z "$(git status --porcelain)" ]
+}
+
+@test "common-lib: resume_point: a resume at review iteration 3 restores the counter, from the cache and from its state comment" {
+  sr_workdir
+  sr_record issue PASS "${SR_SHA[1]}" 1
+  sr_record plan PASS "${SR_SHA[2]}" 1
+  sr_record implement PASS "${SR_SHA[3]}" 2
+  sr_record review IN_PROGRESS "${SR_SHA[4]}" 3
+  sr_resume - --cache "$SR_CACHE"
+  sr_expect "$(sr_done issue 1 1)" "$(sr_done plan 2 1)" "$(sr_done implement 3 2)" \
+    'RESUME_STAGE: review' \
+    'COUNTERS: issue=1,plan=1,implement=2,review=3,qa=0,finish-pr=A0.B0.C0.W0.R0'
+  printf '%s\n' "$output" >"$BATS_TEST_TMPDIR/from-cache"
+  # The published comment of the same cache resumes identically (D10 parity).
+  "$LIB" state_comment_body "$SR_CACHE" | sr_as_comment acme-sdlc-bot >"$BATS_TEST_TMPDIR/comments.json"
+  sr_resume "$BATS_TEST_TMPDIR/comments.json" --comments acme-sdlc-bot
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(cat "$BATS_TEST_TMPDIR/from-cache")" ]
+  # The sourced function agrees.
+  run lib_shell 'resume_point --cache "$1"' "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(cat "$BATS_TEST_TMPDIR/from-cache")" ]
+  [ ! -s "$STUB_GH_LOG" ]
+}
+
+@test "common-lib: resume_point: a new commit after the QA verdict makes QA stale" {
+  sr_workdir
+  sr_record issue PASS "${SR_SHA[1]}" 1
+  sr_record plan PASS "${SR_SHA[2]}" 1
+  sr_record implement PASS "${SR_SHA[3]}" 1
+  sr_record review PASS "${SR_SHA[4]}" 2
+  sr_record qa PASS "${SR_SHA[4]}" 1
+  sr_resume - --cache "$SR_CACHE"
+  sr_expect "$(sr_done issue 1 1)" "$(sr_done plan 2 1)" "$(sr_done implement 3 1)" \
+    "$(sr_done review 4 2)" "$(sr_done qa 4 1)" \
+    'RESUME_STAGE: finish-pr' \
+    'COUNTERS: issue=1,plan=1,implement=1,review=2,qa=1,finish-pr=A0.B0.C0.W0.R0'
+  # A commit after the verdict: review and QA count only at HEAD itself, so
+  # both re-run; their counters are kept.
+  sr_commit . c5 >/dev/null
+  sr_resume - --cache "$SR_CACHE"
+  sr_expect "$(sr_done issue 1 1)" "$(sr_done plan 2 1)" "$(sr_done implement 3 1)" \
+    'RESUME_STAGE: review' \
+    'COUNTERS: issue=1,plan=1,implement=1,review=2,qa=1,finish-pr=A0.B0.C0.W0.R0'
+  [[ "$output" != *'DONE_STAGE: qa'* ]]
+}
+
+@test "common-lib: resume_point: an implement head_sha that is not an ancestor of HEAD resumes at implement" {
+  local side
+  sr_workdir
+  git switch -q -c side "${SR_SHA[2]}"
+  side="$(sr_commit . 'rewritten implementation')"
+  git switch -q main
+  sr_record issue PASS "${SR_SHA[1]}" 1
+  sr_record plan PASS "${SR_SHA[2]}" 1
+  sr_record implement PASS "$side" 2
+  sr_record review PASS "${SR_SHA[4]}" 1
+  sr_resume - --cache "$SR_CACHE"
+  # review is recorded at HEAD, yet nothing after the first stale stage counts.
+  sr_expect "$(sr_done issue 1 1)" "$(sr_done plan 2 1)" \
+    'RESUME_STAGE: implement' \
+    'COUNTERS: issue=1,plan=1,implement=2,review=1,qa=0,finish-pr=A0.B0.C0.W0.R0'
+  # A sha unknown to the clone does not count either; HEAD itself does.
+  sr_record implement PASS "$(printf 'ab%.0s' {1..20})" 2
+  sr_resume - --cache "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  [ "${lines[2]}" = 'RESUME_STAGE: implement' ]
+  sr_record implement PASS "${SR_SHA[4]}" 2
+  sr_resume - --cache "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  [ "${lines[2]}" = "$(sr_done implement 4 2)" ]
+  [ "${lines[4]}" = 'RESUME_STAGE: qa' ]
+  # issue and plan need PASS: an IN_PROGRESS plan at an ancestor re-runs plan.
+  sr_record plan IN_PROGRESS "${SR_SHA[2]}" 3
+  sr_resume - --cache "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  [ "${lines[1]}" = 'RESUME_STAGE: plan' ]
+}
+
+@test "common-lib: resume_point: the forger's state comment is ignored and only the oldest comment of the posting identity is read" {
+  sr_workdir
+  sr_comments >"$BATS_TEST_TMPDIR/comments.json"
+  sr_resume "$BATS_TEST_TMPDIR/comments.json" --comments acme-sdlc-bot
+  [ "$status" -eq 0 ]
+  # The forger's table claims QA PASS at HEAD and so does the newer duplicate
+  # of the posting identity; neither is read, so QA is not skipped.
+  [ "$(grep -c '^DEGRADED: ' <<<"$output")" -eq 1 ]
+  [ "${lines[0]}" = 'DEGRADED: ignored state comment by mallory-forger' ]
+  [[ "$output" != *'DONE_STAGE: qa'* ]]
+  [[ "$output" == *'RESUME_STAGE: qa'* ]]
+  # The comment that only mentions the marker is no state comment at all.
+  [[ "$output" != *drive-by-contributor* ]]
+  # Read as trusted, the forged table would have skipped review and QA.
+  sr_resume "$BATS_TEST_TMPDIR/comments.json" --comments mallory-forger
+  sr_expect 'DEGRADED: ignored state comment by acme-sdlc-bot' \
+    'DEGRADED: ignored state comment by acme-sdlc-bot' \
+    "$(sr_done issue 1 1)" "$(sr_done plan 2 1)" "$(sr_done implement 3 1)" \
+    "$(sr_done review 4 1)" "$(sr_done qa 4 1)" \
+    'RESUME_STAGE: finish-pr' \
+    'COUNTERS: issue=1,plan=1,implement=1,review=1,qa=1,finish-pr=A0.B0.C0.W0.R0'
+  # A broken table from another author cannot stop the resume either.
+  python3 -I -c '
+import json
+import sys
+
+doc = json.load(open(sys.argv[1]))
+doc[1]["body"] = "<!-- rust-sdlc-state -->\n\n| not | a | table |"
+doc[1]["user"] = None
+print(json.dumps(doc))
+' "$BATS_TEST_TMPDIR/comments.json" >"$BATS_TEST_TMPDIR/broken.json"
+  sr_resume "$BATS_TEST_TMPDIR/broken.json" --comments acme-sdlc-bot
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = 'DEGRADED: ignored state comment by (unknown)' ]
+  [[ "$output" == *'RESUME_STAGE: qa'* ]]
+  [ ! -s "$STUB_GH_LOG" ]
+}
+
+@test "common-lib: resume_point: BLOCKED_STAGE when the implement row is ESCALATED and the breaker is OPEN or HALF_OPEN" {
+  local state before
+  sr_workdir
+  sr_record issue PASS "${SR_SHA[1]}" 1
+  sr_record plan PASS "${SR_SHA[2]}" 1
+  sr_record implement ESCALATED "${SR_SHA[3]}" 5
+  mkdir .ralph
+  for state in OPEN HALF_OPEN; do
+    printf '{"state": "%s", "consecutive_no_progress": 3, "reason": "no progress"}\n' "$state" >.ralph/.circuit_breaker_state
+    before="$(cksum <.ralph/.circuit_breaker_state)"
+    sr_resume - --cache "$SR_CACHE"
+    sr_expect "$(sr_done issue 1 1)" "$(sr_done plan 2 1)" \
+      "BLOCKED_STAGE: implement breaker=$state" \
+      'COUNTERS: issue=1,plan=1,implement=5,review=0,qa=0,finish-pr=A0.B0.C0.W0.R0'
+    [ "$(cksum <.ralph/.circuit_breaker_state)" = "$before" ]
+  done
+  # The state comment carries the same verdict.
+  "$LIB" state_comment_body "$SR_CACHE" | sr_as_comment acme-sdlc-bot >"$BATS_TEST_TMPDIR/comments.json"
+  sr_resume "$BATS_TEST_TMPDIR/comments.json" --comments acme-sdlc-bot
+  [ "$status" -eq 0 ]
+  [ "${lines[2]}" = 'BLOCKED_STAGE: implement breaker=HALF_OPEN' ]
+  # A CLOSED, malformed or absent breaker resumes implement.
+  printf '{"state": "CLOSED"}\n' >.ralph/.circuit_breaker_state
+  sr_resume - --cache "$SR_CACHE"
+  [ "${lines[2]}" = 'RESUME_STAGE: implement' ]
+  printf 'OPEN\n' >.ralph/.circuit_breaker_state
+  sr_resume - --cache "$SR_CACHE"
+  [ "${lines[2]}" = 'RESUME_STAGE: implement' ]
+  rm .ralph/.circuit_breaker_state
+  sr_resume - --cache "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  [ "${lines[2]}" = 'RESUME_STAGE: implement' ]
+  # An OPEN breaker blocks only an ESCALATED implement row.
+  printf '{"state": "OPEN"}\n' >.ralph/.circuit_breaker_state
+  sr_record implement IN_PROGRESS "${SR_SHA[3]}" 5
+  sr_resume - --cache "$SR_CACHE"
+  [ "$status" -eq 0 ]
+  [ "${lines[2]}" = 'RESUME_STAGE: implement' ]
+}
+
+@test "common-lib: resume_point: finish-pr never counts (re-derived live) and its counter cell is restored" {
+  sr_workdir
+  sr_record issue PASS "${SR_SHA[1]}" 1
+  sr_record plan PASS "${SR_SHA[2]}" 1
+  sr_record implement PASS "${SR_SHA[3]}" 1
+  sr_record review PASS "${SR_SHA[4]}" 1
+  sr_record qa PASS "${SR_SHA[4]}" 2
+  sr_record finish-pr PASS "${SR_SHA[4]}" A2.B0.C1.W3.R0
+  sr_resume - --cache "$SR_CACHE"
+  sr_expect "$(sr_done issue 1 1)" "$(sr_done plan 2 1)" "$(sr_done implement 3 1)" \
+    "$(sr_done review 4 1)" "$(sr_done qa 4 2)" \
+    'RESUME_STAGE: finish-pr' \
+    'COUNTERS: issue=1,plan=1,implement=1,review=1,qa=2,finish-pr=A2.B0.C1.W3.R0'
+  "$LIB" state_comment_body "$SR_CACHE" | sr_as_comment acme-sdlc-bot >"$BATS_TEST_TMPDIR/comments.json"
+  sr_resume "$BATS_TEST_TMPDIR/comments.json" --comments acme-sdlc-bot
+  [ "$status" -eq 0 ]
+  [ "${lines[6]}" = 'COUNTERS: issue=1,plan=1,implement=1,review=1,qa=2,finish-pr=A2.B0.C1.W3.R0' ]
+  [[ "$output" != *'DONE_STAGE: finish-pr'* ]]
+}
+
+@test "common-lib: resume_point: concatenated pages, an array of pages and NDJSON read like one array" {
+  local form
+  sr_workdir
+  sr_comments >"$BATS_TEST_TMPDIR/comments.json"
+  sr_resume "$BATS_TEST_TMPDIR/comments.json" --comments acme-sdlc-bot
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" >"$BATS_TEST_TMPDIR/want"
+  for form in pages pages-tight slurp ndjson object; do
+    python3 -I -c '
+import json
+import sys
+
+doc = json.load(open(sys.argv[1]))
+form = sys.argv[2]
+if form == "pages":
+    print(json.dumps(doc[:2], indent=2))
+    print(json.dumps(doc[2:], indent=2))
+elif form == "pages-tight":
+    sys.stdout.write(json.dumps(doc[:3]) + json.dumps(doc[3:]) + json.dumps([]))
+elif form == "slurp":
+    print(json.dumps([doc[:1], doc[1:4], doc[4:]]))
+elif form == "ndjson":
+    for comment in doc:
+        print(json.dumps(comment))
+else:
+    print(json.dumps(doc[2]))
+' "$BATS_TEST_TMPDIR/comments.json" "$form" >"$BATS_TEST_TMPDIR/form.json"
+    sr_resume "$BATS_TEST_TMPDIR/form.json" --comments acme-sdlc-bot
+    [ "$status" -eq 0 ]
+    if [ "$form" = object ]; then
+      # One trusted comment object alone: no forger to report.
+      [ "$output" = "$(grep -v '^DEGRADED: ' "$BATS_TEST_TMPDIR/want")" ]
+    else
+      [ "$output" = "$(cat "$BATS_TEST_TMPDIR/want")" ]
+    fi
+  done
+}
+
+@test "common-lib: resume_point: malformed comments input exits 1 with nothing on stdout" {
+  local input body
+  sr_workdir
+  for input in '' '   ' 'not json' '42' '"text"' '["a"]' '[[[{}]]]' '[{"body": "x"}' '[{"body": "x"}] trailing' \
+    '[NaN]' "$(printf '\377\376')"; do
+    printf '%s' "$input" >"$BATS_TEST_TMPDIR/input.json"
+    sr_resume "$BATS_TEST_TMPDIR/input.json" --comments acme-sdlc-bot
+    if [ "$status" -ne 1 ] || [ -n "$output" ]; then
+      printf 'input %s: status %s, output %s\n' "$input" "$status" "$output"
+      return 1
+    fi
+  done
+  # A trusted state comment whose table is broken.
+  local h="| stage | result | head_sha | iteration | at |" r="| --- | --- | --- | --- | --- |"
+  local s="${SR_SHA[1]}" at=2026-11-12T10:00:00Z
+  for body in '<!-- rust-sdlc-state -->' \
+    "<!-- rust-sdlc-state --> trailing text"$'\n\n'"$h"$'\n'"$r" \
+    $'<!-- rust-sdlc-state -->\n\nno table here' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h" \
+    $'<!-- rust-sdlc-state -->\n\n| stage | result | sha | iteration | at |\n'"$r" \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n| - | - | - | - | - |' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n'"$r"$'\n| issue | PASS | '"${s:0:39}"' | 1 | '"$at"' |' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n'"$r"$'\n| build | PASS | '"$s"' | 1 | '"$at"' |' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n'"$r"$'\n| issue | DONE | '"$s"' | 1 | '"$at"' |' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n'"$r"$'\n| issue | PASS | '"$s"' | x | '"$at"' |' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n'"$r"$'\n| issue | PASS | '"$s"' | 1 | yesterday |' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n'"$r"$'\n| review | PASS | '"$s"' | A1.B0.C0.W0.R0 | '"$at"' |' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n'"$r"$'\n| finish-pr | PASS | '"$s"' | 3 | '"$at"' |' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n'"$r"$'\n| issue | PASS | '"$s"' | 1 | '"$at"' | extra |' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n'"$r"$'\n| issue | PASS | '"$s"' | 1 | '"$at"$' |\n| issue | PASS | '"$s"' | 2 | '"$at"' |' \
+    $'<!-- rust-sdlc-state -->\n\n'"$h"$'\n'"$r"$'\n| issue | PASS | '"$s"' | 1 | '"$at"$' |\n\nSee the run report.'; do
+    printf '%s' "$body" | sr_as_comment acme-sdlc-bot >"$BATS_TEST_TMPDIR/input.json"
+    sr_resume "$BATS_TEST_TMPDIR/input.json" --comments acme-sdlc-bot
+    if [ "$status" -ne 1 ] || [ -n "$output" ] || [[ "$stderr" != *'[rust-sdlc][ERROR] '* ]]; then
+      printf 'body %s: status %s, output %s\n' "$body" "$status" "$output"
+      return 1
+    fi
+  done
+  # The same well-formed row, CRLF line endings and trailing blank lines included, is read.
+  printf '<!-- rust-sdlc-state -->\r\n\r\n%s\r\n%s\r\n| issue | PASS | %s | 1 | %s |\r\n\r\n' "$h" "$r" "$s" "$at" |
+    sr_as_comment acme-sdlc-bot >"$BATS_TEST_TMPDIR/input.json"
+  sr_resume "$BATS_TEST_TMPDIR/input.json" --comments acme-sdlc-bot
+  sr_expect "$(sr_done issue 1 1)" 'RESUME_STAGE: plan' \
+    'COUNTERS: issue=1,plan=0,implement=0,review=0,qa=0,finish-pr=A0.B0.C0.W0.R0'
+  [ ! -s "$STUB_GH_LOG" ]
+}
+
+@test "common-lib: resume_point: a missing or malformed cache exits 1, a bad cache name exits 2" {
+  sr_workdir
+  sr_resume - --cache "$SR_CACHE"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  mkdir -p target/rust-sdlc/state
+  sr_doc 1 12 '"add-invoice-export"' null "$(sr_element issue 1 "${SR_SHA[1]:0:39}")" >"$SR_CACHE"
+  sr_resume - --cache "$SR_CACHE"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == '[rust-sdlc][ERROR] '* ]]
+  printf 'not json\n' >"$SR_CACHE"
+  sr_resume - --cache "$SR_CACHE"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  cp "$SR_CACHE" target/rust-sdlc/state/state.json
+  sr_resume - --cache target/rust-sdlc/state/state.json
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  # The cache of another issue is not read under this name.
+  sr_doc 1 13 '"add-invoice-export"' null '' >"$SR_CACHE"
+  sr_resume - --cache "$SR_CACHE"
+  [ "$status" -eq 1 ]
+}
+
+@test "common-lib: resume_point: malformed arguments exit 2" {
+  local login
+  sr_workdir
+  printf '[]\n' >"$BATS_TEST_TMPDIR/empty.json"
+  sr_resume "$BATS_TEST_TMPDIR/empty.json"
+  [ "$status" -eq 2 ]
+  sr_resume "$BATS_TEST_TMPDIR/empty.json" --comments
+  [ "$status" -eq 2 ]
+  sr_resume "$BATS_TEST_TMPDIR/empty.json" --cache ''
+  [ "$status" -eq 2 ]
+  sr_resume "$BATS_TEST_TMPDIR/empty.json" --comments acme-sdlc-bot --cache "$SR_CACHE"
+  [ "$status" -eq 2 ]
+  sr_resume "$BATS_TEST_TMPDIR/empty.json" --comments acme-sdlc-bot --verbose
+  [ "$status" -eq 2 ]
+  sr_resume "$BATS_TEST_TMPDIR/empty.json" acme-sdlc-bot
+  [ "$status" -eq 2 ]
+  for login in 'acme bot' -acme 'acme;id' 'acme[bot' "$(printf 'acme\nbot')" 'acme/bot' '[bot]'; do
+    sr_resume "$BATS_TEST_TMPDIR/empty.json" --comments "$login"
+    if [ "$status" -ne 2 ] || [ -n "$output" ]; then
+      printf 'login %s: status %s\n' "$login" "$status"
+      return 1
+    fi
+  done
+  # A bot login is a login.
+  sr_resume "$BATS_TEST_TMPDIR/empty.json" --comments 'acme-sdlc[bot]'
+  [ "$status" -eq 0 ]
+}
+
+@test "common-lib: resume_point: without a state comment of the posting identity it resumes at issue with zero counters" {
+  sr_workdir
+  printf '[]\n' >"$BATS_TEST_TMPDIR/empty.json"
+  sr_resume "$BATS_TEST_TMPDIR/empty.json" --comments acme-sdlc-bot
+  sr_expect 'RESUME_STAGE: issue' 'COUNTERS: issue=0,plan=0,implement=0,review=0,qa=0,finish-pr=A0.B0.C0.W0.R0'
+  sr_comments >"$BATS_TEST_TMPDIR/comments.json"
+  sr_resume "$BATS_TEST_TMPDIR/comments.json" --comments someone-else
+  sr_expect 'DEGRADED: ignored state comment by mallory-forger' \
+    'DEGRADED: ignored state comment by acme-sdlc-bot' \
+    'DEGRADED: ignored state comment by acme-sdlc-bot' \
+    'RESUME_STAGE: issue' 'COUNTERS: issue=0,plan=0,implement=0,review=0,qa=0,finish-pr=A0.B0.C0.W0.R0'
+}
+
+@test "common-lib: resume_point: without a HEAD commit it exits 1" {
+  local cache="$BATS_TEST_TMPDIR/state/12-add-invoice-export.json"
+  sr_workdir
+  "$LIB" state_cache_update "$cache" issue PASS "${SR_SHA[1]}" 1 >/dev/null
+  mkdir "$BATS_TEST_TMPDIR/not-a-repo"
+  cd "$BATS_TEST_TMPDIR/not-a-repo"
+  GIT_CEILING_DIRECTORIES="$BATS_TEST_TMPDIR" run --separate-stderr "$LIB" resume_point --cache "$cache"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *'no HEAD commit'* ]]
+  git init -q -b main "$BATS_TEST_TMPDIR/unborn"
+  cd "$BATS_TEST_TMPDIR/unborn"
+  run --separate-stderr "$LIB" resume_point --cache "$cache"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
