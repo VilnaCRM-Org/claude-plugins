@@ -32,8 +32,8 @@ GRAPHQL_EXPORT_CMD  = cargo run --locked --quiet -p service -- graphql-export --
 SNAPSHOT_STATUS_CMD = test -z "$$(git status --porcelain -- .github/openapi-spec .github/graphql-spec)"
 SCHEMATHESIS_FLAGS  = --checks all --phases=examples,coverage
 export SPECTRAL_FLAGS = --fail-severity=hint
-export OASDIFF_FLAGS  = --fail-on ERR
-export TRIVY_FLAGS    = --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore
+export OASDIFF_FLAGS = --fail-on ERR
+export TRIVY_FLAGS = --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore
 CI_STAGES ?= ci-preflight ci-static-analysis ci-tests ci-contracts ci-mutation ci-delivery ci-cli
 CONFIG_CHANGE_APPROVED ?=
 BREAKING_CHANGE_APPROVED ?=
