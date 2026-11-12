@@ -1,0 +1,13 @@
+{
+  "name": "rust-backend-sdlc",
+  "version": "0.1.0",
+  "description": "Full-SDLC automation for Rust microservices built from the Rust service template: one-command service creation, bounded-context scaffolding, GitHub issue creation, BMAD-method planning, bmalph/Ralph implementation with Claude CLI, multi-lens code review with the BMAD FR/NFR gate, black-box REST and GraphQL QA, CI auto-fix, and AI review comment resolution, looping until the PR is finished.",
+  "author": {
+    "name": "VilnaCRM",
+    "url": "https://github.com/VilnaCRM-Org"
+  },
+  "homepage": "https://github.com/VilnaCRM-Org/claude-plugins/tree/main/plugins/rust-backend-sdlc",
+  "repository": "https://github.com/VilnaCRM-Org/claude-plugins",
+  "license": "MIT",
+  "keywords": ["rust", "sdlc", "bmad", "ralph", "microservices", "axum", "automation", "code-review", "qa", "ci", "github"]
+}
