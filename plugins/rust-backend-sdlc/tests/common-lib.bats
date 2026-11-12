@@ -3993,3 +3993,758 @@ else:
   [ "$status" -eq 1 ]
   [ -z "$output" ]
 }
+
+# section: Ralph helpers
+
+# The cases below run in $BATS_TEST_TMPDIR/billing-service, the working
+# directory of a service whose planning bundle for issue 12 is
+# specs/12-add-invoice-export (bundle_write: stories 1.1 and 1.2) and whose
+# state cache is target/rust-sdlc/state/12-add-invoice-export.json.
+# SDLC_NOW_EPOCH fixes the archive stamp at 20261112T100000Z and CB_AUTO_RESET
+# is unset unless a case sets it.
+
+# rh_workdir — creates and enters $BATS_TEST_TMPDIR/billing-service (RH_DIR)
+# with the planning bundle RH_SPECS; RH_CACHE is the state cache path,
+# RH_ARCHIVE the archive path at the fixed clock and RH_T1/RH_T2 the titles
+# of stories 1.1 and 1.2.
+rh_workdir() {
+  RH_DIR="$BATS_TEST_TMPDIR/billing-service"
+  mkdir -p "$RH_DIR"
+  cd "$RH_DIR"
+  rh_names
+  bundle_write "$RH_SPECS"
+}
+
+# rh_names — the variables of rh_workdir without creating anything.
+rh_names() {
+  RH_SPECS=specs/12-add-invoice-export
+  RH_CACHE=target/rust-sdlc/state/12-add-invoice-export.json
+  RH_ARCHIVE=target/rust-sdlc/ralph-archive/20261112T100000Z-fix_plan.md
+  RH_T1='Add the export query to the billing context'
+  RH_T2='Expose the export over REST'
+  export SDLC_NOW_EPOCH=1794477600
+  unset CB_AUTO_RESET
+}
+
+# rh_plan FILE LINE... — a fix plan in bmalph 2.11.0's layout holding the
+# story LINEs (each followed by one `  > AC:` detail line).
+rh_plan() {
+  local file="$1" line
+  shift
+  mkdir -p "$(dirname "$file")"
+  {
+    printf '# Ralph Fix Plan\n\n## Stories to Implement\n\n### Epic 1: Invoice export\n\n'
+    for line in "$@"; do
+      printf '%s\n  > AC: Given a period, when it runs, then it answers\n' "$line"
+    done
+    printf '\n## Completed\n\n## Notes\n- Follow TDD methodology (red-green-refactor)\n'
+  } >"$file"
+}
+
+# rh_cache SPECS — records SPECS as staged_specs_dir in RH_CACHE through
+# state_cache_update (the command's own write after bmalph implement).
+rh_cache() {
+  "$LIB" state_cache_update "$RH_CACHE" plan PASS "$(printf '%040d' 7)" 1 --staged-specs-dir "$1" >/dev/null
+}
+
+# rh_add_story ID TITLE — appends `### Story ID: TITLE` with one criterion to
+# RH_SPECS/epics.md (how /rs-sdlc adds a QA fix story).
+rh_add_story() {
+  printf '\n### Story %s: %s\n\n**Acceptance Criteria:**\n\n- Given the QA report, when it reruns, then the row passes\n\n**Depends on:** 1.2\n' \
+    "$1" "$2" >>"$RH_SPECS/epics.md"
+}
+
+# rh_tree [DIR...] — every entry below DIR (default .ralph and target) with
+# its type, and the checksum of every regular file, sorted; absent DIRs print
+# `absent <dir>`.
+rh_tree() {
+  local dir
+  local -a dirs=("$@")
+  if ((${#dirs[@]} == 0)); then
+    dirs=(.ralph target)
+  fi
+  for dir in "${dirs[@]}"; do
+    if [[ ! -e "$dir" && ! -L "$dir" ]]; then
+      printf 'absent %s\n' "$dir"
+      continue
+    fi
+    find "$dir" -type d -print | sed 's/^/D /'
+    find "$dir" -type l -print | sed 's/^/L /'
+    find "$dir" -type f -exec cksum {} +
+  done | LC_ALL=C sort
+}
+
+# rh_expect LINE... — the last run exited 0 and printed exactly the LINEs.
+rh_expect() {
+  local want
+  want="$(printf '%s\n' "$@")"
+  if [[ "$status" != 0 || "$output" != "$want" ]]; then
+    printf -- 'status %s\n--- want\n%s\n--- got\n%s\n--- stderr\n%s\n' "$status" "$want" "$output" "${stderr-}"
+    return 1
+  fi
+}
+
+# rh_refused CODE FUNCTION ARG... — `common.sh FUNCTION ARG...` exits CODE
+# with nothing on stdout and an [rust-sdlc][ERROR] line on stderr, and the
+# trees of .ralph and target are left as they were.
+rh_refused() {
+  local code="$1" before
+  shift
+  before="$(rh_tree)"
+  run --separate-stderr "$LIB" "$@"
+  if [[ "$status" != "$code" || -n "$output" || "$stderr" != *'[rust-sdlc][ERROR] '* || "$(rh_tree)" != "$before" ]]; then
+    printf '%s: status %s (want %s), stdout %s, stderr %s\n' "$*" "$status" "$code" "$output" "$stderr"
+    return 1
+  fi
+}
+
+# rh_agent — .ralph/@AGENT.md copied from tests/fixtures/ralph/AGENT.md.tpl
+# and the golden profile at .claude/rust-sdlc.yml.
+rh_agent() {
+  mkdir -p .ralph .claude
+  cp "$PLUGIN_ROOT/tests/fixtures/ralph/AGENT.md.tpl" .ralph/@AGENT.md
+  cp "$PLUGIN_ROOT/tests/fixtures/profiles/golden.yml" .claude/rust-sdlc.yml
+}
+
+# rh_rules — the three Git rules ralph_agent_md_patch writes for
+# specs/12-add-invoice-export.
+rh_rules() {
+  cat <<'EOF'
+1. **Commit each story as `<type>(#12): story N.M <title>`** with the hooks active:
+   - `<type>` is one of feat, fix, refactor, build, chore, ci, docs, style, perf, test; N.M is the story id; 12 is the issue number of specs/12-add-invoice-export
+   - One commit per story; a commit the hooks reject is fixed and committed again, never bypassed
+
+2. **Stay on the branch the plugin checked out** (`<type>/12-add-invoice-export`):
+   - Never create, switch or rename a branch
+
+3. **Never push**: the plugin command pushes
+   - Every commit stays local; the plugin command pushes once the loop ends
+EOF
+}
+
+# rh_expected_agent — the golden-profile patch of AGENT.md.tpl, built from
+# the template by line number: the four command blocks (lines 5, 10, 15, 20),
+# the two 85% lines (34, 114), the coverage examples (42-45), items 1-3 of
+# the Git list with the blank line before item 4 (54-75) and the push
+# checklist item (119).
+rh_expected_agent() {
+  rh_rules >"$BATS_TEST_TMPDIR/rules.txt"
+  python3 -I - "$PLUGIN_ROOT/tests/fixtures/ralph/AGENT.md.tpl" "$BATS_TEST_TMPDIR/rules.txt" <<'PY'
+import sys
+
+lines = open(sys.argv[1], encoding="utf-8").read().split("\n")
+rules = open(sys.argv[2], encoding="utf-8").read().rstrip("\n").split("\n")
+assert lines[4] == "cargo build" and lines[33].endswith("85% code coverage ratio required for all new code")
+assert lines[40] == "  ```bash" and lines[44] == "  cargo tarpaulin --out Html" and lines[45] == "  ```"
+assert lines[53].startswith("1. ") and lines[75].startswith("4. ") and lines[118].endswith("pushed to remote repository")
+floor = "Coverage floor: 100% lines and 100% functions"
+edits = {
+    5: ["make bootstrap"],
+    10: ["make unit-tests", "make setup-test-db", "make integration-tests", "make e2e-tests"],
+    15: ["make tests-with-coverage"],
+    20: ["make start"],
+    34: [floor],
+    114: [floor],
+    119: ["- [ ] No commit pushed: the plugin command pushes"],
+}
+out = []
+number = 1
+while number <= len(lines):
+    if number == 42:
+        out += ["  make tests-with-coverage"]
+        number = 46
+        continue
+    if number == 54:
+        out += rules + [""]
+        number = 76
+        continue
+    out += edits.get(number, [lines[number - 1]])
+    number += 1
+sys.stdout.write("\n".join(out))
+PY
+}
+
+# rh_breaker STATE — .ralph/.circuit_breaker_state in Ralph's JSON shape.
+rh_breaker() {
+  mkdir -p .ralph
+  printf '{"state": "%s", "last_change": "2026-11-12T09:00:00+00:00", "consecutive_no_progress": 3, "total_opens": 1, "reason": "no progress"}\n' \
+    "$1" >.ralph/.circuit_breaker_state
+}
+
+# rh_breaker_case STATUS BREAKER AUTO_RESET — `common.sh ralph_breaker_state`
+# exits STATUS, prints exactly the two lines and leaves .ralph as it was.
+rh_breaker_case() {
+  local before
+  before="$(rh_tree .ralph)"
+  run --separate-stderr "$LIB" ralph_breaker_state
+  if [[ "$status" != "$1" || "$output" != "BREAKER: $2"$'\n'"AUTO_RESET: $3" || "$(rh_tree .ralph)" != "$before" ]]; then
+    printf 'status %s (want %s)\n--- got\n%s\n--- stderr\n%s\n' "$status" "$1" "$output" "$stderr"
+    return 1
+  fi
+}
+
+@test "common-lib: Ralph helpers: the section follows stage state and resume directly above the dispatch trailer (A3)" {
+  local start end fn line names body
+  [ "$(sed -n 's/^# section: //p' "$LIB" | tr '\n' '|')" = \
+    'core|command helpers|publishing and model sessions|stage state and resume|Ralph helpers|dispatch (keep last)|' ]
+  start="$(grep -nxF '# section: Ralph helpers' "$LIB" | cut -d: -f1)"
+  end="$(grep -nxF '# section: dispatch (keep last)' "$LIB" | cut -d: -f1)"
+  [ "$start" -gt "$(grep -nxF '# section: stage state and resume' "$LIB" | cut -d: -f1)" ]
+  [ "$(tail -n 4 "$LIB" | head -n 1)" = '# section: dispatch (keep last)' ]
+  # Only blank lines lie between the section's last function and the trailer.
+  [ -z "$(sed -n "$((end - 1))p" "$LIB")" ]
+  [ "$(sed -n "$((end - 2))p" "$LIB")" = '}' ]
+  for fn in ralph_fix_plan_prepare ralph_fix_plan_restore ralph_agent_md_patch ralph_breaker_state; do
+    line="$(grep -nxF "$fn() {" "$LIB" | cut -d: -f1)"
+    [ "$line" -gt "$start" ]
+    [ "$line" -lt "$end" ]
+  done
+  names="$(sed -n "${start},${end}p" "$LIB" | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)() {$/\1/p')"
+  run grep -vxE 'ralph_fix_plan_prepare|ralph_fix_plan_restore|ralph_agent_md_patch|ralph_breaker_state|_rh_[a-z_]+' <<<"$names"
+  [ "$status" -eq 1 ]
+  # ralph_breaker_state only reads: its body holds no write verb or redirect.
+  body="$(awk '/^ralph_breaker_state\(\) \{$/ { f = 1 } f { print } f && /^}$/ { exit }' "$LIB")"
+  [ -n "$body" ]
+  run grep -E '(^|[^A-Za-z_])(mv|cp|tee|rm|mkdir|touch|atomic_write|safe_write_target)[[:space:]]|[^0-9&]>[^&]' <<<"$body"
+  [ "$status" -eq 1 ]
+  # This suite's part defines only rh_ helpers.
+  start="$(grep -nxF '# section: Ralph helpers' "$BATS_TEST_FILENAME" | cut -d: -f1)"
+  names="$(sed -n "${start},\$p" "$BATS_TEST_FILENAME" | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)() {$/\1/p')"
+  [ -n "$names" ]
+  run grep -vE '^rh_' <<<"$names"
+  [ "$status" -eq 1 ]
+}
+
+@test "common-lib: Ralph helpers: only the three ADR-10 functions write into .ralph/ and all 17 names resolve sourced and executed" {
+  local n rc
+  # A line naming .ralph/ with a write verb or a redirect into it lies in
+  # ralph_fix_plan_prepare, ralph_fix_plan_restore or ralph_agent_md_patch.
+  run awk 'FNR == 1 { f = "(top)" } /^[A-Za-z_]+\(\)/ { f = $1 }
+    /\.ralph\// && /(>>?[[:space:]]*"?\.ralph\/|(^|[^A-Za-z_])(mv|cp|tee|rm|atomic_write|safe_write_target)[[:space:]])/ { print FILENAME ": " f ": " $0 }' \
+    "$PLUGIN_ROOT"/scripts/*.sh "$LIB"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  run grep -vE '/lib/common\.sh: (ralph_fix_plan_prepare|ralph_fix_plan_restore|ralph_agent_md_patch)\(\): ' <<<"$output"
+  [ "$status" -eq 1 ]
+  mkdir "$BATS_TEST_TMPDIR/empty"
+  cd "$BATS_TEST_TMPDIR/empty"
+  for n in "${DISPATCH_NAMES[@]}"; do
+    lib_shell 'declare -F "$1" >/dev/null' "$n"
+    rc=0
+    "$LIB" "$n" --rh-probe </dev/null >"$BATS_TEST_TMPDIR/out" 2>"$BATS_TEST_TMPDIR/err" || rc=$?
+    if [ "$rc" -eq 64 ] || grep -qF 'is a library' "$BATS_TEST_TMPDIR/err"; then
+      printf '%s did not resolve through the executed dispatcher (exit %s)\n' "$n" "$rc"
+      return 1
+    fi
+  done
+}
+
+@test "common-lib: ralph_fix_plan_prepare: FIX_PLAN: absent without a fix plan, nothing moved or created" {
+  rh_workdir
+  run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rh_expect 'FIX_PLAN: absent'
+  [ "$(rh_tree)" = "$(printf 'absent .ralph\nabsent target')" ]
+  # Without a fix plan the cache does not matter.
+  rh_cache specs/99-other
+  mkdir .ralph
+  run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rh_expect 'FIX_PLAN: absent'
+  [ ! -e target/rust-sdlc/ralph-archive ]
+}
+
+@test "common-lib: ralph_fix_plan_prepare: FIX_PLAN: current when the cache names SPECS_DIR and every story is planned" {
+  local before spelling
+  rh_workdir
+  rh_plan .ralph/@fix_plan.md "- [x] Story 1.1: $RH_T1" "- [ ] Story 1.2: $RH_T2"
+  rh_cache "$RH_SPECS"
+  before="$(rh_tree)"
+  for spelling in "$RH_SPECS" "./$RH_SPECS/" "$RH_DIR/$RH_SPECS"; do
+    run --separate-stderr "$LIB" ralph_fix_plan_prepare "$spelling" "$RH_CACHE"
+    rh_expect 'FIX_PLAN: current'
+    [ "$(rh_tree)" = "$before" ]
+  done
+  # A planned story the bundle no longer has keeps the plan current.
+  rh_plan .ralph/@fix_plan.md "- [x] Story 1.1: $RH_T1" "- [ ] Story 1.2: $RH_T2" '- [ ] Story 1.9: Dropped story'
+  run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rh_expect 'FIX_PLAN: current'
+}
+
+@test "common-lib: ralph_fix_plan_prepare: ARCHIVED keep-progress when the same bundle gained a story the plan lacks" {
+  local plan_sum
+  rh_workdir
+  rh_plan .ralph/@fix_plan.md "- [x] Story 1.1: $RH_T1" "- [ ] Story 1.2: $RH_T2"
+  rh_cache "$RH_SPECS"
+  rh_add_story 1.3 'Fix QA findings 1'
+  plan_sum="$(cksum <.ralph/@fix_plan.md)"
+  run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rh_expect "ARCHIVED: $RH_ARCHIVE keep-progress"
+  [ ! -e .ralph/@fix_plan.md ]
+  [ -f "$RH_ARCHIVE" ]
+  [ "$(cksum <"$RH_ARCHIVE")" = "$plan_sum" ]
+  [ "$(find target/rust-sdlc/ralph-archive -type f | wc -l)" -eq 1 ]
+}
+
+@test "common-lib: ralph_fix_plan_prepare: ARCHIVED discard-progress when the cache names another bundle" {
+  local plan_sum
+  rh_workdir
+  bundle_write specs/9-earlier-feature
+  rh_plan .ralph/@fix_plan.md "- [x] Story 1.1: $RH_T1" "- [x] Story 1.2: $RH_T2"
+  rh_cache specs/9-earlier-feature
+  plan_sum="$(cksum <.ralph/@fix_plan.md)"
+  # Every story of RH_SPECS is in the plan, yet the plan belongs to bundle 9.
+  run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rh_expect "ARCHIVED: $RH_ARCHIVE discard-progress"
+  [ ! -e .ralph/@fix_plan.md ]
+  [ "$(cksum <"$RH_ARCHIVE")" = "$plan_sum" ]
+}
+
+@test "common-lib: ralph_fix_plan_prepare: ARCHIVED discard-progress when the cache is absent, records no bundle or is malformed" {
+  local epoch=1794477600 doc stamp
+  rh_workdir
+  for doc in absent \
+    '{"schema_version": 1, "issue": 12, "slug": "add-invoice-export", "staged_specs_dir": null, "stages": []}' \
+    '{"staged_specs_dir": 42}' 'not json' '[]'; do
+    rm -f "$RH_CACHE"
+    if [ "$doc" != absent ]; then
+      mkdir -p "$(dirname "$RH_CACHE")"
+      printf '%s\n' "$doc" >"$RH_CACHE"
+    fi
+    rh_plan .ralph/@fix_plan.md "- [x] Story 1.1: $RH_T1" "- [ ] Story 1.2: $RH_T2"
+    export SDLC_NOW_EPOCH="$epoch"
+    stamp="$(lib_shell utc_stamp)"
+    run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+    rh_expect "ARCHIVED: target/rust-sdlc/ralph-archive/$stamp-fix_plan.md discard-progress"
+    [ ! -e .ralph/@fix_plan.md ]
+    case "$doc" in
+      'not json' | '{"staged_specs_dir": 42}' | '[]') [[ "$stderr" == '[rust-sdlc][WARN] '*'treated as absent'* ]] ;;
+      *) [ -z "$stderr" ] ;;
+    esac
+    epoch=$((epoch + 1))
+  done
+  [ "$(find target/rust-sdlc/ralph-archive -type f | wc -l)" -eq 5 ]
+}
+
+@test "common-lib: ralph_fix_plan_prepare: malformed arguments exit 2, refusals exit 1 and leave the fix plan in place" {
+  rh_workdir
+  rh_plan .ralph/@fix_plan.md "- [x] Story 1.1: $RH_T1"
+  rh_refused 2 ralph_fix_plan_prepare
+  rh_refused 2 ralph_fix_plan_prepare "$RH_SPECS"
+  rh_refused 2 ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE" extra
+  rh_refused 2 ralph_fix_plan_prepare '' "$RH_CACHE"
+  rh_refused 2 ralph_fix_plan_prepare "$RH_SPECS" ''
+  rh_refused 2 ralph_fix_plan_prepare "$RH_SPECS" target/rust-sdlc/state/state.json
+  rh_refused 2 ralph_fix_plan_prepare "$RH_SPECS" target/rust-sdlc/state/0-add.json
+  # No bundle, no epics.md, or an epics.md without a story heading.
+  rh_refused 1 ralph_fix_plan_prepare specs/13-missing "$RH_CACHE"
+  mkdir specs/14-empty
+  rh_refused 1 ralph_fix_plan_prepare specs/14-empty "$RH_CACHE"
+  printf '# Epics\n\n## Epic 1: Nothing yet\n' >specs/14-empty/epics.md
+  rh_refused 1 ralph_fix_plan_prepare specs/14-empty "$RH_CACHE"
+  # An archive already at the stamp is never overwritten.
+  mkdir -p target/rust-sdlc/ralph-archive
+  printf 'older\n' >"$RH_ARCHIVE"
+  rh_refused 1 ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rm "$RH_ARCHIVE"
+  # A linked or non-regular fix plan is refused.
+  mv .ralph/@fix_plan.md .ralph/real-plan.md
+  ln -s real-plan.md .ralph/@fix_plan.md
+  rh_refused 1 ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rm .ralph/@fix_plan.md
+  mkdir .ralph/@fix_plan.md
+  rh_refused 1 ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rmdir .ralph/@fix_plan.md
+  # A linked archive directory that leads outside the working directory.
+  mv .ralph/real-plan.md .ralph/@fix_plan.md
+  rm -r target/rust-sdlc/ralph-archive
+  mkdir "$BATS_TEST_TMPDIR/elsewhere"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" target/rust-sdlc/ralph-archive
+  rh_refused 1 ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/elsewhere")" ]
+}
+
+@test "common-lib: ralph_fix_plan_restore: re-marks only the stories whose id and title were both checked" {
+  rh_workdir
+  mkdir -p target/rust-sdlc/ralph-archive
+  rh_plan "$RH_ARCHIVE" "- [x] Story 1.1: $RH_T1" '- [X] Story 1.2: Expose the export over GraphQL' \
+    '- [ ] Story 1.3: Fix QA findings 1' '- [x] Story 1.4: Renumbered story'
+  rh_plan .ralph/@fix_plan.md "- [ ] Story 1.1: $RH_T1  " "- [ ] Story 1.2: $RH_T2" \
+    '- [ ] Story 1.3: Fix QA findings 1' '- [ ] Story 1.5: Renumbered story' '- [x] Story 1.6: Already done'
+  run --separate-stderr "$LIB" ralph_fix_plan_restore "$RH_ARCHIVE"
+  rh_expect 'RESTORED: 1 stories'
+  rh_plan "$BATS_TEST_TMPDIR/want.md" "- [x] Story 1.1: $RH_T1  " "- [ ] Story 1.2: $RH_T2" \
+    '- [ ] Story 1.3: Fix QA findings 1' '- [ ] Story 1.5: Renumbered story' '- [x] Story 1.6: Already done'
+  cmp "$BATS_TEST_TMPDIR/want.md" .ralph/@fix_plan.md
+  # A second restore has nothing left to mark and leaves the bytes alone.
+  run --separate-stderr "$LIB" ralph_fix_plan_restore "$RH_ARCHIVE"
+  rh_expect 'RESTORED: 0 stories'
+  cmp "$BATS_TEST_TMPDIR/want.md" .ralph/@fix_plan.md
+}
+
+@test "common-lib: ralph_fix_plan_restore: keeps CRLF lines and the plan's mode" {
+  rh_workdir
+  mkdir -p target/rust-sdlc/ralph-archive .ralph
+  printf -- '- [x] Story 1.1: %s\r\n- [x] Story 1.2: %s\r\n' "$RH_T1" "$RH_T2" >"$RH_ARCHIVE"
+  printf -- '# Ralph Fix Plan\r\n\r\n- [ ] Story 1.1: %s\r\n  > AC: one\r\n- [ ] Story 1.2: %s\r\n' "$RH_T1" "$RH_T2" >.ralph/@fix_plan.md
+  chmod 640 .ralph/@fix_plan.md
+  run --separate-stderr "$LIB" ralph_fix_plan_restore "$RH_ARCHIVE"
+  rh_expect 'RESTORED: 2 stories'
+  printf -- '# Ralph Fix Plan\r\n\r\n- [x] Story 1.1: %s\r\n  > AC: one\r\n- [x] Story 1.2: %s\r\n' "$RH_T1" "$RH_T2" |
+    cmp - .ralph/@fix_plan.md
+  [ "$(perms .ralph/@fix_plan.md)" = '-rw-r-----' ]
+}
+
+@test "common-lib: ralph_fix_plan_restore: an archive outside ralph-archive exits 2, a missing archive or fix plan exits 1" {
+  rh_workdir
+  rh_plan .ralph/@fix_plan.md "- [ ] Story 1.1: $RH_T1"
+  rh_plan "$BATS_TEST_TMPDIR/stray.md" "- [x] Story 1.1: $RH_T1"
+  rh_refused 2 ralph_fix_plan_restore
+  rh_refused 2 ralph_fix_plan_restore ''
+  rh_refused 2 ralph_fix_plan_restore "$RH_ARCHIVE" extra
+  rh_refused 2 ralph_fix_plan_restore "$BATS_TEST_TMPDIR/stray.md"
+  rh_refused 2 ralph_fix_plan_restore .ralph/@fix_plan.md
+  mkdir -p target/rust-sdlc/ralph-archive
+  ln -s "$BATS_TEST_TMPDIR/stray.md" target/rust-sdlc/ralph-archive/linked-fix_plan.md
+  rh_refused 2 ralph_fix_plan_restore target/rust-sdlc/ralph-archive/linked-fix_plan.md
+  rh_refused 2 ralph_fix_plan_restore target/rust-sdlc/ralph-archive/../../../.ralph/@fix_plan.md
+  rh_refused 1 ralph_fix_plan_restore "$RH_ARCHIVE"
+  cp "$BATS_TEST_TMPDIR/stray.md" "$RH_ARCHIVE"
+  rm .ralph/@fix_plan.md
+  rh_refused 1 ralph_fix_plan_restore "$RH_ARCHIVE"
+}
+
+@test "common-lib: ralph_fix_plan_prepare: end to end: prepare, the bmalph stub's implement and restore carry the progress into a QA fix round" {
+  local implements
+  RH_DIR="$BATS_TEST_TMPDIR/billing-service"
+  rr_materialize "$RH_DIR"
+  cd "$RH_DIR"
+  rh_names
+  bundle_write "$RH_SPECS"
+  git add specs
+  git commit -q -m 'docs(#12): add planning bundle 12-add-invoice-export'
+  cp "$PLUGIN_ROOT/tests/fixtures/profiles/golden.yml" .claude/rust-sdlc.yml
+  # First entry: no fix plan, so stage and run bmalph implement.
+  run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rh_expect 'FIX_PLAN: absent'
+  "$PLUGIN_ROOT/scripts/stage-planning-artifacts.sh" "$RH_SPECS" >/dev/null
+  run bmalph implement
+  [ "$status" -eq 0 ]
+  "$LIB" state_cache_update "$RH_CACHE" plan PASS "$(git rev-parse HEAD)" 1 --staged-specs-dir "$RH_SPECS" >/dev/null
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UPDATED: .ralph/@AGENT.md'
+  # Ralph finishes story 1.1, then a resume finds the plan current.
+  python3 -I -c '
+import sys
+p = ".ralph/@fix_plan.md"
+t = open(p).read()
+open(p, "w").write(t.replace("- [ ] Story 1.1: ", "- [x] Story 1.1: ", 1))'
+  run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rh_expect 'FIX_PLAN: current'
+  # QA fails: /rs-sdlc appends a fix story, so the plan is archived with its
+  # progress and bmalph implement runs again without meeting its refusal.
+  rh_add_story 1.3 'Fix QA findings 1'
+  git commit -q -am 'docs(#12): add QA fix story 1'
+  run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rh_expect "ARCHIVED: $RH_ARCHIVE keep-progress"
+  "$PLUGIN_ROOT/scripts/stage-planning-artifacts.sh" "$RH_SPECS" >/dev/null
+  run bmalph implement
+  [ "$status" -eq 0 ]
+  [[ "$output" != *'already been run'* ]]
+  grep -qxF -- '- [ ] Story 1.1: Add the export query to the billing context' .ralph/@fix_plan.md
+  run --separate-stderr "$LIB" ralph_fix_plan_restore "$RH_ARCHIVE"
+  rh_expect 'RESTORED: 1 stories'
+  run grep -E '^- \[[ x]\] Story ' .ralph/@fix_plan.md
+  [ "$output" = "$(printf '%s\n' "- [x] Story 1.1: $RH_T1" "- [ ] Story 1.2: $RH_T2" '- [ ] Story 1.3: Fix QA findings 1')" ]
+  "$LIB" state_cache_update "$RH_CACHE" plan PASS "$(git rev-parse HEAD)" 2 --staged-specs-dir "$RH_SPECS" >/dev/null
+  run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rh_expect 'FIX_PLAN: current'
+  # bmalph implement ran twice, never with --force.
+  implements="$(grep -c '^bmalph implement' "$STUB_BMALPH_LOG")"
+  [ "$implements" -eq 2 ]
+  run grep -F -- '--force' "$STUB_BMALPH_LOG"
+  [ "$status" -eq 1 ]
+}
+
+@test "common-lib: ralph_fix_plan_prepare: the bmalph stub refuses implement with already been run while the fix plan exists" {
+  local before
+  rh_workdir
+  mkdir -p _bmad-output/planning-artifacts
+  cp "$RH_SPECS/epics.md" _bmad-output/planning-artifacts/epics.md
+  rh_plan .ralph/@fix_plan.md "- [x] Story 1.1: $RH_T1" "- [ ] Story 1.2: $RH_T2"
+  before="$(rh_tree .ralph)"
+  run bmalph implement
+  [ "$status" -eq 1 ]
+  [ "${lines[0]}" = 'Warning: bmalph implement has already been run.' ]
+  [ "$(rh_tree .ralph)" = "$before" ]
+  # The protocol moves the plan aside first, so the next implement runs.
+  run --separate-stderr "$LIB" ralph_fix_plan_prepare "$RH_SPECS" "$RH_CACHE"
+  rh_expect "ARCHIVED: $RH_ARCHIVE discard-progress"
+  run bmalph implement
+  [ "$status" -eq 0 ]
+  grep -qxF -- "- [ ] Story 1.2: $RH_T2" .ralph/@fix_plan.md
+}
+
+@test "common-lib: ralph_agent_md_patch: rewrites the bmalph template with the golden profile" {
+  rh_workdir
+  rh_agent
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UPDATED: .ralph/@AGENT.md'
+  rh_expected_agent | cmp - .ralph/@AGENT.md
+  # Spot checks of the contract: no cargo command, no 85%, no push step,
+  # item 4 kept.
+  run grep -nE 'cargo|85%|git push|git add \.|feature/<' .ralph/@AGENT.md
+  [ "$status" -eq 1 ]
+  [ "$(grep -cxF 'Coverage floor: 100% lines and 100% functions' .ralph/@AGENT.md)" -eq 2 ]
+  grep -qxF '4. **Ralph Integration**:' .ralph/@AGENT.md
+  [ "$(sed -n '/^## Running Tests$/,/^## Build Commands$/p' .ralph/@AGENT.md)" = "$(printf '%s\n' '## Running Tests' \
+    '```bash' 'make unit-tests' 'make setup-test-db' 'make integration-tests' 'make e2e-tests' '```' '' '## Build Commands')" ]
+}
+
+@test "common-lib: ralph_agent_md_patch: a second run prints UNCHANGED and keeps the bytes" {
+  local sum
+  rh_workdir
+  rh_agent
+  "$LIB" ralph_agent_md_patch "$RH_SPECS" >/dev/null
+  sum="$(cksum <.ralph/@AGENT.md)"
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UNCHANGED: .ralph/@AGENT.md'
+  [ "$(cksum <.ralph/@AGENT.md)" = "$sum" ]
+  # The SPECS_DIR spelling does not change the result.
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_DIR/$RH_SPECS/"
+  rh_expect 'UNCHANGED: .ralph/@AGENT.md'
+  # CRLF line endings are kept and the patch is still idempotent.
+  python3 -I -c '
+import sys
+data = open(sys.argv[1], "rb").read().replace(b"\n", b"\r\n")
+open(".ralph/@AGENT.md", "wb").write(data)' "$PLUGIN_ROOT/tests/fixtures/ralph/AGENT.md.tpl"
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UPDATED: .ralph/@AGENT.md'
+  rh_expected_agent | python3 -I -c '
+import sys
+want = sys.stdin.buffer.read().replace(b"\n", b"\r\n")
+sys.exit(0 if open(".ralph/@AGENT.md", "rb").read() == want else 1)'
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UNCHANGED: .ralph/@AGENT.md'
+}
+
+@test "common-lib: ralph_agent_md_patch: a null make key drops its line and an empty block reads not available (capability absent)" {
+  rh_workdir
+  rh_agent
+  mutate_profile .claude/rust-sdlc.yml make.bootstrap null
+  mutate_profile .claude/rust-sdlc.yml make.setup_test_db null
+  mutate_profile .claude/rust-sdlc.yml make.e2e_tests null
+  mutate_profile .claude/rust-sdlc.yml make.start null
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UPDATED: .ralph/@AGENT.md'
+  [ "$(sed -n '/^## Project Setup$/,/^## Build Commands$/p' .ralph/@AGENT.md)" = "$(printf '%s\n' '## Project Setup' \
+    '```bash' 'not available (capability absent)' '```' '' '## Running Tests' '```bash' 'make unit-tests' \
+    'make integration-tests' '```' '' '## Build Commands')" ]
+  [ "$(sed -n '/^## Development Server$/,/^## Key Learnings$/p' .ralph/@AGENT.md)" = "$(printf '%s\n' \
+    '## Development Server' '```bash' 'not available (capability absent)' '```' '' '## Key Learnings')" ]
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UNCHANGED: .ralph/@AGENT.md'
+  # Mapping the key again restores its line.
+  mutate_profile .claude/rust-sdlc.yml make.start start
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UPDATED: .ralph/@AGENT.md'
+  grep -qxF 'make start' .ralph/@AGENT.md
+}
+
+@test "common-lib: ralph_agent_md_patch: a missing heading appends the rust-backend-sdlc overrides section" {
+  local sum
+  rh_workdir
+  rh_agent
+  # No Development Server section and no Git Workflow Requirements heading.
+  python3 -I -c '
+import sys
+t = open(sys.argv[1]).read()
+t = t.replace("## Development Server\n```bash\ncargo run\n```\n\n", "")
+t = t.replace("### Git Workflow Requirements\n", "### Git Habits\n")
+open(".ralph/@AGENT.md", "w").write(t)' "$PLUGIN_ROOT/tests/fixtures/ralph/AGENT.md.tpl"
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UPDATED: .ralph/@AGENT.md'
+  [ "$(grep -cxF '## rust-backend-sdlc overrides' .ralph/@AGENT.md)" -eq 1 ]
+  {
+    printf '%s\n' '## rust-backend-sdlc overrides' '' 'These rules replace every conflicting instruction in this file.' ''
+    printf '%s\n' '### Project setup (rust-backend-sdlc)' '' '```bash' 'make bootstrap' '```' ''
+    printf '%s\n' '### Running tests (rust-backend-sdlc)' '' '```bash' 'make unit-tests' 'make setup-test-db' \
+      'make integration-tests' 'make e2e-tests' '```' ''
+    printf '%s\n' '### Build commands (rust-backend-sdlc)' '' '```bash' 'make tests-with-coverage' '```' ''
+    printf '%s\n' '### Development server (rust-backend-sdlc)' '' '```bash' 'make start' '```' ''
+    printf '%s\n' '### Coverage and Git workflow (rust-backend-sdlc)' '' 'Coverage floor: 100% lines and 100% functions' ''
+    rh_rules
+  } >"$BATS_TEST_TMPDIR/overrides.md"
+  sed -n '/^## rust-backend-sdlc overrides$/,$p' .ralph/@AGENT.md | cmp "$BATS_TEST_TMPDIR/overrides.md" -
+  # The headings that exist are still patched.
+  [ "$(sed -n '/^## Build Commands$/,/^## Key Learnings$/p' .ralph/@AGENT.md)" = "$(printf '%s\n' \
+    '## Build Commands' '```bash' 'make tests-with-coverage' '```' '' '## Key Learnings')" ]
+  run grep -c '85%' .ralph/@AGENT.md
+  [ "$output" = 0 ]
+  sum="$(cksum <.ralph/@AGENT.md)"
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UNCHANGED: .ralph/@AGENT.md'
+  [ "$(cksum <.ralph/@AGENT.md)" = "$sum" ]
+  # A profile change re-renders the overrides section in place.
+  mutate_profile .claude/rust-sdlc.yml make.bootstrap null
+  run --separate-stderr "$LIB" ralph_agent_md_patch "$RH_SPECS"
+  rh_expect 'UPDATED: .ralph/@AGENT.md'
+  [ "$(grep -cxF '## rust-backend-sdlc overrides' .ralph/@AGENT.md)" -eq 1 ]
+  [ "$(grep -cxF 'not available (capability absent)' .ralph/@AGENT.md)" -eq 2 ]
+}
+
+@test "common-lib: ralph_agent_md_patch: an absent @AGENT.md or an absent, unparseable or invalid profile exits 1 with the file unchanged" {
+  local key value
+  rh_workdir
+  rh_agent
+  rm .ralph/@AGENT.md
+  rh_refused 1 ralph_agent_md_patch "$RH_SPECS"
+  [ ! -e .ralph/@AGENT.md ]
+  ln -s "$PLUGIN_ROOT/tests/fixtures/ralph/AGENT.md.tpl" .ralph/@AGENT.md
+  rh_refused 1 ralph_agent_md_patch "$RH_SPECS"
+  rm .ralph/@AGENT.md
+  cp "$PLUGIN_ROOT/tests/fixtures/ralph/AGENT.md.tpl" .ralph/@AGENT.md
+  rm .claude/rust-sdlc.yml
+  rh_refused 1 ralph_agent_md_patch "$RH_SPECS"
+  cp "$PLUGIN_ROOT/tests/fixtures/profiles/invalid-yaml.yml" .claude/rust-sdlc.yml
+  rh_refused 1 ralph_agent_md_patch "$RH_SPECS"
+  while IFS='|' read -r key value; do
+    cp "$PLUGIN_ROOT/tests/fixtures/profiles/golden.yml" .claude/rust-sdlc.yml
+    if [ "$value" = DROP ]; then
+      drop_profile_key .claude/rust-sdlc.yml "$key"
+    else
+      mutate_profile .claude/rust-sdlc.yml "$key" "$value"
+    fi
+    rh_refused 1 ralph_agent_md_patch "$RH_SPECS"
+    if [[ "$stderr" != *"invalid profile .claude/rust-sdlc.yml: $key: "* ]]; then
+      printf '%s=%s: %s\n' "$key" "$value" "$stderr"
+      return 1
+    fi
+    cmp "$PLUGIN_ROOT/tests/fixtures/ralph/AGENT.md.tpl" .ralph/@AGENT.md
+  done <<'EOF'
+make.start|'start; rm -rf /'
+make.unit_tests|format
+make.bootstrap|'boot strap'
+make.e2e_tests|DROP
+make.tests_with_coverage|[tests-with-coverage]
+quality.coverage_lines|85
+quality.coverage_functions|'100'
+quality.coverage_functions|null
+schema_version|2
+EOF
+}
+
+@test "common-lib: ralph_agent_md_patch: malformed arguments exit 2 and a SPECS_DIR that is not a directory exits 1" {
+  rh_workdir
+  rh_agent
+  rh_refused 2 ralph_agent_md_patch
+  rh_refused 2 ralph_agent_md_patch ''
+  rh_refused 2 ralph_agent_md_patch "$RH_SPECS" extra
+  rh_refused 2 ralph_agent_md_patch specs/add-invoice-export
+  rh_refused 2 ralph_agent_md_patch specs/012-add-invoice-export
+  rh_refused 2 ralph_agent_md_patch specs/12-Add_Export
+  rh_refused 1 ralph_agent_md_patch specs/13-not-there
+  cmp "$PLUGIN_ROOT/tests/fixtures/ralph/AGENT.md.tpl" .ralph/@AGENT.md
+}
+
+@test "common-lib: ralph_breaker_state: CLOSED with no auto-reset passes" {
+  rh_names
+  mkdir -p "$BATS_TEST_TMPDIR/svc" && cd "$BATS_TEST_TMPDIR/svc"
+  rh_breaker CLOSED
+  rh_breaker_case 0 CLOSED false
+}
+
+@test "common-lib: ralph_breaker_state: OPEN fails" {
+  rh_names
+  mkdir -p "$BATS_TEST_TMPDIR/svc" && cd "$BATS_TEST_TMPDIR/svc"
+  rh_breaker OPEN
+  rh_breaker_case 1 OPEN false
+}
+
+@test "common-lib: ralph_breaker_state: HALF_OPEN fails" {
+  rh_names
+  mkdir -p "$BATS_TEST_TMPDIR/svc" && cd "$BATS_TEST_TMPDIR/svc"
+  rh_breaker HALF_OPEN
+  rh_breaker_case 1 HALF_OPEN false
+}
+
+@test "common-lib: ralph_breaker_state: ABSENT passes and creates nothing" {
+  rh_names
+  mkdir -p "$BATS_TEST_TMPDIR/svc" && cd "$BATS_TEST_TMPDIR/svc"
+  rh_breaker_case 0 ABSENT false
+  [ ! -e .ralph ]
+  mkdir .ralph
+  printf 'CB_AUTO_RESET=false\n' >.ralph/.ralphrc
+  rh_breaker_case 0 ABSENT false
+}
+
+@test "common-lib: ralph_breaker_state: CB_AUTO_RESET=true from the environment fails even with a CLOSED breaker" {
+  rh_names
+  mkdir -p "$BATS_TEST_TMPDIR/svc" && cd "$BATS_TEST_TMPDIR/svc"
+  rh_breaker CLOSED
+  export CB_AUTO_RESET=true
+  rh_breaker_case 1 CLOSED true
+  # The environment wins over .ralph/.ralphrc in both directions (Ralph's
+  # precedence); an empty value is no override.
+  printf 'CB_AUTO_RESET=false\n' >.ralph/.ralphrc
+  rh_breaker_case 1 CLOSED true
+  printf 'CB_AUTO_RESET=true\n' >.ralph/.ralphrc
+  CB_AUTO_RESET=false rh_breaker_case 0 CLOSED false
+  CB_AUTO_RESET='' rh_breaker_case 1 CLOSED true
+  # Only the exact value true auto-resets, as in Ralph.
+  rm .ralph/.ralphrc
+  CB_AUTO_RESET=TRUE rh_breaker_case 0 CLOSED false
+  rm -f .ralph/.circuit_breaker_state
+  rh_breaker_case 1 ABSENT true
+}
+
+@test "common-lib: ralph_breaker_state: CB_AUTO_RESET=true from .ralph/.ralphrc fails" {
+  local line
+  rh_names
+  mkdir -p "$BATS_TEST_TMPDIR/svc" && cd "$BATS_TEST_TMPDIR/svc"
+  rh_breaker CLOSED
+  for line in 'CB_AUTO_RESET=true' 'CB_AUTO_RESET="true"' "  export CB_AUTO_RESET='true'   # reset on start"; do
+    printf 'CB_COOLDOWN_MINUTES=30\n%s\n' "$line" >.ralph/.ralphrc
+    rh_breaker_case 1 CLOSED true
+  done
+  # The last assignment wins, a commented line is no assignment, and Ralph's
+  # shipped default (false) passes.
+  printf 'CB_AUTO_RESET=true\nCB_AUTO_RESET=false\n# CB_AUTO_RESET=true\n' >.ralph/.ralphrc
+  rh_breaker_case 0 CLOSED false
+  printf 'CB_AUTO_RESET=false\nCB_AUTO_RESET=true\n' >.ralph/.ralphrc
+  rh_breaker_case 1 CLOSED true
+  printf 'MAX_CALLS_PER_HOUR=100\n' >.ralph/.ralphrc
+  rh_breaker_case 0 CLOSED false
+  rh_breaker OPEN
+  printf 'CB_AUTO_RESET=true\n' >.ralph/.ralphrc
+  rh_breaker_case 1 OPEN true
+}
+
+@test "common-lib: ralph_breaker_state: a .ralphrc value that needs shell evaluation counts as true" {
+  local line
+  rh_names
+  mkdir -p "$BATS_TEST_TMPDIR/svc" && cd "$BATS_TEST_TMPDIR/svc"
+  rh_breaker CLOSED
+  for line in 'CB_AUTO_RESET=${RESET:-false}' 'CB_AUTO_RESET=$(cat flag)' 'CB_AUTO_RESET=false OTHER=1'; do
+    printf '%s\n' "$line" >.ralph/.ralphrc
+    rh_breaker_case 1 CLOSED true
+    [[ "$stderr" == '[rust-sdlc][WARN] ralph_breaker_state: cannot evaluate CB_AUTO_RESET='*'treated as true' ]]
+  done
+}
+
+@test "common-lib: ralph_breaker_state: an unknown breaker state exits 1 with nothing on stdout, an argument exits 2" {
+  local doc before
+  rh_names
+  mkdir -p "$BATS_TEST_TMPDIR/svc/.ralph" && cd "$BATS_TEST_TMPDIR/svc"
+  for doc in 'OPEN' '{"state": "BROKEN"}' '{"reason": "no state"}' '[]' ''; do
+    printf '%s\n' "$doc" >.ralph/.circuit_breaker_state
+    before="$(rh_tree .ralph)"
+    run --separate-stderr "$LIB" ralph_breaker_state
+    [ "$status" -eq 1 ]
+    [ -z "$output" ]
+    [[ "$stderr" == *'holds no CLOSED, OPEN or HALF_OPEN state'* ]]
+    [ "$(rh_tree .ralph)" = "$before" ]
+  done
+  rh_breaker CLOSED
+  run --separate-stderr "$LIB" ralph_breaker_state --reset
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+}

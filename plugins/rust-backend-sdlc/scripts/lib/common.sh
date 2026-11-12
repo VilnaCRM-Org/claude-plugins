@@ -3042,6 +3042,622 @@ resume_point() {
     "${got_iter[review]:-0}" "${got_iter[qa]:-0}" "${got_iter[finish-pr]:-A0.B0.C0.W0.R0}"
 }
 
+# section: Ralph helpers
+
+# The bmalph re-entry protocol (ADR-10a), the .ralph/@AGENT.md overrides
+# (ADR-10b) and the breaker pre-check (ADR-10c). They run in the service's
+# working directory (the repository root). ralph_fix_plan_prepare,
+# ralph_fix_plan_restore and ralph_agent_md_patch are the only plugin code
+# that writes into .ralph/ (ADR-10): the archive move of the fix plan, the
+# re-marking of restored stories and the @AGENT.md patch. ralph_breaker_state
+# only reads. bmalph implement is never run with --force and .ralph/.ralphrc
+# is never edited. All four are dispatcher names (ADR-15); private helpers
+# carry the _rh_ prefix.
+
+# _rh_py MODE ARG... — the python3 side of the Ralph helpers. Story headings
+# follow bmalph 2.11.0 (`^###\s+Story\s+([\d.]+):\s+(.+)` in epics.md) and so
+# do fix-plan lines (`- [ ] Story <id>: <title>` / `- [x] Story <id>: <title>`).
+# Modes:
+#   decide SPECS_DIR PLAN CACHE  print `current`, `keep` or `discard` (ADR-10a):
+#                                current when the cache's staged_specs_dir is
+#                                SPECS_DIR (same normalized path or the same
+#                                directory) and every story id of
+#                                SPECS_DIR/epics.md is in PLAN; keep for the
+#                                same bundle with an id missing from PLAN;
+#                                discard when the cache is absent, records no
+#                                bundle or names another one (a malformed
+#                                cache is logged and counts as absent)
+#   restore ARCHIVE PLAN         print the number of re-marked lines, a
+#                                newline and PLAN with `[ ]` turned into `[x]`
+#                                on every story line whose id and title (both,
+#                                trailing blanks ignored) are checked in ARCHIVE
+#   agent FILE N SLUG            read the profile JSON on stdin, check the keys
+#                                the patch consumes, and print `UPDATED` or
+#                                `UNCHANGED`, a newline and the patched FILE
+#   autoreset FILE               print `value <v>` for the last CB_AUTO_RESET=
+#                                line of FILE, `uncertain <raw>` when that
+#                                value needs shell evaluation, nothing without
+#                                such a line
+# A malformed input exits 1 with the reason on stderr.
+_rh_py() {
+  _sdlc_py -c '
+import json
+import os
+import re
+import shlex
+import sys
+
+CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+STORY = re.compile(r"^###\s+Story\s+([\d.]+):\s+(.+)")
+PLAN_LINE = re.compile(r"^\s*-\s*\[([ xX])\]\s*Story\s+([\d.]+):\s*(.+?)\s*$")
+OPEN_LINE = re.compile(r"^([ \t]*-[ \t]*)\[ \]([ \t]*Story[ \t]+([\d.]+):[ \t]*(.+?)[ \t]*)(\r?)$", re.M)
+TICKS = chr(96) * 3
+FENCE = re.compile(r"[ \t]*(%s|~~~)" % TICKS)
+HEADING = re.compile(r"(#{1,6})[ \t]")
+FIRST = re.compile(r"1\.[ \t]")
+FOURTH = re.compile(r"4\.[ \t]")
+ABSENT = "not available (capability absent)"
+OVERRIDES = "## rust-backend-sdlc overrides"
+GIT_HEADING = "### Git Workflow Requirements"
+PUSH_ITEM = "- [ ] All commits pushed to remote repository"
+COVERAGE_ITEM = "**Coverage Validation**"
+MAKE_KEYS = ("bootstrap", "unit_tests", "setup_test_db", "integration_tests",
+             "e2e_tests", "tests_with_coverage", "start")
+FLOORS = ("coverage_lines", "coverage_functions")
+
+
+def fail(message):
+    sys.stderr.write("[rust-sdlc][ERROR] %s\n" % CTRL.sub("?", message))
+    sys.exit(1)
+
+
+def warn(message):
+    sys.stderr.write("[rust-sdlc][WARN] %s\n" % CTRL.sub("?", message))
+
+
+def read_text(path, what):
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read()
+    except OSError as exc:
+        fail("cannot read %s %s: %s" % (what, path, exc.strerror or exc))
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        fail("%s %s is not UTF-8" % (what, path))
+    if "\x00" in text:
+        fail("%s %s holds a NUL byte" % (what, path))
+    return text
+
+
+def emit(text):
+    sys.stdout.buffer.write(text.encode("utf-8"))
+
+
+def staged_bundle(cache):
+    if not os.path.lexists(cache):
+        return None
+    try:
+        with open(cache, "rb") as handle:
+            doc = json.loads(handle.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError, RecursionError) as exc:
+        warn("ralph_fix_plan_prepare: unreadable state cache %s (%s); treated as absent"
+             % (cache, (str(exc).splitlines() or ["invalid JSON"])[0]))
+        return None
+    if not isinstance(doc, dict):
+        warn("ralph_fix_plan_prepare: state cache %s is not a JSON object; treated as absent" % cache)
+        return None
+    specs = doc.get("staged_specs_dir")
+    if specs is not None and not (isinstance(specs, str) and specs):
+        warn("ralph_fix_plan_prepare: staged_specs_dir of %s is not a path; treated as absent" % cache)
+        return None
+    return specs
+
+
+def same_dir(left, right):
+    if os.path.normpath(left) == os.path.normpath(right):
+        return True
+    try:
+        return os.path.isdir(left) and os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
+def decide(specs, plan, cache):
+    epics = os.path.join(specs, "epics.md")
+    ids = []
+    for line in read_text(epics, "epics file").splitlines():
+        match = STORY.match(line)
+        if match:
+            ids.append(match.group(1))
+    if not ids:
+        fail("ralph_fix_plan_prepare: %s has no ### Story N.M: heading" % epics)
+    staged = staged_bundle(cache)
+    if staged is None or not same_dir(staged, specs):
+        emit("discard\n")
+        return
+    planned = set()
+    for line in read_text(plan, "fix plan").splitlines():
+        match = PLAN_LINE.match(line)
+        if match:
+            planned.add(match.group(2))
+    emit("current\n" if all(story in planned for story in ids) else "keep\n")
+
+
+def restore(archive, plan):
+    checked = set()
+    for line in read_text(archive, "archived fix plan").splitlines():
+        match = PLAN_LINE.match(line)
+        if match and match.group(1) in "xX":
+            checked.add((match.group(2), match.group(3)))
+    count = [0]
+
+    def mark(match):
+        if (match.group(3), match.group(4)) not in checked:
+            return match.group(0)
+        count[0] += 1
+        return match.group(1) + "[x]" + match.group(2) + match.group(5)
+
+    text = OPEN_LINE.sub(mark, read_text(plan, "fix plan"))
+    emit("%d\n%s" % (count[0], text))
+
+
+def profile_values(doc):
+    """The consumed keys as (targets, floors); exit 1 naming each violation."""
+    errors = []
+    targets = {}
+    floors = {}
+    if not isinstance(doc, dict):
+        fail("ralph_agent_md_patch: the profile is not a mapping")
+    version = doc.get("schema_version")
+    if type(version) is not int or version != 1:
+        errors.append("schema_version: must be 1 (%s)" % json.dumps(version))
+    make = doc.get("make")
+    if not isinstance(make, dict):
+        errors.append("make: missing or not a mapping")
+        make = {}
+    for key in MAKE_KEYS:
+        want = key.replace("_", "-")
+        if key not in make and isinstance(doc.get("make"), dict):
+            errors.append("make.%s: missing" % key)
+        elif make.get(key) is not None and make.get(key) != want:
+            errors.append("make.%s: must be null or %s (%s)" % (key, want, json.dumps(make[key])))
+        else:
+            targets[key] = make.get(key)
+    quality = doc.get("quality")
+    if not isinstance(quality, dict):
+        errors.append("quality: missing or not a mapping")
+        quality = {}
+    for key in FLOORS:
+        value = quality.get(key)
+        if type(value) is not int or value != 100:
+            errors.append("quality.%s: must be the integer 100 (%s)" % (key, json.dumps(value)))
+        else:
+            floors[key] = value
+    if errors:
+        for error in errors:
+            sys.stderr.write("[rust-sdlc][ERROR] ralph_agent_md_patch: invalid profile .claude/rust-sdlc.yml: %s\n"
+                             % CTRL.sub("?", error))
+        sys.exit(1)
+    return targets, floors
+
+
+def fenced(lines):
+    """Per line: True for a fence line or a line inside a fenced block."""
+    inside = False
+    marks = []
+    for line in lines:
+        if FENCE.match(line):
+            marks.append(True)
+            inside = not inside
+        else:
+            marks.append(inside)
+    return marks
+
+
+def level(lines, marks, index):
+    match = HEADING.match(lines[index])
+    return 0 if marks[index] or match is None else len(match.group(1))
+
+
+def find_heading(lines, text):
+    marks = fenced(lines)
+    for index, line in enumerate(lines):
+        if not marks[index] and line.rstrip() == text:
+            return index, marks
+    return None, marks
+
+
+def section_end(lines, marks, start, deepest):
+    for index in range(start + 1, len(lines)):
+        if 0 < level(lines, marks, index) <= deepest:
+            return index
+    return len(lines)
+
+
+def set_block(lines, heading, commands):
+    """Replace the first fenced block under the heading; False when absent."""
+    start, marks = find_heading(lines, "## " + heading)
+    if start is None:
+        return False
+    end = section_end(lines, marks, start, 2)
+    opening = next((i for i in range(start + 1, end) if FENCE.match(lines[i])), None)
+    if opening is None:
+        return False
+    closing = next((i for i in range(opening + 1, end) if FENCE.match(lines[i])), None)
+    if closing is None:
+        return False
+    lines[opening + 1:closing] = commands or [ABSENT]
+    return True
+
+
+def set_git(lines, rules):
+    """Replace items 1-3 of the Git workflow list; False when absent."""
+    start, marks = find_heading(lines, GIT_HEADING)
+    if start is None:
+        return False
+    end = section_end(lines, marks, start, 3)
+    first = next((i for i in range(start + 1, end) if not marks[i] and FIRST.match(lines[i])), None)
+    if first is None:
+        return False
+    fourth = next((i for i in range(first + 1, end) if not marks[i] and FOURTH.match(lines[i])), end)
+    lines[first:fourth] = rules + [""]
+    return True
+
+
+def set_coverage_examples(lines, commands):
+    """Replace the fenced example block after each Coverage Validation item."""
+    marks = fenced(lines)
+    for index, line in enumerate(lines):
+        if marks[index] or COVERAGE_ITEM not in line:
+            continue
+        opening = index + 1
+        while opening < len(lines) and not lines[opening].strip():
+            opening += 1
+        if opening >= len(lines) or not FENCE.match(lines[opening]):
+            continue
+        closing = next((i for i in range(opening + 1, len(lines)) if FENCE.match(lines[i])), None)
+        if closing is not None:
+            indent = lines[opening][:len(lines[opening]) - len(lines[opening].lstrip())]
+            lines[opening + 1:closing] = [indent + command for command in commands or [ABSENT]]
+            marks = fenced(lines)
+
+
+def git_rules(number, slug):
+    tick = chr(96)
+    subject = tick + "<type>(#%s): story N.M <title>" % number + tick
+    branch = tick + "<type>/%s-%s" % (number, slug) + tick
+    return [
+        "1. **Commit each story as %s** with the hooks active:" % subject,
+        "   - %s<type>%s is one of feat, fix, refactor, build, chore, ci, docs, style, perf, test;"
+        " N.M is the story id; %s is the issue number of specs/%s-%s" % (tick, tick, number, number, slug),
+        "   - One commit per story; a commit the hooks reject is fixed and committed again, never bypassed",
+        "",
+        "2. **Stay on the branch the plugin checked out** (%s):" % branch,
+        "   - Never create, switch or rename a branch",
+        "",
+        "3. **Never push**: the plugin command pushes",
+        "   - Every commit stays local; the plugin command pushes once the loop ends",
+    ]
+
+
+def agent(path, number, slug):
+    try:
+        doc = json.loads(sys.stdin.read())
+    except ValueError as exc:
+        fail("ralph_agent_md_patch: the profile is not readable: %s" % exc)
+    targets, floors = profile_values(doc)
+    original = read_text(path, "agent file")
+    crlf = "\r\n" in original
+    body = original.replace("\r\n", "\n")
+    final_newline = body.endswith("\n")
+    lines = body.split("\n")
+    if final_newline:
+        lines.pop()
+
+    def make(*keys):
+        return ["make " + targets[key] for key in keys if targets[key] is not None]
+
+    blocks = (
+        ("Project Setup", make("bootstrap")),
+        ("Running Tests", make("unit_tests", "setup_test_db", "integration_tests", "e2e_tests")),
+        ("Build Commands", make("tests_with_coverage")),
+        ("Development Server", make("start")),
+    )
+    floor = "Coverage floor: %d%% lines and %d%% functions" % (
+        floors["coverage_lines"], floors["coverage_functions"])
+    rules = git_rules(number, slug)
+    missing = False
+    for heading, commands in blocks:
+        if not set_block(lines, heading, commands):
+            missing = True
+    if not set_git(lines, rules):
+        missing = True
+    set_coverage_examples(lines, make("tests_with_coverage"))
+    lines = [line[:len(line) - len(line.lstrip())] + "- [ ] No commit pushed: the plugin command pushes"
+             if line.strip() == PUSH_ITEM else line for line in lines]
+    lines = [floor if "85%" in line else line for line in lines]
+    start, marks = find_heading(lines, OVERRIDES)
+    if missing or start is not None:
+        section = [OVERRIDES, "",
+                   "These rules replace every conflicting instruction in this file.", ""]
+        # Lower-case words keep these headings out of the unanchored,
+        # case-sensitive "## Project Setup" patterns of the next bmalph implement.
+        for heading, commands in blocks:
+            section += ["### %s (rust-backend-sdlc)" % heading.capitalize(), "",
+                        TICKS + "bash"] + (commands or [ABSENT]) + [TICKS, ""]
+        section += ["### Coverage and Git workflow (rust-backend-sdlc)", "", floor, ""] + rules
+        if start is None:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines += section
+            final_newline = True
+        else:
+            end = section_end(lines, marks, start, 2)
+            lines[start:end] = section + ([""] if end < len(lines) else [])
+    text = "\n".join(lines) + ("\n" if final_newline else "")
+    if crlf:
+        text = text.replace("\n", "\r\n")
+    emit("%s\n%s" % ("UNCHANGED" if text == original else "UPDATED", text))
+
+
+def autoreset(path):
+    raw = None
+    for line in read_text(path, "Ralph configuration").splitlines():
+        match = re.match(r"\s*(?:export\s+)?CB_AUTO_RESET=(.*)$", line)
+        if match:
+            raw = match.group(1)
+    if raw is None:
+        return
+    try:
+        words = shlex.split(raw, comments=True)
+    except ValueError:
+        words = None
+    if words is None or len(words) > 1 or any(c in raw for c in ("$", chr(96), chr(92))):
+        emit("uncertain %s\n" % CTRL.sub("", raw).replace("\t", " "))
+    else:
+        emit("value %s\n" % (words[0] if words else ""))
+
+
+mode, args = sys.argv[1], sys.argv[2:]
+if mode == "decide":
+    decide(*args)
+elif mode == "restore":
+    restore(*args)
+elif mode == "agent":
+    agent(*args)
+elif mode == "autoreset":
+    autoreset(*args)
+else:
+    fail("_rh_py: unknown mode %s" % mode)
+' "$@"
+}
+
+# ralph_fix_plan_prepare SPECS_DIR STATE_FILE — the ADR-10a re-entry check,
+# run before every staging. Prints exactly one line: `FIX_PLAN: absent` (no
+# .ralph/@fix_plan.md: stage and run bmalph implement), `FIX_PLAN: current`
+# (the cache STATE_FILE records SPECS_DIR as staged_specs_dir and every
+# `### Story N.M:` id of SPECS_DIR/epics.md is in the fix plan: a resume, so
+# staging and bmalph implement are skipped), or, after moving the fix plan to
+# target/rust-sdlc/ralph-archive/<utc_stamp>-fix_plan.md,
+# `ARCHIVED: <path> keep-progress` (same bundle, but epics.md holds a story id
+# the plan lacks, e.g. a QA fix story: restore with ralph_fix_plan_restore
+# after bmalph implement) or `ARCHIVED: <path> discard-progress` (cache absent,
+# no bundle recorded, or another bundle: the plan is foreign). The fix plan is
+# moved only in the ARCHIVED cases; bmalph implement then never meets its
+# re-run refusal and is never run with --force. STATE_FILE is the state cache
+# target/rust-sdlc/state/<N>-<slug>.json (read only). Exit 2 on a malformed
+# argument (a STATE_FILE not named <N>-<slug>.json included); exit 1 when
+# SPECS_DIR holds no epics.md with a story heading, the fix plan is a symbolic
+# link or not a regular file, or the archive path exists or is refused; nothing
+# is moved then.
+ralph_fix_plan_prepare() {
+  local usage='(usage: ralph_fix_plan_prepare SPECS_DIR STATE_FILE)'
+  local specs="${1-}" cache="${2-}" plan='.ralph/@fix_plan.md' verdict stamp archive progress
+  if (($# != 2)) || [[ -z "$specs" || -z "$cache" ]]; then
+    log_error "ralph_fix_plan_prepare: needs SPECS_DIR and STATE_FILE $usage"
+    return 2
+  fi
+  if ! _sr_cache_name "$cache" >/dev/null; then
+    log_error "ralph_fix_plan_prepare: STATE_FILE must be named <N>-<slug>.json: $(_ch_clean "$cache")"
+    return 2
+  fi
+  if [[ ! -d "$specs" || ! -f "$specs/epics.md" ]]; then
+    log_error "ralph_fix_plan_prepare: no epics.md in SPECS_DIR $(_ch_clean "$specs")"
+    return 1
+  fi
+  if [[ ! -e "$plan" && ! -L "$plan" ]]; then
+    printf 'FIX_PLAN: absent\n'
+    return 0
+  fi
+  if [[ -L "$plan" || ! -f "$plan" ]]; then
+    log_error "ralph_fix_plan_prepare: $plan is a symbolic link or not a regular file; move it aside by hand"
+    return 1
+  fi
+  verdict="$(_rh_py decide "$specs" "$plan" "$cache")" || return 1
+  case "$verdict" in
+    current)
+      printf 'FIX_PLAN: current\n'
+      return 0
+      ;;
+    keep) progress=keep-progress ;;
+    *) progress=discard-progress ;;
+  esac
+  stamp="$(utc_stamp)" || return 1
+  archive="target/rust-sdlc/ralph-archive/$stamp-fix_plan.md"
+  if [[ -e "$archive" || -L "$archive" ]]; then
+    log_error "ralph_fix_plan_prepare: $archive exists; the fix plan stays in place"
+    return 1
+  fi
+  safe_write_target "$archive" "$PWD" || return 1
+  mkdir -p -- target/rust-sdlc/ralph-archive || return 1
+  mv -- .ralph/@fix_plan.md "$archive" || return 1
+  printf 'ARCHIVED: %s %s\n' "$archive" "$progress"
+}
+
+# ralph_fix_plan_restore ARCHIVE — after a keep-progress archive and the new
+# bmalph implement (ADR-10a): re-marks `- [ ] Story <id>: <title>` as
+# `- [x] Story <id>: <title>` in .ralph/@fix_plan.md for every story whose id
+# and title were both checked in ARCHIVE (a renamed or renumbered story stays
+# open) and prints `RESTORED: <n> stories`. The plan is rewritten atomically
+# only when n > 0. ARCHIVE must lie below target/rust-sdlc/ralph-archive/
+# (exit 2 otherwise, or on a wrong argument count); exit 1 when ARCHIVE or the
+# fix plan is not a readable regular file.
+ralph_fix_plan_restore() {
+  local usage='(usage: ralph_fix_plan_restore ARCHIVE)'
+  local archive="${1-}" plan='.ralph/@fix_plan.md' out count text
+  if (($# != 1)) || [[ -z "$archive" ]]; then
+    log_error "ralph_fix_plan_restore: needs one ARCHIVE $usage"
+    return 2
+  fi
+  if ! _ch_resolved_under "$archive" target/rust-sdlc/ralph-archive; then
+    log_error "ralph_fix_plan_restore: ARCHIVE must lie below target/rust-sdlc/ralph-archive/: $(_ch_clean "$archive")"
+    return 2
+  fi
+  if [[ ! -f "$archive" ]]; then
+    log_error "ralph_fix_plan_restore: no archived fix plan at $(_ch_clean "$archive")"
+    return 1
+  fi
+  if [[ -L "$plan" || ! -f "$plan" ]]; then
+    log_error "ralph_fix_plan_restore: no regular $plan (run bmalph implement first)"
+    return 1
+  fi
+  out="$(_rh_py restore "$archive" "$plan" && printf x)" || return 1
+  out="${out%x}"
+  count="${out%%$'\n'*}"
+  text="${out#*$'\n'}"
+  if [[ "$count" != 0 ]]; then
+    safe_write_target .ralph/@fix_plan.md "$PWD" || return 1
+    printf '%s' "$text" | atomic_write .ralph/@fix_plan.md || return 1
+  fi
+  printf 'RESTORED: %s stories\n' "$count"
+}
+
+# ralph_agent_md_patch SPECS_DIR — the ADR-10b overrides of .ralph/@AGENT.md,
+# run after every bmalph implement and before every bmalph run. With the
+# profile .claude/rust-sdlc.yml it rewrites the fenced block under
+# `## Project Setup` to `make <make.bootstrap>`, under `## Running Tests` to
+# `make <make.unit_tests>` then `make <make.setup_test_db>`,
+# `make <make.integration_tests>` and `make <make.e2e_tests>`, under
+# `## Build Commands` to `make <make.tests_with_coverage>` and under
+# `## Development Server` to `make <make.start>` (a null key drops its line,
+# an empty block reads `not available (capability absent)`); replaces every
+# line containing `85%` with `Coverage floor: <quality.coverage_lines>% lines
+# and <quality.coverage_functions>% functions`; replaces items 1-3 of
+# `### Git Workflow Requirements` with three rules (commit each story as
+# `<type>(#<N>): story N.M <title>` with the hooks active; stay on
+# `<type>/<N>-<slug>`; never push, the plugin command pushes) and keeps
+# item 4; and, so that no other command or push step remains, rewrites the
+# fenced examples under the `**Coverage Validation**` item to the
+# make.tests_with_coverage line and turns the checklist item `All commits
+# pushed to remote repository` into `No commit pushed: the plugin command
+# pushes`. N and slug
+# come from the SPECS_DIR name `<N>-<slug>`. A missing heading (or a heading
+# without its fenced block or numbered list) appends a
+# `## rust-backend-sdlc overrides` section holding the four commands, the
+# coverage floor and the three rules; an existing overrides section is
+# re-rendered in place. Prints `UPDATED: .ralph/@AGENT.md` or, when the file
+# already reads so, `UNCHANGED: .ralph/@AGENT.md` (idempotent). The profile
+# check covers the keys the patch consumes: schema_version 1, each of the
+# seven make keys present and null or its identity target (validate-profile
+# rules V4, V10, V12) and both coverage floors the integer 100 (V6, V11).
+# Exit 2 on a wrong argument count or a SPECS_DIR not named <N>-<slug>;
+# exit 1 when SPECS_DIR is not a directory, .ralph/@AGENT.md is absent (or a
+# symbolic link), or the profile is absent, unparseable or invalid; the file
+# is unchanged then.
+ralph_agent_md_patch() {
+  local usage='(usage: ralph_agent_md_patch SPECS_DIR)'
+  local specs="${1-}" name base number slug agent='.ralph/@AGENT.md' profile json out verdict
+  if (($# != 1)) || [[ -z "$specs" ]]; then
+    log_error "ralph_agent_md_patch: needs one SPECS_DIR $usage"
+    return 2
+  fi
+  name="$specs"
+  while [[ "$name" == */ && "$name" != / ]]; do
+    name="${name%/}"
+  done
+  base="${name##*/}"
+  if [[ ! "$base" =~ ^([1-9][0-9]*)-([a-z0-9-]+)$ ]]; then
+    log_error "ralph_agent_md_patch: SPECS_DIR must be named <N>-<slug> (specs/<N>-<slug>): $(_ch_clean "$specs")"
+    return 2
+  fi
+  number="${BASH_REMATCH[1]}"
+  slug="${BASH_REMATCH[2]}"
+  if [[ ! -d "$specs" ]]; then
+    log_error "ralph_agent_md_patch: SPECS_DIR is not a directory: $(_ch_clean "$specs")"
+    return 1
+  fi
+  if [[ -L "$agent" || ! -f "$agent" ]]; then
+    log_error "ralph_agent_md_patch: no regular $agent (run bmalph implement first)"
+    return 1
+  fi
+  profile="$(profile_path)"
+  if [[ ! -f "$profile" ]]; then
+    log_error "ralph_agent_md_patch: no profile at .claude/rust-sdlc.yml (run /rs-sdlc-setup)"
+    return 1
+  fi
+  json="$(yaml_to_json "$profile")" || return 1
+  out="$(printf '%s\n' "$json" | _rh_py agent "$agent" "$number" "$slug" && printf x)" || return 1
+  out="${out%x}"
+  verdict="${out%%$'\n'*}"
+  if [[ "$verdict" == UPDATED ]]; then
+    safe_write_target .ralph/@AGENT.md "$PWD" || return 1
+    printf '%s' "${out#*$'\n'}" | atomic_write .ralph/@AGENT.md || return 1
+  fi
+  printf '%s: .ralph/@AGENT.md\n' "$verdict"
+}
+
+# ralph_breaker_state — the ADR-10c pre-check before every bmalph run. Prints
+# `BREAKER: CLOSED|OPEN|HALF_OPEN|ABSENT` (the `.state` of
+# .ralph/.circuit_breaker_state, read with python3 json; ABSENT without the
+# file) and `AUTO_RESET: true|false`: CB_AUTO_RESET from the environment when
+# it is non-empty, else the last `CB_AUTO_RESET=` line of .ralph/.ralphrc
+# (Ralph's precedence), else false; true only for the value `true`, as in
+# Ralph, and also when the .ralphrc value needs shell evaluation (it cannot be
+# shown to be false). Exit 0 only for CLOSED or ABSENT with AUTO_RESET: false,
+# 1 otherwise (OPEN, HALF_OPEN or an auto-reset: the command escalates without
+# running, D22, because Ralph would reset the breaker itself, NFR-5). A state
+# file that holds none of the three states exits 1 with nothing on stdout.
+# Reads only: no file is created, edited or removed. Exit 2 when an argument
+# is given.
+ralph_breaker_state() {
+  local state value="" auto=false line
+  if (($#)); then
+    log_error "ralph_breaker_state: takes no argument (usage: ralph_breaker_state)"
+    return 2
+  fi
+  if [[ ! -e .ralph/.circuit_breaker_state && ! -L .ralph/.circuit_breaker_state ]]; then
+    state=ABSENT
+  else
+    state="$(_sr_breaker)"
+    if [[ -z "$state" ]]; then
+      log_error "ralph_breaker_state: .ralph/.circuit_breaker_state holds no CLOSED, OPEN or HALF_OPEN state; inspect it by hand and never reset it"
+      return 1
+    fi
+  fi
+  if [[ -n "${CB_AUTO_RESET:-}" ]]; then
+    value="$CB_AUTO_RESET"
+  elif [[ -f .ralph/.ralphrc ]]; then
+    line="$(_rh_py autoreset .ralph/.ralphrc)" || return 1
+    case "$line" in
+      'value '*) value="${line#value }" ;;
+      'uncertain '*)
+        log_warn "ralph_breaker_state: cannot evaluate CB_AUTO_RESET=${line#uncertain } of .ralph/.ralphrc; treated as true"
+        value=true
+        ;;
+      *) ;;
+    esac
+  fi
+  if [[ "$value" == true ]]; then
+    auto=true
+  fi
+  printf 'BREAKER: %s\nAUTO_RESET: %s\n' "$state" "$auto"
+  case "$state:$auto" in
+    CLOSED:false | ABSENT:false) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # section: dispatch (keep last)
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   _sdlc_dispatch "$@"
