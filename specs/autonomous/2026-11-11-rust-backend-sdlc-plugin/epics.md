@@ -1858,3 +1858,537 @@ So that a new bounded context is wired, tested and committed in one command, the
 - `C=plugins/rust-backend-sdlc/commands/rs-sdlc-new-context.md; v_md $C && v_sent $C && v_esc $C && v_exit new-context $C && v_p17 $C && v_suffix $C && v_cmdtok $C`
 - `for t in validate_context_name 'new-context refused:' 'new-context could not run:' C1 C12 ci-preflight ci-static-analysis ci-tests ci-contracts ci-mutation ci-delivery 'CONFIG_CHANGE_APPROVED=' 'feat(#N): add <group>/<context> bounded context' --no-handoff; do grep -qF -- "$t" $C || echo "missing $t"; done | { ! grep .; }`
 
+## Epic 7: Workflow layer (the cut line)
+
+Users of the Claude Code Workflow tool can run the feature loop, the review panel, the PR-until-green sensor loop and the FR/NFR review as plugin workflows with the same counters, prohibitions and escalation block as the command path, proven by a deterministic harness over 55 scenarios; this is the PRD's "epic 8" and the cut line (ADR-18): if it slips, deleting its files and applying the post-cut counts in Stories 8.4–8.6 keeps G1–G4 through the command layer, and it builds on the scripts of Epic 3, the Ralph helpers and agents of Epic 5.
+
+### Story 7.1: Workflow harness
+
+As a plugin maintainer,
+I want a deterministic harness that runs a workflow script against scripted agent replies and canned nested workflows,
+So that every workflow's control flow is testable without Claude Code, including the one-level nesting rule.
+**Read:** § Workflow Epic › Harness; `plugins/react-frontend-sdlc/tests/lib/workflow-harness.mjs` (port source); ADR-18; PRD FR-44. **Size:** S.
+
+**Acceptance Criteria:**
+
+- Given `node tests/lib/workflow-harness.mjs [--as-child] <workflow.js> [scenario.json]`, when called without a workflow it exits 2 with a usage line; it exits 1 for a missing `export const meta = {…}` literal, a script that throws, a scenario gap (`scenario gap: no reply for agent label="<l>" prompt starts "<80 chars>"`) or a schema gap (a reply lacking a top-level `required` key of `opts.schema`); otherwise it exits 0 and prints pretty JSON `{meta, result | error, calls, phases, logs}`.
+- Given a scenario `{args, replies: [{match, reply}], workflows: {<name>: result | [results]}}`, when the script runs, then `match` is a regex over the label, then the prompt (flag `s`), array replies are consumed in order and clamped at the last, `parallel` resolves a throwing branch to `null`, `workflow()` returns the canned result for the exact plugin-qualified name `rust-backend-sdlc:rs-sdlc-<name>` and otherwise throws `unknown workflow: <name>`, and the budget object is `{total: null, spent: () => 0, remaining: () => Infinity}`.
+- Given `--as-child`, when the script calls `workflow()`, then it throws `workflow() nesting is one level only`.
+- Given the file, when checked, then it is a port of the react harness (about 110 lines) with only the `--as-child` flag, the schema check and the name form added, uses no network, no `Date.now()`, `Math.random()` or argless `new Date()`, and passes `node --check`.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/tests/lib/workflow-harness.mjs`
+
+**Depends on:** none
+
+**FRs:** FR-44 (NFR-8)
+
+**Verification:**
+
+- `node --check plugins/rust-backend-sdlc/tests/lib/workflow-harness.mjs && v_clock plugins/rust-backend-sdlc/tests/lib/workflow-harness.mjs`
+- `node plugins/rust-backend-sdlc/tests/lib/workflow-harness.mjs >/dev/null 2>&1; test $? -eq 2`
+- `d=$(mktemp -d) && printf 'export const meta = {\n  name: "x",\n  description: "x",\n  whenToUse: "x",\n  phases: [{ title: "A", detail: "a" }],\n}\nphase("A")\nreturn { result: "SUCCESS", degrade_notes: [] }\n' >"$d/x.js" && node plugins/rust-backend-sdlc/tests/lib/workflow-harness.mjs "$d/x.js" | grep -q '"SUCCESS"' && node plugins/rust-backend-sdlc/tests/lib/workflow-harness.mjs --as-child "$d/x.js" >/dev/null`
+
+### Story 7.2: FR/NFR review workflow with its scenarios
+
+As a Workflow-tool user,
+I want `rs-sdlc-fr-nfr-review` to scope the requirement sources, run the gate once per iteration and hand findings to implementers until zero remain,
+So that the gate loop runs as a leaf workflow with the same bounds and fail-closed rules as the command path.
+**Read:** § Workflow Epic (runtime rules, table row `rs-sdlc-fr-nfr-review`, scenario list `fnr-`); `plugins/react-frontend-sdlc/workflows/fe-sdlc-fr-nfr-review.js` (port source); ADR-18; PRD FR-44, AC-19.2. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given `workflows/rs-sdlc-fr-nfr-review.js`, when read, then its first statement is a pure-literal `export const meta = {…}` with `name: 'rs-sdlc-fr-nfr-review'`, `description`, `whenToUse` and phases `Scope`, `Gate`, `Fix` (no `}` at column 0 before the closing one), every `phase()` title is in `meta.phases`, it uses no clock or random API and no filesystem API, resolves the plugin root with the block of § Workflow Epic (empty → `BLOCKED`), uses agent types `rust-backend-sdlc:fr-nfr-reviewer` and `rust-backend-sdlc:rust-implementer`, and calls no `workflow()` (leaf).
+- Given args as a string `[slug] [--slug s] [--base ref] [--summary text] [--pr n] [--head sha]` or an object `{slug, pr, head, base, summary, maxIterations}`, when parsed, then `--pr` accepts only `N`, `#N` or a PR URL (strict `PR_ARG`), and a malformed value escalates (`fnr-bad-pr`).
+- Given the phases, when run, then Scope resolves the bundle and the PR sources and checks a clean tree and the head match (dirty tree or head mismatch → advisory), Gate runs `fr-nfr-reviewer` for exactly one gate run per iteration and parses `FR_NFR_REVIEWER:`, Fix dispatches at most 4 `rust-implementer` groups whose prompts carry the background and container-precondition sentences verbatim, iterations are capped at 5, and the return is `{result, iterations, new_findings, fixed, requirement_source, advisory, degrade_notes}` with the 7-field block on every escalation.
+- Given the 15 scenarios, when each runs through the harness, then it exits 0 with the outcome its name states: `fnr-advisory`, `fnr-bad-pr`, `fnr-converges` (finding counts 3 → 1 → 0 end the loop, AC-19.2), `fnr-degraded`, `fnr-exhausted` (5 non-zero iterations → `ESCALATED` with 7 fields), `fnr-fail-no-findings`, `fnr-fix-blocked`, `fnr-head-mismatch`, `fnr-no-source`, `fnr-no-specs`, `fnr-pr-source`, `fnr-scope-blocked`, `fnr-skipped-runner`, `fnr-transport`, `fnr-transport-twice`; `fnr-converges` also passes under `--as-child`.
+- Given the workflow file, when grepped, then it has no organization token, P1–P7 match only prohibition lines, and every commit literal (if any) matches the template's subject regex.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/workflows/rs-sdlc-fr-nfr-review.js`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-advisory.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-bad-pr.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-converges.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-degraded.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-exhausted.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-fail-no-findings.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-fix-blocked.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-head-mismatch.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-no-source.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-no-specs.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-pr-source.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-scope-blocked.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-skipped-runner.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-transport.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-transport-twice.json`
+
+**Depends on:** 3.9, 5.3, 5.4, 7.1
+
+**FRs:** FR-44, FR-19 (NFR-6, NFR-10)
+
+**Verification:**
+
+- `W=plugins/rust-backend-sdlc/workflows/rs-sdlc-fr-nfr-review.js; node --check $W && v_clock $W && v_gen $W && v_p17 $W && ! grep -nF "workflow('" $W`
+- `v_json plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-*.json && v_wf rs-sdlc-fr-nfr-review fnr 15`
+- `node plugins/rust-backend-sdlc/tests/lib/workflow-harness.mjs --as-child plugins/rust-backend-sdlc/workflows/rs-sdlc-fr-nfr-review.js plugins/rust-backend-sdlc/tests/fixtures/workflows/fnr-converges.json >/dev/null`
+
+### Story 7.3: Review panel workflow with its scenarios
+
+As a Workflow-tool user,
+I want `rs-sdlc-review-panel` to run the three lenses in parallel, refute each finding three ways and fix the survivors by context,
+So that review findings are verified before anyone edits code, within five iterations.
+**Read:** § Workflow Epic (runtime rules, table row `rs-sdlc-review-panel`, scenario list `rp-`); `plugins/react-frontend-sdlc/workflows/fe-sdlc-review-panel.js` (port source); ADR-5; PRD FR-44. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given `workflows/rs-sdlc-review-panel.js`, when read, then it meets the § Workflow Epic runtime rules with `name: 'rs-sdlc-review-panel'` and phases `Scope`, `Review`, `Verify`, `Fix`, uses the agent types `rust-backend-sdlc:code-quality-reviewer`, `rust-backend-sdlc:fr-nfr-reviewer`, `rust-backend-sdlc:security-auditor` and `rust-backend-sdlc:rust-implementer`, and calls no `workflow()` (leaf).
+- Given args `[slug] [--slug s] [--base ref]` or `{slug, base, maxIterations, securityFamilies: ['all']}`, when it runs, then Scope triages, Review runs the code-quality and FR/NFR lenses in parallel and the security lens only when the diff touches the PA-5 paths, Verify runs 3 refuters per finding (`correctness`, `standards`, `remedy`), Fix groups surviving findings by the first three path segments (`crates/<group>/<context>`), at most 4 groups per iteration, with the Rust fix prohibitions stated only on prohibition lines and the background and container sentences verbatim in implementer prompts, iterations are capped at 5, and the return is `{result, iterations, findings, fixed, carried, degrade_notes}`.
+- Given the 8 scenarios `rp-all-refuted`, `rp-carry`, `rp-converges`, `rp-exhausted`, `rp-missing-lens`, `rp-scope-blocked`, `rp-security-skipped`, `rp-unverified`, when each runs through the harness, then it exits 0 with the outcome its name states, and `rp-converges` passes under `--as-child`.
+- Given the workflow file, when grepped, then it has no organization token and P1–P7 match only prohibition lines.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/workflows/rs-sdlc-review-panel.js`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/rp-all-refuted.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/rp-carry.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/rp-converges.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/rp-exhausted.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/rp-missing-lens.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/rp-scope-blocked.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/rp-security-skipped.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/rp-unverified.json`
+
+**Depends on:** 5.3, 5.4, 7.1
+
+**FRs:** FR-44 (NFR-6, NFR-12)
+
+**Verification:**
+
+- `W=plugins/rust-backend-sdlc/workflows/rs-sdlc-review-panel.js; node --check $W && v_clock $W && v_gen $W && v_p17 $W && ! grep -nF "workflow('" $W`
+- `v_json plugins/rust-backend-sdlc/tests/fixtures/workflows/rp-*.json && v_wf rs-sdlc-review-panel rp 8`
+- `node plugins/rust-backend-sdlc/tests/lib/workflow-harness.mjs --as-child plugins/rust-backend-sdlc/workflows/rs-sdlc-review-panel.js plugins/rust-backend-sdlc/tests/fixtures/workflows/rp-converges.json >/dev/null`
+
+### Story 7.4: PR-until-green workflow with its scenarios
+
+As a Workflow-tool user,
+I want `rs-sdlc-pr-until-green` to drive the PR sensor loop with bounded fix, wait, request and gate rounds and hand a gate verdict back when asked,
+So that a PR is finished from a workflow with the same counters and safety rules as the finish-pr command.
+**Read:** § Workflow Epic (runtime rules, table row `rs-sdlc-pr-until-green`, hand-back loop, scenario list `pug-`); `plugins/react-frontend-sdlc/workflows/fe-sdlc-pr-until-green.js` (port source); ADR-18, ADR-25; PRD FR-44, AC-21.2, AC-3.4 (b). **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given `workflows/rs-sdlc-pr-until-green.js`, when read, then it meets the runtime rules with `name: 'rs-sdlc-pr-until-green'` and phases `Snapshot`, `Request reviews`, `Wait`, `Fix`, `FR/NFR gate`, `Publish`, accepts a number, a string (`<n>`, `#<n>`, PR URL, `--reviewers`, `--required-checks`, `--pr`) or an object with defaults `maxFixRounds: 5`, `maxWaitRounds: 6`, `maxRequestRounds: 3`, `maxGateRounds: 3`, `waitSeconds: 540`, `onGate: 'nested'`, `carry: {counters, journal, degrade_notes}` and `reviewers`/`requiredChecks`/`humanGatedChecks` defaulting to `null` (the sensor reads the profile).
+- Given the loop, when it runs, then the snapshot agent runs `pr-state.sh … --json`, the request agent runs the sensor's `NEXT:` command, `rust-backend-sdlc:ci-fixer` and `rust-backend-sdlc:pr-comment-resolver` handle `FIX`, counters fix 5, wait 6, request 3 and gate 3 resume from `carry` and never reset, and the only `workflow('rust-backend-sdlc:rs-sdlc-fr-nfr-review', …)` call sits inside a branch guarded by `OPTS.onGate === 'nested'`; with `onGate: 'return'` a `GATE` verdict returns `{result: 'GATE', pr, head, counters, journal, degrade_notes}`; otherwise the return is `{result, pr, head, verdict, counters, journal, degrade_notes}`; a nested call that throws escalates with the manual command line (D21).
+- Given the publish agent (an untyped agent, the single exception to FR-22's no-commit rule), when its prompt is read, then it runs `make.format`, `protected_changes <merge-base-sha>`, `commit_msg_file 'fix(#N): <subject>'` with the FR-2 issue derivation (never the PR number), `git commit -F <file>` and `git push -u origin HEAD` with hooks on, each in the background form with the `RUN_IN_CONTAINER=1` prefix in container mode, logged to `target/rust-sdlc/logs/publish-<UTC>.log` and polled with `wait_log` at most every 30 s within 1,800 s per call; a failing hook leads to `make.format` once and one retry, then `ESCALATED`; the prompt carries the background and container-precondition sentences verbatim.
+- Given the 17 scenarios, when each runs through the harness, then it exits 0 with the outcome its name states: `pug-as-child` (run with `--as-child` and `args.onGate: 'return'`), `pug-blocked`, `pug-carry` (0 counters reset, AC-3.4 b), `pug-coderabbit-interval`, `pug-fix-exhausted`, `pug-full-loop` (FIX → GATE → READY succeeds), `pug-gate`, `pug-gate-escalated`, `pug-gate-exhausted`, `pug-human-gated-blocked` (ends `ESCALATED` naming the label), `pug-malformed-ready`, `pug-not-approved`, `pug-ready`, `pug-ready-without-gate`, `pug-return-gate`, `pug-silent-reviewer` (D7), `pug-wait-exhausted` (6 WAITs escalate) (AC-21.2).
+- Given the workflow file, when grepped, then it has no organization token, P1–P7 match only prohibition lines, and every commit literal matches the template's subject regex.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/workflows/rs-sdlc-pr-until-green.js`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-as-child.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-blocked.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-carry.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-coderabbit-interval.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-fix-exhausted.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-full-loop.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-gate.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-gate-escalated.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-gate-exhausted.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-human-gated-blocked.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-malformed-ready.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-not-approved.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-ready.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-ready-without-gate.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-return-gate.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-silent-reviewer.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-wait-exhausted.json`
+
+**Depends on:** 3.6, 3.7, 5.5, 7.1, 7.2
+
+**FRs:** FR-44, FR-21, FR-2 (NFR-3, NFR-5, NFR-6)
+
+**Verification:**
+
+- `W=plugins/rust-backend-sdlc/workflows/rs-sdlc-pr-until-green.js; node --check $W && v_clock $W && v_gen $W && v_p17 $W && v_sent $W && grep -qF "OPTS.onGate === 'nested'" $W`
+- `v_json plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-*.json && for s in plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-*.json; do f=""; case "$s" in *pug-as-child.json) f=--as-child;; esac; node plugins/rust-backend-sdlc/tests/lib/workflow-harness.mjs $f plugins/rust-backend-sdlc/workflows/rs-sdlc-pr-until-green.js "$s" >/dev/null || { echo "FAIL $s"; exit 1; }; done && test "$(ls plugins/rust-backend-sdlc/tests/fixtures/workflows/pug-*.json | wc -l)" -eq 17`
+
+### Story 7.5: Feature workflow with its scenarios
+
+As a Workflow-tool user,
+I want `rs-sdlc-feature` to run setup check, plan, staging, implementation rounds, review, gate, QA and PR finishing as one top-level workflow,
+So that the whole loop runs inside the Workflow tool without ever starting Ralph's own loop.
+**Read:** § Workflow Epic (runtime rules, table row `rs-sdlc-feature`, hand-back loop, scenario list `feat-`); ADR-10a (workflow path), ADR-10b, ADR-18; `plugins/react-frontend-sdlc/workflows/fe-sdlc-feature.js` (port source); PRD FR-44, AC-44.1, AC-3.4 (b). **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given `workflows/rs-sdlc-feature.js`, when read, then it meets the runtime rules with `name: 'rs-sdlc-feature'` and phases `Setup check`, `Resolve plan`, `Stage`, `Implement`, `Review`, `FR/NFR gate`, `QA`, `Finish PR`, accepts a task string (an issue URL becomes `issue`) or `{task, slug, issue, reviewers, maxImplementRounds: 5, maxQaLoops: 2}`, and runs only as the top level.
+- Given the staging phase, when it runs, then its agent applies the ADR-10a protocol in order: `ralph_fix_plan_prepare`, then on `FIX_PLAN: absent` or `ARCHIVED:` `stage-planning-artifacts.sh "$SPECS_DIR"` followed by `bmalph implement` (never `--force`) and `ralph_fix_plan_restore` after `keep-progress`, then always `ralph_agent_md_patch` and the two-part `.ralph/PROJECT_CONTEXT.md` check; no shell command the workflow issues or asks an agent to run invokes `bmalph run`, and `degrade_notes` always contains `bmalph run: not used (workflow path)` (PA-17).
+- Given the implementation rounds, when they run, then `rust-backend-sdlc:rust-implementer` agents execute the stories of `.ralph/@fix_plan.md` (read-only) layer-first, parallel stories run DB-free targets only, one serialized `verify <round>` agent runs the DB-backed targets, replies follow `status: COMPLETE | IN_PROGRESS | BLOCKED` with `BLOCKED` → `ESCALATED` and the 7-field block, rounds are capped at 5 for the whole run, and implement, verify and publish prompts carry the background and container-precondition sentences verbatim.
+- Given review, gate, QA and PR, when they run, then the review panel and the FR/NFR review are nested as `rust-backend-sdlc:rs-sdlc-review-panel` and `rust-backend-sdlc:rs-sdlc-fr-nfr-review`; QA runs `qa-manual-tester` after `make start` and `make migrate`, a QA `FAIL` hands its FAIL rows to one `rust-implementer` round directly (no restage, QA loops ≤ 2); the call `workflow('rust-backend-sdlc:rs-sdlc-pr-until-green', {…, onGate: 'return', carry})` passes the literal `onGate: 'return'`, and on `GATE` the workflow runs the FR/NFR review, publishes and re-enters with `carry` at most 3 times, then `ESCALATED`; it keeps no state comment; a nested call that throws escalates with the manual command line (D21); the return is `{result, task, branch, issue_url, specs_dir, pr_url, stages, degrade_notes, escalation?}`.
+- Given the 15 scenarios `feat-happy`, `feat-setup-fails`, `feat-null-slug`, `feat-incomplete-story`, `feat-no-nested`, `feat-gate-escalated`, `feat-qa-skipped-accepted`, `feat-qa-skipped-rejected`, `feat-implementer-blocked`, `feat-staging-order`, `feat-staging-context-missing`, `feat-staging-rerun` (with both the `FIX_PLAN: current` and the `ARCHIVED: … discard-progress` replies), `feat-gate-handback`, `feat-gate-handback-exhausted`, `feat-verify-serialized`, when each runs through the harness, then it exits 0 with the outcome its name states, and the file has no organization token with P1–P7 only on prohibition lines.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/workflows/rs-sdlc-feature.js`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-happy.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-setup-fails.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-null-slug.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-incomplete-story.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-no-nested.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-gate-escalated.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-qa-skipped-accepted.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-qa-skipped-rejected.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-implementer-blocked.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-staging-order.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-staging-context-missing.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-staging-rerun.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-gate-handback.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-gate-handback-exhausted.json`
+- `plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-verify-serialized.json`
+
+**Depends on:** 3.3, 5.2, 7.2, 7.3, 7.4
+
+**FRs:** FR-44, FR-18 (NFR-5, NFR-6, NFR-9)
+
+**Verification:**
+
+- `W=plugins/rust-backend-sdlc/workflows/rs-sdlc-feature.js; node --check $W && v_clock $W && v_gen $W && v_p17 $W && v_sent $W && grep -qF "onGate: 'return'" $W && grep -qF 'bmalph run: not used (workflow path)' $W`
+- `v_json plugins/rust-backend-sdlc/tests/fixtures/workflows/feat-*.json && v_wf rs-sdlc-feature feat 15`
+
+### Story 7.6: Workflow test suite and workflow documentation
+
+As a plugin maintainer,
+I want `workflows.bats` to assert the static rules of the four workflows and the outcome of all 55 scenarios, and `docs/workflows.md` to document them,
+So that the workflow layer is release-gated in CI and understandable to users.
+**Read:** § Test Architecture › Suites (row `workflows.bats`); § Workflow Epic (all); § Documentation Set row `docs/workflows.md`; ADR-18; PRD FR-44, AC-44.1, AC-44.2. **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given `tests/workflows.bats`, when it runs, then 11 static cases assert: the meta literal and phases of the 4 files; no `Date.now()`, `Math.random()` or argless `new Date()`; every agent type `rust-backend-sdlc:<agent>` names a file under `agents/`; every `workflow('…')` literal names one of the 4 stems with the `rust-backend-sdlc:` prefix; the static call graph has depth ≤ 1 under the ADR-18 rule (an edge from `rs-sdlc-pr-until-green` is excluded only inside the `OPTS.onGate === 'nested'` branch); feature's call to pr-until-green passes `onGate: 'return'`; each leaf passes under `--as-child`; P1–P7 and the generalization denylist over `workflows/`; every commit literal matches the template regex (AC-2.2); the publish prompt carries P1-clean commit and push forms, the background sentence and the `RUN_IN_CONTAINER=1` prefix; the implement, verify and publish prompts carry the container-precondition sentence.
+- Given the 55 scenario files, when the suite runs, then each has one `@test` asserting its documented outcome (result word, key counters, ordered calls: e.g. `feat-staging-order` shows `stage-planning-artifacts.sh` before `bmalph implement` and no `bmalph run`; `fnr-exhausted` and `feat-implementer-blocked` end `ESCALATED` with the 7 fields; `pug-carry` resumes counters), the suite has at least 66 `@test` cases, and it skips with a reason only when `node` is absent locally (AC-44.1).
+- Given `docs/workflows.md`, when read, then it documents the 4 workflows (args, phases, counters, returns), the plugin-qualified nested names `rust-backend-sdlc:rs-sdlc-<name>`, the `onGate` default `'nested'` and the static call-graph rule, the hand-back contract, the publish-agent exception, harness usage with `--as-child`, and the fidelity gaps (the harness proves control flow over mocked replies, never model behaviour or Ralph), and meets SC-DOC.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/tests/workflows.bats`
+- `plugins/rust-backend-sdlc/docs/workflows.md`
+
+**Depends on:** 7.1, 7.2, 7.3, 7.4, 7.5
+
+**FRs:** FR-44, FR-41 (NFR-6, NFR-8)
+
+**Verification:**
+
+- `npx --yes bats plugins/rust-backend-sdlc/tests/workflows.bats && test "$(grep -c '^@test' plugins/rust-backend-sdlc/tests/workflows.bats)" -ge 66`
+- `v_md plugins/rust-backend-sdlc/docs/workflows.md && v_cmdtok plugins/rust-backend-sdlc/docs/workflows.md`
+
+## Epic 8: Documentation, marketplace wiring and release gate
+
+A team can install rust-backend-sdlc from the marketplace, read the loop, permissions, degrade, release and test-strategy documentation, and trust a v0.1.0 whose counts, contracts and CI jobs are pinned: this epic wires the marketplace entry, the root README and `ci.yml`, writes the remaining docs and the plugin README, adds the component contract suite and runs the release gate; it comes last because it pins the final state of every earlier epic (with the post-cut counts if Epic 7 is cut).
+
+### Story 8.1: Marketplace entry, root README row and CI wiring
+
+As a marketplace user and as a maintainer,
+I want the plugin listed in the marketplace and the root README, and CI to lint, audit and test it,
+So that `claude plugin install rust-backend-sdlc@vilnacrm-plugins` works and every PR is gated on the plugin's checks.
+**Read:** § Repository Wiring (all three subsections); ADR-9, ADR-19; PRD FR-43, AC-43.1. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given `.claude-plugin/marketplace.json`, when the entry is appended to `plugins`, then it holds exactly `name: rust-backend-sdlc`, a `description` byte-identical to the plugin manifest's, `author {name: VilnaCRM, url: https://github.com/VilnaCRM-Org}`, `category: development` and `source: ./plugins/rust-backend-sdlc`, the other entries are byte-identical, and `lint_all.py` reports no M4 finding (CC-24).
+- Given the root `README.md`, when edited, then the install block gains `claude plugin install rust-backend-sdlc@vilnacrm-plugins` right after the php line and the plugins table gains the architecture's exact row right after the react row; nothing else changes.
+- Given `.github/workflows/ci.yml`, when edited, then `on.push.tags` is `['php-backend-sdlc-v*', 'react-frontend-sdlc-v*', 'devops-sdlc-v*', 'rust-backend-sdlc-v*']`; `profile-keys-check` loops `for PLUGIN in plugins/php-backend-sdlc plugins/rust-backend-sdlc` (no skills → `continue` with a note, missing schema → fail, `fail` accumulated); `generalization-audit` uses the same explicit loop over the directories `skills commands agents scripts workflows` (missing ones ignored) with the name filter extended by `-o -name '*.js'` and the `_bmad`/`.ralph` check per plugin; the `bats` job gains, before "Run bats suites", the step "Install template-compatibility linters (rust-backend-sdlc K7 cases)" verbatim (pipx `yamllint==1.38.0` and `typos==1.52.0`, npm `prettier@3.9.10` and `markdownlint-cli2@0.24.0` under `$RUNNER_TEMP/k7`, both PATH lines, four version probes); no other job changes and the existing action pins stay.
+- Given the edited workflow, when the two loop job bodies run locally for both plugins, then they pass for php and, once Epic 4 exists, for rust; a scratch copy of a Rust skill with the organization token seeded into its body makes the generalization loop fail (the AC-43.2 negative check recorded by Story 8.4).
+
+**Files owned:**
+
+- `.claude-plugin/marketplace.json`
+- `README.md`
+- `.github/workflows/ci.yml`
+
+**Depends on:** 1.1
+
+**FRs:** FR-43, FR-40 (NFR-2, NFR-11)
+
+**Verification:**
+
+- `python3 -c 'import json; m=json.load(open(".claude-plugin/marketplace.json")); p=json.load(open("plugins/rust-backend-sdlc/.claude-plugin/plugin.json")); e=[x for x in m["plugins"] if x["name"]=="rust-backend-sdlc"][0]; assert e["description"]==p["description"] and e["source"]=="./plugins/rust-backend-sdlc" and e["category"]=="development" and sorted(e)==["author","category","description","name","source"]'`
+- `python3 -c 'import yaml; yaml.safe_load(open(".github/workflows/ci.yml"))' && grep -qF "'rust-backend-sdlc-v*'" .github/workflows/ci.yml && grep -qF 'plugins/php-backend-sdlc plugins/rust-backend-sdlc' .github/workflows/ci.yml && grep -qF 'yamllint==1.38.0' .github/workflows/ci.yml`
+- `grep -qF 'claude plugin install rust-backend-sdlc@vilnacrm-plugins' README.md && ! python3 tools/plugin-quality/lint/lint_all.py | grep -F ' M4]'`
+
+### Story 8.2: Loop and degrade documentation
+
+As a feature engineer and a reviewer,
+I want `docs/sdlc-loop.md` to describe the stage machine, counters, state, resume and Ralph rules with the exact exit strings, and `docs/degrade-matrix.md` to list every degrade path,
+So that every escalation, resume and degraded outcome can be understood from one place that matches the commands byte for byte.
+**Read:** § Documentation Set rows `docs/sdlc-loop.md`, `docs/degrade-matrix.md`; § Command Contracts › Exit strings (CC-12 scope), `/rs-sdlc` (run report), `/rs-sdlc-finish-pr` (counters); § Degrade Matrix; ADR-10a, ADR-10b, ADR-10c, ADR-13, ADR-14, ADR-25; PRD FR-41, AC-3.3, AC-21.1, NFR-3. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given `docs/sdlc-loop.md`, when read, then its stage table holds all 11 stage ids with exit strings byte-equal to § Exit strings and to the commands that carry them (stage rows equal in the stage command and `rs-sdlc.md`, `setup-check`/`branch` equal in `rs-sdlc.md`, `setup`/`new-service`/`new-context` equal in their command, CC-12).
+- Given the counters section, when read, then A `ci_fix` 5, B `comment_resolution` 5, C `fr_nfr_gate` 3, W `wait` 6, R `request` 3 and the state cell `A<n>.B<n>.C<n>.W<n>.R<n>` appear identical to `rs-sdlc-finish-pr.md` and `agents/ci-fixer.md` (AC-21.1).
+- Given the state and resume sections, when read, then the marker `<!-- rust-sdlc-state -->` and the columns `| stage | result | head_sha | iteration | at |` appear identical to `rs-sdlc.md` (AC-3.3), with the author filter, the resume rules (ancestor, equal, live), the ADR-10a re-entry protocol and QA loop-back, the ADR-10b and ADR-10c Ralph rules, the 8-field run report, the 7-field escalation block, the background rule (`run_in_background: true`, `wait_log`), the branch guards (ADR-25) and a "Workflow form" section (the four workflows, hand-back with `carry`, `bmalph run: not used (workflow path)`).
+- Given `docs/degrade-matrix.md`, when read, then it lists D1–D25 exactly as § Degrade Matrix (condition, detected by, outcome, proven by), the Outcome column uses only `SUCCESS`, `SUCCESS-WITH-REPORT`, `ESCALATED` (CC-26), and both files meet SC-DOC with every relative link resolving (CC-27).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/docs/sdlc-loop.md`
+- `plugins/rust-backend-sdlc/docs/degrade-matrix.md`
+
+**Depends on:** 2.5, 5.5, 5.11, 5.12, 6.2, 6.3
+
+**FRs:** FR-41, FR-3, FR-21 (NFR-3, NFR-9)
+
+**Verification:**
+
+- `v_md plugins/rust-backend-sdlc/docs/sdlc-loop.md plugins/rust-backend-sdlc/docs/degrade-matrix.md && v_cmdtok plugins/rust-backend-sdlc/docs/sdlc-loop.md plugins/rust-backend-sdlc/docs/degrade-matrix.md`
+- `L=plugins/rust-backend-sdlc/docs/sdlc-loop.md; C=plugins/rust-backend-sdlc/commands; for s in issue plan implement review qa finish-pr; do v_exit $s $L $C/rs-sdlc.md $C/rs-sdlc-$s.md || exit 1; done && for s in setup-check branch; do v_exit $s $L $C/rs-sdlc.md || exit 1; done && for s in setup new-service new-context; do v_exit $s $L $C/rs-sdlc-$s.md || exit 1; done`
+- `for i in $(seq 1 25); do grep -qE "^\| D$i \|" plugins/rust-backend-sdlc/docs/degrade-matrix.md || echo "missing D$i"; done | { ! grep .; }`
+
+### Story 8.3: Permissions and release documentation
+
+As a security-minded maintainer and as a releaser,
+I want `docs/permissions.md` to justify every allow and deny entry per command and `docs/release-process.md` to fix tagging, versioning and the changelog,
+So that the permission model can be audited and every release follows one policy.
+**Read:** § Permissions Strategy; § Documentation Set rows `docs/permissions.md`, `docs/release-process.md`; § Release and Versioning; ADR-6, ADR-9; PRD FR-41, FR-9, NFR-5. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given `docs/permissions.md`, when read, then it states ADR-6, reproduces the allow table (rows 1–39) and the deny tables (G1–G9, H1–H8, B1–B2, M1–M10) exactly as `merge-settings.sh` writes them, explains deny > ask > allow, why the template's prefix deny rules need the plugin deny entries and the residual combined-short-option gap (`git commit -nm x`), and lists per command (all 10) every non-make command it issues with the allow entry or `common.sh` dispatcher function covering it.
+- Given the same file, when read, then it states that `common.sh http_probe` is the only HTTP path (no `curl` entry; `--with-qa-network` is an INFO no-op), documents the manual removal of stale plugin-root entries after `claude plugin update` or uninstall and the headless `not run (ask rule)` outcome, and states Ralph's `CLAUDE_PERMISSION_MODE="bypassPermissions"` default in `.ralph/.ralphrc` truthfully as never changed by the plugin with ADR-25 as the backstop (the only plugin file where P7 may appear outside a prohibition line).
+- Given `docs/release-process.md`, when read, then it states the ADR-9 policy: tag `rust-backend-sdlc-vX.Y.Z` on the merge commit of `main`, the `manifest-validate` tag check, MAJOR/MINOR/PATCH rules (a profile key addition is MINOR with generator, validator, schema doc, golden profile and CC-16 changed together; a `schema_version` bump is MAJOR with a migration note), the marketplace source switch (relative until v1.0.0 or the first external consumer, then `git-subdir` with `ref` and `sha`), and a `## Changelog` section whose first entry is `### 0.1.0 — <YYYY-MM-DD>`.
+- Given both files, when checked, then they meet SC-DOC.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/docs/permissions.md`
+- `plugins/rust-backend-sdlc/docs/release-process.md`
+
+**Depends on:** 2.3, 2.5, 5.7, 5.8, 5.9, 5.10, 5.11, 5.12, 6.2, 6.3
+
+**FRs:** FR-41, FR-9 (NFR-5, NFR-10)
+
+**Verification:**
+
+- `v_md plugins/rust-backend-sdlc/docs/permissions.md plugins/rust-backend-sdlc/docs/release-process.md && v_cmdtok plugins/rust-backend-sdlc/docs/permissions.md plugins/rust-backend-sdlc/docs/release-process.md`
+- `for id in G1 G9 H1 H8 B1 B2 M1 M10; do grep -qE "^\| $id \|" plugins/rust-backend-sdlc/docs/permissions.md || echo "missing $id"; done | { ! grep .; } && for c in rs-sdlc rs-sdlc-setup rs-sdlc-new-service rs-sdlc-new-context rs-sdlc-issue rs-sdlc-plan rs-sdlc-implement rs-sdlc-review rs-sdlc-qa rs-sdlc-finish-pr; do grep -qF "$c" plugins/rust-backend-sdlc/docs/permissions.md || echo "missing $c"; done | { ! grep .; }`
+- `grep -qF 'rust-backend-sdlc-v' plugins/rust-backend-sdlc/docs/release-process.md && grep -qE '^### 0\.1\.0 — ' plugins/rust-backend-sdlc/docs/release-process.md`
+
+### Story 8.4: Test strategy document
+
+As a plugin maintainer,
+I want `docs/testing/test-strategy.md` to explain the test surfaces, suites, fixtures, tool pins and skip policy and to map every degrade path to a test,
+So that coverage gaps are visible and the AC-43.2 negative check is recorded.
+**Read:** § Test Architecture (all); § Documentation Set row `docs/testing/test-strategy.md`; § Degrade Matrix ("Proven by" column); PRD FR-41, FR-42, AC-43.2, NFR-3, NFR-8. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given the document, when read, then it describes the surfaces (scripts, Markdown contracts, workflows through the harness, fixtures), the 16 suites with their floors (total 557; post-cut 491), the fixtures and stubs (incl. the `bin-kislyuk/` rationale, the `*.tpl`, `dot-claude/`, `dot-bmalph/` rename map and the materialization by `rr_materialize`), the K7 tool pins (yamllint 1.38.0, Prettier 3.9.10, typos 1.52.0, markdownlint-cli2 0.24.0), the skip policy (uid 0, an absent optional tool with a reason, `have_yq` gating) and the two-backend run (`SDLC_FORCE_PYTHON_YAML=1`).
+- Given the D1–D25 map, when read, then every degrade id names at least one existing test: a bats `@test` name that occurs in a suite, a CC id of `component-counts.bats`, or a scenario file name under `tests/fixtures/workflows/`, including for D2 the contract assertion that `rs-sdlc-review.md`, `rs-sdlc-implement.md` and `rs-sdlc-new-context.md` state the Docker precondition and the message-based classification, and for D25 the container-precondition sentence (CC-11).
+- Given the negative check, when read, then it records AC-43.2: seeding the denylisted organization token into a Rust skill body makes the CI `generalization-audit` job fail, with the exact command to reproduce it on a scratch copy.
+- Given the file, when checked, then it meets SC-DOC.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/docs/testing/test-strategy.md`
+
+**Depends on:** 1.7, 1.8, 2.1, 2.2, 2.3, 2.4, 3.3, 3.4, 3.6, 3.7, 3.8, 3.9, 3.10, 5.2, 6.1, 7.5
+
+**FRs:** FR-41, FR-42, FR-43 (NFR-3, NFR-8)
+
+**Verification:**
+
+- `v_md plugins/rust-backend-sdlc/docs/testing/test-strategy.md && v_cmdtok plugins/rust-backend-sdlc/docs/testing/test-strategy.md`
+- `for i in $(seq 1 25); do grep -qE "(^|[^0-9A-Za-z])D$i([^0-9]|$)" plugins/rust-backend-sdlc/docs/testing/test-strategy.md || echo "missing D$i"; done | { ! grep .; }`
+- `grep -qF '557' plugins/rust-backend-sdlc/docs/testing/test-strategy.md && grep -qF 'generalization-audit' plugins/rust-backend-sdlc/docs/testing/test-strategy.md`
+
+### Story 8.5: Plugin README
+
+As a prospective user,
+I want the plugin README to tell me how to install, what I need, what each command does and where every document is,
+So that I can go from marketplace to a first feature without reading the specs.
+**Read:** § Documentation Set row `README.md` (plugin); § Workflow Epic (sensor verdicts); PRD FR-40, AC-40.2, NFR-16. **Size:** S.
+
+**Acceptance Criteria:**
+
+- Given `plugins/rust-backend-sdlc/README.md`, when read, then it gives the install lines `claude plugin marketplace add VilnaCRM-Org/claude-plugins` and `claude plugin install rust-backend-sdlc@vilnacrm-plugins`, a prerequisites list byte-identical to the version-floors list of `docs/setup-walkthrough.md` (CC-25), the 10 commands each with a one-line purpose, and a quick start (new service → setup → feature).
+- Given the "Workflows" section, when read, then a 4-row table names `rs-sdlc-feature`, `rs-sdlc-review-panel`, `rs-sdlc-pr-until-green` and `rs-sdlc-fr-nfr-review`, and the six sensor verdicts `BLOCKED`, `FIX`, `GATE`, `REQUEST`, `WAIT`, `READY` are named.
+- Given the docs links, when resolved, then the README links all 9 docs (`docs/profile-schema.md`, `docs/setup-walkthrough.md`, `docs/sdlc-loop.md`, `docs/permissions.md`, `docs/degrade-matrix.md`, `docs/release-process.md`, `docs/new-service-walkthrough.md`, `docs/workflows.md`, `docs/testing/test-strategy.md`) and every link resolves (AC-40.2).
+- Given the file, when checked, then it meets SC-DOC and contains no default template slug (allowed only in `config/` and `# profile-example` fences of `docs/`, CC-28).
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/README.md`
+
+**Depends on:** 1.9, 2.5, 6.2, 7.6, 8.2, 8.3, 8.4
+
+**FRs:** FR-40, FR-41 (NFR-11, NFR-16)
+
+**Verification:**
+
+- `v_md plugins/rust-backend-sdlc/README.md && v_cmdtok plugins/rust-backend-sdlc/README.md && ! grep -niF 'rust-service-template' plugins/rust-backend-sdlc/README.md`
+- `for d in profile-schema setup-walkthrough sdlc-loop permissions degrade-matrix release-process new-service-walkthrough workflows testing/test-strategy; do grep -qF "](docs/$d.md)" plugins/rust-backend-sdlc/README.md && test -f "plugins/rust-backend-sdlc/docs/$d.md" || echo "bad link $d"; done | { ! grep .; }`
+- `for c in rs-sdlc rs-sdlc-setup rs-sdlc-new-service rs-sdlc-new-context rs-sdlc-issue rs-sdlc-plan rs-sdlc-implement rs-sdlc-review rs-sdlc-qa rs-sdlc-finish-pr; do grep -qF "/$c" plugins/rust-backend-sdlc/README.md || echo "missing /$c"; done | { ! grep .; }`
+
+### Story 8.6: Component contract suite
+
+As a plugin maintainer,
+I want `component-counts.bats` to pin every count, contract and shared name of the plugin,
+So that no later change can drop a component, drift an exit string, leak a service literal or loosen a safety rule without failing CI.
+**Read:** § Test Architecture › `component-counts.bats` assertions (CC-01 to CC-36) and Suites (all floors); § Implementation Patterns; § Command Contracts › Exit strings (CC-12 scope); ADR-12, ADR-13, ADR-19, ADR-22; PRD AC-1.1, AC-1.3, AC-1.4, AC-2.2, AC-2.3, AC-5.2, AC-6.4, AC-19.1, AC-21.1, AC-22.1, AC-30.1, AC-32.2, AC-33.2, AC-44.2, NFR-5 (P1–P7). **Size:** L.
+
+**Acceptance Criteria:**
+
+- Given the complete tree, when `tests/component-counts.bats` runs, then it has one `@test "component-counts: CC-<nn> …"` per id CC-01 to CC-36 (≥ 36 cases, floor 20) and every case passes: counts 10 commands, 7 agents (names, models, tools of § Agent Contracts), 28 skill directories, 2 meta-guides without frontmatter, 13 executable scripts plus an executable library whose dispatcher accepts exactly the 17 names, 4 workflows starting `export const meta = {`, 9 docs, 16 suites each at or above its floor by `grep -c '^@test'` (CC-01 to CC-08).
+- Given the Markdown contracts, when asserted, then CC-09 to CC-23 hold: frontmatter keys; command spine, `MAX_ITERATIONS=5`, `validate-profile.sh` in the first fence (except setup and new-service) and 7 escalation fields; the background and container sentences verbatim in the 9 commands and 6 agents that run make or git, and no `&` appended to a make, git or bmalph call; exit strings byte-identical per the CC-12 scope; command tokens per AC-1.4 with the path negative case; commit literals per AC-2.2 and commits only as `git commit -F` after `commit_msg_file`, pushes only `git push -u origin HEAD`; P1–P7 only on prohibition lines with the positive cases `request-ai-reviews.sh --force` and `git config --get core.hooksPath`; profile-key candidates declared (AC-5.2) with the five-name negative case (`architecture.toml`, `persistence.rs`, `workspace.dsl`, `clippy.toml`, `tests.rs`); the setup, new-service, new-context, stage-command and agent token lists of CC-17 to CC-21; counterparts' `## Repository precedence` and FR-31 tokens; the decision guide's 28 rows, verbatim sentence and 6 docs-only `EXECUTE`s.
+- Given the packaging and hygiene contracts, when asserted, then CC-24 to CC-36 hold: `plugin.json` and the marketplace entry; README commands, doc links and floors equal to `docs/setup-walkthrough.md`; degrade ids and outcome vocabulary; relative links in `docs/` resolve; the generalization grep over `skills commands agents scripts workflows` and the template slug only in `config/new-service.defaults.json` and `# profile-example` fences of `docs/` (the suite assembles the slug from two halves); no `_bmad`/`.ralph` component, no `*.md` under `tests/fixtures`, and `git -C <repo-root> check-ignore --no-index` silent over every fixture (skipped with a reason outside a checkout); shared names byte-identical with their php/react sources (CC-30); script skeleton, `Usage:`/exit codes header, `--help` exit 0 and banned constructs absent; no `make logs` outside prohibition lines and no raw `cargo` outside the FR-1 list; state-comment marker, run-report fields and resume table; counters identical; Q1–Q15 mapping identical in `rs-sdlc-review.md` and `code-quality-reviewer.md`; suffix make spelling with the closed variable set, `CONFIG_CHANGE_APPROVED` only empty and every `make validate-configuration` carrying `base_ref=` and `CONFIG_CHANGE_APPROVED=` (CC-36).
+- Given a scratch copy of the plugin with one skill directory removed, when the suite runs against it via `PLUGIN_ROOT`, then CC-03 fails, proving the counts are real; the suite itself contains no denylisted literal and meets SC-SUITE.
+
+**Files owned:**
+
+- `plugins/rust-backend-sdlc/tests/component-counts.bats`
+
+**Depends on:** 2.5, 5.6, 5.12, 6.2, 6.3, 7.6, 8.1, 8.2, 8.3, 8.4, 8.5
+
+**FRs:** FR-1, FR-2, FR-3, FR-22, FR-30, FR-31, FR-32, FR-33, FR-40, FR-41, FR-42, FR-44 (NFR-2, NFR-4, NFR-5, NFR-6, NFR-8, NFR-11, NFR-12, NFR-15)
+
+**Verification:**
+
+- `npx --yes bats plugins/rust-backend-sdlc/tests/component-counts.bats && test "$(grep -c '^@test' plugins/rust-backend-sdlc/tests/component-counts.bats)" -ge 36`
+- `for i in $(seq -w 1 36); do grep -qE "^@test \"component-counts: CC-$i " plugins/rust-backend-sdlc/tests/component-counts.bats || echo "missing CC-$i"; done | { ! grep .; }`
+- `v_gen plugins/rust-backend-sdlc/tests/component-counts.bats`
+
+### Story 8.7: Release gate for v0.1.0
+
+As the release owner,
+I want every gate of the v0.1.0 release run once more on the complete tree and every requirement traced to a done story,
+So that `rust-backend-sdlc-v0.1.0` is tagged only on a fully green, fully traced plugin.
+**Read:** § Constraints ("Done means all green"); § Release and Versioning (v0.1.0 release gate K1–K8); PRD § Success Criteria › Technical success; this document's FR Coverage Map. **Size:** M.
+
+**Acceptance Criteria:**
+
+- Given the complete tree, when `python3 tools/plugin-quality/lint/lint_all.py` runs, then it reports 0 findings for every plugin (K1); `shellcheck -x plugins/rust-backend-sdlc/scripts/*.sh plugins/rust-backend-sdlc/scripts/lib/common.sh` and `npx --yes markdownlint-cli2 "plugins/rust-backend-sdlc/**/*.md"` report 0 findings (K5).
+- Given the 16 suites, when `npx --yes bats plugins/rust-backend-sdlc/tests/*.bats` runs and runs again with `SDLC_FORCE_PYTHON_YAML=1`, then both runs pass with at least 557 tests, every per-suite floor met and skips only for uid 0 or an absent optional tool with a printed reason; with the K7 tools installed the K7 cases run and pass (K4, K7).
+- Given the CI wiring, when the bodies of the `profile-keys-check` and `generalization-audit` jobs run locally for both plugins, then they pass (K2, K6); `claude plugin validate plugins/rust-backend-sdlc --strict` exits 0 where the CLI is available, and with `ANTHROPIC_API_KEY` set `run_judge.py --gate --require` reports no blocking finding (no critical dimension J1, J2, J3, J7, J10 at or below 2) (AC-40.1).
+- Given traceability, when the FR Coverage Map is re-checked against the done stories, then every FR-1 to FR-44 and NFR-1 to NFR-16 maps to at least one done story, `find plugins/rust-backend-sdlc -type f | wc -l` prints 283 (the architecture's tree; no `.gitkeep`, no other file), and the counts of K3 hold.
+- Given any failure, when it is found, then it is fixed in the owning story's files by a `fix(rust-backend-sdlc): …` commit and the failing gate re-run; nothing is waived, and the tag `rust-backend-sdlc-v0.1.0` is created only after merge to `main` (ADR-9, out of this bundle's scope).
+
+**Files owned:**
+
+- none (verification only; fixes are committed against the owning story's files)
+
+**Depends on:** 8.6
+
+**FRs:** FR-40, FR-42, FR-43 (release gate K1–K8 over all FRs and NFRs)
+
+**Verification:**
+
+- `python3 tools/plugin-quality/lint/lint_all.py`
+- `shellcheck -x plugins/rust-backend-sdlc/scripts/*.sh plugins/rust-backend-sdlc/scripts/lib/common.sh && npx --yes markdownlint-cli2 "plugins/rust-backend-sdlc/**/*.md"`
+- `npx --yes bats plugins/rust-backend-sdlc/tests/*.bats && SDLC_FORCE_PYTHON_YAML=1 npx --yes bats plugins/rust-backend-sdlc/tests/*.bats`
+- `test "$(cat plugins/rust-backend-sdlc/tests/*.bats | grep -c '^@test')" -ge 557 && test "$(find plugins/rust-backend-sdlc -type f | wc -l)" -eq 283`
+- `! command -v claude >/dev/null || claude plugin validate plugins/rust-backend-sdlc --strict`
+
+## Wave Plan
+
+Stories in one wave have no dependency on each other and own disjoint files; a wave starts when every story of the previous waves it depends on is done. The single-writer library sections (`scripts/lib/common.sh`, `tests/common-lib.bats`) appear in exactly one story per wave (W2 → 1.6, W3 → 2.4, W4 → 3.1, W5 → 5.1, W6 → 5.2). Critical path: 1.3 → 1.6 → 2.4 → 3.1 → 3.9 → 5.4 → 5.9 → 6.3 → 8.3 → 8.4… → 8.5 → 8.6 → 8.7 (13 waves).
+
+| Wave | Stories (parallel) | Count | Gate to enter |
+| --- | --- | --- | --- |
+| W1 | 1.1, 1.2, 1.3, 1.4, 1.5, 1.9, 3.5, 7.1 | 8 | none |
+| W2 | 1.6, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 4.10, 4.11, 4.12, 8.1 | 14 | W1 (1.6 needs 1.1–1.4; skills need 1.9; 8.1 needs 1.1) |
+| W3 | 1.7, 2.1, 2.2, 2.3, 2.4, 3.3, 3.4, 4.13, 6.1 | 9 | 1.6 (scripts), 4.1–4.12 (decision guide) |
+| W4 | 1.8, 3.1, 3.2, 3.6, 3.7, 5.3, 5.7 | 7 | 1.7 (golden profile), 2.4 (library order), 3.4, 3.5, 4.13 |
+| W5 | 2.5, 3.8, 3.9, 3.10, 5.1, 5.10 | 6 | 1.8, 3.1, 3.2, 5.3 |
+| W6 | 5.2, 5.4, 5.5 | 3 | 5.1, 3.8, 3.9 |
+| W7 | 5.6, 5.8, 5.9, 5.11, 7.2, 7.3 | 6 | 5.2, 5.4, 5.5, 3.10 |
+| W8 | 5.12, 6.2, 6.3, 7.4 | 4 | 5.7–5.11, 2.5, 7.2 |
+| W9 | 7.5, 8.2, 8.3 | 3 | 5.12, 6.2, 6.3, 7.4 |
+| W10 | 7.6, 8.4 | 2 | 7.5 |
+| W11 | 8.5 | 1 | 7.6, 8.2, 8.3, 8.4 |
+| W12 | 8.6 | 1 | 8.5 and every component story |
+| W13 | 8.7 | 1 | 8.6 |
+
+> Assumption A7: a wave is a maximum, not a mandate; the orchestrator may start a story as soon as its `**Depends on:**` stories are done, as long as no other running story owns one of its files (the only shared paths are the two section-owned library files, already serialized by their dependency chain 1.6 → 2.4 → 3.1 → 5.1 → 5.2). If Epic 7 is cut, 7.1–7.6 are dropped, 8.4–8.6 apply the post-cut counts (0 workflows, 15 suites, 8 docs, ≥ 491 tests) and drop the README "Workflows" table, the "Workflow form" section and the workflow rows of the D-map in the same change.
+
+## FR Coverage Map
+
+| Requirement | Stories |
+| --- | --- |
+| FR-1 Shared command contract | 2.5, 5.7, 5.8, 5.9, 5.10, 5.11, 5.12, 6.2, 6.3, 4.6 (verification skill sentences), 8.6 (CC-10, CC-11, CC-32, CC-36) |
+| FR-2 Hook-valid git | 1.6 (`is_commit_subject`), 2.4 (`derive_issue_number`, `commit_msg_file`, `hooks_active`), 2.5, 5.7–5.12, 6.2, 6.3, 7.4 (publish agent), 8.6 (CC-14, CC-15) |
+| FR-3 Orchestrator | 5.1 (`resume_point`, state helpers), 5.12, 8.2, 8.6 (CC-33) |
+| FR-4 `/rs-sdlc-setup` | 2.1 (AC-4.4), 2.3 (AC-4.2), 2.5, 8.6 (CC-17) |
+| FR-5 Profile schema | 1.7, 1.8, 1.9, 8.6 (CC-16) |
+| FR-6 `generate-profile.sh` | 1.8 |
+| FR-7 `validate-profile.sh` | 1.7 |
+| FR-8 `inject-governance.sh` | 2.2 |
+| FR-9 `merge-settings.sh` | 2.3, 8.3 |
+| FR-10 `setup-preflight.sh` | 2.1 |
+| FR-11 `/rs-sdlc-new-service` | 6.2, 8.6 (CC-18) |
+| FR-12 `new-service.sh` | 6.1 |
+| FR-13 `config/new-service.defaults.json` | 6.1, 8.6 (CC-28) |
+| FR-14 `/rs-sdlc-new-context` | 2.4 (`validate_context_name`, AC-14.1), 6.3, 8.6 (CC-19) |
+| FR-15 `/rs-sdlc-issue` | 5.7, 8.6 (CC-20) |
+| FR-16 `/rs-sdlc-plan` | 3.3 (AC-16.2), 4.4, 5.7, 8.6 (CC-20) |
+| FR-17 `stage-planning-artifacts.sh` | 3.3 |
+| FR-18 `/rs-sdlc-implement` | 5.2, 5.8, 7.5 (workflow staging path), 8.6 (CC-20) |
+| FR-19 `/rs-sdlc-review` | 4.13 (AC-19.3), 5.4, 5.9, 7.2 (AC-19.2), 7.3, 8.6 (CC-20, CC-35) |
+| FR-20 `/rs-sdlc-qa` | 2.4 (`http_probe`), 5.3, 5.10, 8.6 (CC-20) |
+| FR-21 `/rs-sdlc-finish-pr` | 3.6 (AC-21.3), 5.5, 5.11, 7.4 (AC-21.2), 8.2, 8.6 (CC-34) |
+| FR-22 Shared agent contract | 5.3, 5.4, 5.5, 8.6 (CC-02, CC-09, CC-11) |
+| FR-23 `rust-implementer` | 5.3, 8.6 (CC-21) |
+| FR-24 `code-quality-reviewer` | 5.4, 8.6 (CC-35) |
+| FR-25 `fr-nfr-reviewer` | 5.4, 8.6 (CC-21) |
+| FR-26 `qa-manual-tester` | 5.3, 8.6 (CC-21, CC-32) |
+| FR-27 `ci-fixer` | 5.5, 8.6 (CC-21, CC-34) |
+| FR-28 `pr-comment-resolver` | 5.5, 8.6 (CC-21) |
+| FR-29 `security-auditor` | 5.4, 8.6 (CC-21) |
+| FR-30 Skill library | 4.1–4.12, 8.6 (CC-03, CC-22) |
+| FR-31 Rust-only skills | 1.9 (L25 declarations), 4.8, 4.11, 4.12, 8.6 (CC-22) |
+| FR-32 Meta-guides and triage | 4.13, 5.6, 8.6 (CC-04, CC-23) |
+| FR-33 `lib/common.sh` and script contract | 1.6, 2.4, 3.1, 5.1, 5.2, 8.6 (CC-05, CC-31) |
+| FR-34 `ai-review-loop.sh` | 3.8 |
+| FR-35 `fr-nfr-gate.sh` | 3.9 |
+| FR-36 `get-pr-comments.sh` | 3.4 |
+| FR-37 `post-review-findings.sh` | 3.2, 3.10 |
+| FR-38 `pr-state.sh` | 3.5, 3.6 |
+| FR-39 `request-ai-reviews.sh` | 3.7 |
+| FR-40 Manifest and README | 1.1, 8.1, 8.5, 8.6 (CC-24, CC-25), 8.7 |
+| FR-41 Documentation set | 1.9, 2.5, 6.2, 7.6, 8.2, 8.3, 8.4, 8.5, 8.6 (CC-07, CC-26, CC-27) |
+| FR-42 Test suites and fixtures | 1.1, 1.2, 1.3, 1.4, 1.5, 3.2, 3.5, every suite story (1.6–1.8, 2.1–2.4, 3.1, 3.3, 3.4, 3.6–3.10, 5.1, 5.2, 6.1, 7.6), 8.4, 8.6 (CC-08, CC-29), 8.7 |
+| FR-43 Marketplace and CI wiring | 8.1, 8.4 (AC-43.2), 8.7 |
+| FR-44 Workflow layer | 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 8.6 (CC-06) |
+
+### NFR coverage
+
+| Requirement | Stories |
+| --- | --- |
+| NFR-1 Idempotence | 1.8, 2.2, 2.3, 3.3, 6.1, 2.5 (second-run statement) |
+| NFR-2 Generalization | 1.3, 1.4, 1.5 (clean fixtures), 1.9, 6.1 (slug location), every SC-SKILL/SC-AGENT/SC-CMD story, 8.1 (CI audit), 8.6 (CC-28) |
+| NFR-3 Degrade matrix | 1.8 (D20), 2.1 (D5, D6, D15, D16, D20), 2.3 (D4), 3.6 (D8, D9), 3.9 (D11, D15), 3.10 (D12), 5.8 (D2, D22, D23), 5.9 (D1, D2, D9), 5.11 (D7, D8), 5.12 (D10, D19, D22, D24), 6.1 (D17, D18), 6.2 (D2, D25), 7.4 (D21), 8.2, 8.4 |
+| NFR-4 Tighten-only bars | 1.7, 4.5, 5.4, 5.9, 8.6 (CC-15) |
+| NFR-5 Safety | 2.3, 2.4, 5.2, 5.8, 5.11, 7.4, 8.3, 8.6 (CC-15) |
+| NFR-6 Boundedness | 3.8, 5.7–5.12, 6.3, 7.2–7.5, 8.6 |
+| NFR-7 Portability | 1.6 and every script story (parity, banned constructs), 8.7 |
+| NFR-8 Testability | every suite story, 8.4, 8.6 (CC-08), 8.7 |
+| NFR-9 Observability | 3.1 (ledgers), 3.10, 5.1 (state), 5.12 (run report), 8.2 |
+| NFR-10 Security | 2.4 (`http_probe`), 3.1 (`redact`, isolated session), 3.4, 3.9, 3.10, 5.3, 5.5 |
+| NFR-11 Installability | 1.1, 8.6 (CC-01 to CC-07, CC-29), 8.7 |
+| NFR-12 Token cost | 4.13, 5.9, 8.6 (CC-23) |
+| NFR-13 Template compatibility | 1.7, 1.8 (profile K7), 2.2 (governance K7), 6.1 (README/CHANGELOG/config K7) |
+| NFR-14 Runtime bounds | 1.7, 1.8, 2.2, 2.3 (≤ 5 s), SC-CMD background sentence (8.6 CC-11) |
+| NFR-15 Drift resistance | 3.1, 3.9, 8.6 (CC-30), 4.5/4.6 (runtime-read lists) |
+| NFR-16 Version floors | 1.6 (bash floor), 2.1, 2.5, 8.5 (CC-25) |
+
+### Final validation (step 4)
+
+- FR coverage: all 44 FRs and 16 NFRs map to at least one story; every story maps to at least one FR (8.7 maps to the release gate over all of them).
+- File coverage: the 108 components and 175 fixtures of § Project Structure › Plugin tree (283 files) and the 3 wiring files are each listed under exactly one story's `**Files owned:**`, except the two section-owned library files (A3), which are serialized across W2–W6; no story owns a file outside the plugin tree and the three wiring files.
+- Starter template: Story 1.1 sets the plugin up from the reference plugin, as step 4 requires when the architecture names a starter.
+- Dependencies: every `**Depends on:**` names an earlier story of the same epic or a story of an earlier epic; no forward dependency exists (A2), and every wave respects them.
+- Story quality: each story names its architecture sections in `**Read:**`, has Given/when/then criteria that cite exact outputs, exit codes and file names, and ends with executable verification commands from the kit.
+- Open questions: none blocking. Two items stay post-release as the architecture states (the quoted plugin-root allow entries and the brace-group background wrapper under real permission matching, R1; the measured skill-body count for a docs-only diff, NFR-12), both observed in the K10 reference run, not in this bundle.
