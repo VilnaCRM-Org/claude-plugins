@@ -314,7 +314,7 @@ Every file `generate-profile.sh` reads, every protected file a quality bar is de
 | `Makefile` | python3 `re` | detection | every `make.*` key (rules with a `##` help comment); `CI_PREFLIGHT_TARGETS` starting with `validate-configuration` for `capabilities.template_derived` |
 | `make/gates.mk` | python3 `re` | detection; marker; bar source | `make.*` rules (as one of `make/*.mk`); marker of `capabilities.template_derived`; `COVERAGE_GATE_CMD`, `MUTANTS_CMD`, `LINT_PROD_CMD`, `LINT_ALL_CMD`, `LINT_RUSTDOC_CMD`, `COMPLEXITY_CMD`, `ARCH_CMD`, `HACK_CMD`, `SHEAR_CMD`, `DENY_CMD`, `SPECTRAL_FLAGS`, `OASDIFF_FLAGS`, `TRIVY_FLAGS` back the `quality.*` bars; looser coverage floors and flags only warn |
 | `make/*.mk` | python3 `re` | detection | `make.*` rules, including the service-owned `make/service.mk` |
-| `clippy.toml` | python3 `re` | bar source; cited | the four complexity thresholds behind `quality.max_complexity_violations` (looser → `WARN`); quoted at review time, never copied into the profile |
+| `clippy.toml` | python3 `tomllib` | bar source; cited | the four complexity thresholds behind `quality.max_complexity_violations` (looser → `WARN`); quoted at review time, never copied into the profile |
 | `deny.toml` | cited, not parsed | bar source | with `DENY_CMD` the source of `quality.max_dependency_policy_findings` |
 | `.spectral.yaml` | cited, not parsed | bar source | with `SPECTRAL_FLAGS` the source of `quality.max_spectral_findings` |
 | `.cargo/mutants.toml` | cited, not parsed | bar source | with `MUTANTS_CMD` the source of `quality.max_surviving_mutants` |
@@ -364,7 +364,7 @@ Output ends with `VALID: <path>` (exit 0) or `INVALID: <path>: <n> violation(s)`
 
 ## Annotated example
 
-The generator output for the template checkout at `3e0bd3e`, with comments added. The generator emits the same keys and values without the trailing comments. The fence's opening line carries `# profile-example`, the only place on this page where concrete template values appear.
+The generator output for the template checkout at `3e0bd3e`, with comments added. The generator emits the same keys and values without the trailing comments. The fence's opening line carries `# profile-example`; the fence is the only place on this page where the default template slug appears.
 
 ```yaml # profile-example
 # Project profile of the rust-backend-sdlc plugin (schema_version 1).

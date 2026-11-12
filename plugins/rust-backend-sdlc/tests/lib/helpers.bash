@@ -47,8 +47,8 @@ common_setup() {
       STUB_CLAUDE_LOG | STUB_GH_LOG | STUB_BMALPH_LOG | STUB_CURL_LOG) ;;
       STUB_CARGO_LOG | STUB_MAKE_LOG | STUB_DOCKER_LOG) ;;
       STUB_*_LOG)
-        lower="$(printf '%s' "$var" | tr '[:upper:]' '[:lower:]')"
-        export "$var=$tmp/stub-logs/${lower#stub_}"
+        lower="$(printf '%s' "${var%_LOG}" | tr '[:upper:]' '[:lower:]')"
+        export "$var=$tmp/stub-logs/${lower#stub_}.log"
         ;;
       *) ;;
     esac
@@ -357,7 +357,7 @@ _profile_edit() {
       }
       print
     }
-    END { exit found ? 0 : 3 }
+    END { if (!found) exit 3 }
   ' "$file" >"$tmp"; then
     rm -f "$tmp"
     printf '%s: key %s not found in %s\n' "$mode" "$key" "$file" >&2

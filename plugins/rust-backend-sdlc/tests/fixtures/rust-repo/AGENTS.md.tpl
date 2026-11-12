@@ -10,7 +10,7 @@ This file tells AI coding assistants how to work in this repository: a Rust serv
 
 ## Working Rules
 
-- Run every tool through `make`. Do not call cargo, docker or the linters directly unless a skill says so; `make ci-list` prints the gate targets in order.
+- Run every tool through `make`. Do not call cargo, docker or the linters directly unless a skill says so; `make help` lists the targets.
 - Never change an item listed in `protected-config.toml` to obtain a pass. A maintainer approves such a change: the session is restarted with `ALLOW_PROTECTED_CONFIG_EDIT=1` and the pull request carries the label `approved-config-change`.
 - Keep Domain crates free of frameworks and I/O. `make architecture` fails when a layer or a bounded context reaches across a boundary.
 - Regenerate the contract snapshots and update `workspace.dsl` in the same change that alters a contract or adds, removes or relates a crate.
@@ -29,32 +29,39 @@ Run the targets below, in this order, before you declare a change complete. The 
 make validate-configuration
 make validate-invariants
 make secrets-scan
+make lint-repo
+make lint-load-tests
 make validate-architecture-model
 make format-check
+make validate-manifest
 make check-crate-isolation
 make static-analysis
 make complexity
 make architecture
 make check-security
 make unused-dependencies
+make check-requirements
 make docs-check
 make setup-test-db
 make validate-sqlx-metadata
 make tests-with-coverage
+make doc-tests
 make e2e-tests
 make validate-contract-snapshots
 make validate-openapi-spec
 make openapi-diff
 make graphql-diff
 make mutation-tests-diff
+make build-prod-image
 make image-scan
 make schemathesis-validate
 make smoke-load-tests
+make bats
 ```
 
 <!-- verification:end -->
 
-For a change that touches only documentation, run `make docs-check`.
+For a change that touches only documentation, run `make lint-repo docs-check`.
 
 ## Close-Out
 
