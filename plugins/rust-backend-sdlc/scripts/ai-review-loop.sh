@@ -404,7 +404,7 @@ if [[ "$DIFF_TOTAL" == 0 ]]; then
 fi
 TRUNCATION=""
 if [[ "$DIFF_TOTAL" != "$DIFF_KEPT" ]]; then
-  TRUNCATION="NOTE: the diff above is truncated to its first $DIFF_KEPT of $DIFF_TOTAL bytes (the $ARL_DIFF_BYTE_LIMIT-byte budget). The rest of the change set is not shown: read the changed files with Read, Grep and Glob before you decide, and never assume that the omitted part is clean."$'\n\n'
+  TRUNCATION="Truncation notice: the diff above is truncated to its first $DIFF_KEPT of $DIFF_TOTAL bytes (the $ARL_DIFF_BYTE_LIMIT-byte budget). The rest of the change set is not shown: read the changed files with Read, Grep and Glob before you decide, and never assume that the omitted part is clean."$'\n\n'
   log_warn "the diff of $BASE...HEAD is $DIFF_TOTAL bytes: the prompt carries its first $DIFF_KEPT bytes and a truncation note"
 fi
 

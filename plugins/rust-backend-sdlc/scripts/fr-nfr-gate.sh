@@ -97,7 +97,7 @@ IMPACT_NOTE='the rest of the impact context is omitted by the prompt budget'
 COMMENT_NOTE="the full review is in the gate run's output"
 
 # --- python3 helpers ---------------------------------------------------------------
-# bound LIMIT NOTE   stdin capped at LIMIT bytes, the truncation note included,
+# bound LIMIT SUFFIX   stdin capped at LIMIT bytes, the truncation note included,
 #                    cut on a UTF-8 character boundary (bytes kept as read)
 # spec ROOT PATH     PATH's real path relative to ROOT; 3 missing, 4 outside
 #                    ROOT, 5 a symbolic link inside escapes ROOT, 6 directory
@@ -320,8 +320,8 @@ fng_fence() {
   fence_safe
 }
 
-# fenced TEXT LIMIT NOTE — TEXT through fence_safe, then capped at LIMIT bytes
-# with NOTE.
+# fenced TEXT LIMIT SUFFIX — TEXT through fence_safe, then capped at LIMIT bytes
+# with SUFFIX.
 fenced() {
   printf '%s' "$1" | fng_fence | fng_py bound "$2" "$3"
 }

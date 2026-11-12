@@ -452,7 +452,7 @@ tree_state() {
   [[ "$output" == *"diff --git a/crates/billing/invoice/domain/src/review_marker.rs b/crates/billing/invoice/domain/src/review_marker.rs"* ]]
   [[ "$output" == *"+pub const REVIEW_MARKER: &str = \"$BRANCH_MARK\";"* ]]
   [[ "$output" != *"Cargo.toml"* ]]
-  run ! grep -q 'NOTE: the diff above is truncated' "$CLAUDE_LOG"
+  run ! grep -q 'Truncation notice: the diff above is truncated' "$CLAUDE_LOG"
 }
 
 @test "ai-review-loop: the diff runs from the merge base, so commits only on the base stay out of the prompt" {
@@ -513,7 +513,7 @@ open(sys.argv[1], "w", encoding="utf-8").write(sys.argv[2] + ("é" * 79 + "\n") 
   [ "$bytes" -le 50001 ]
   [ "$bytes" -ge 49990 ]
   python3 -I -c 'import sys; open(sys.argv[1], "rb").read().decode("utf-8")' "$BATS_TEST_TMPDIR/block"
-  grep -q '^NOTE: the diff above is truncated to its first [0-9]* of [0-9]* bytes (the 50000-byte budget)' "$CLAUDE_LOG"
+  grep -q '^Truncation notice: the diff above is truncated to its first [0-9]* of [0-9]* bytes (the 50000-byte budget)' "$CLAUDE_LOG"
   [[ "$stderr" == *"[rust-sdlc][WARN] the diff of origin/main...HEAD is "*" bytes: the prompt carries its first "*" bytes and a truncation note"* ]]
 }
 
