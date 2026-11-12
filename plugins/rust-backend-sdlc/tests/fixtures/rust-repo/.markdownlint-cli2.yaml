@@ -1,0 +1,18 @@
+# .markdownlint-cli2.yaml
+config:
+  default: true
+  MD013: false # prose and tables are not wrapped
+  MD024: { siblings_only: true }
+  MD033: { allowed_elements: [a, img, p] } # README banner and badges
+  MD041: false # README starts with the banner
+ignores:
+  - CHANGELOG.md
+  - specs/**
+  - target/**
+  - .tools/**
+  - _bmad/**
+  - _bmad-output/**
+  - .ralph/**
+  - .claude/commands/**
+  - tests/CLI/bats/fixtures/**
+  - '**/node_modules/**'

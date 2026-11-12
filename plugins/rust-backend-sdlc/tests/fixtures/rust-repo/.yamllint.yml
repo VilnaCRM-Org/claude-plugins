@@ -1,0 +1,21 @@
+# .yamllint.yml
+extends: default
+ignore: |
+  .github/openapi-spec/
+  tests/Load/pnpm-lock.yaml
+  tests/CLI/bats/fixtures/
+  target/
+  mutants.out*/
+  .tools/
+  _bmad/
+  _bmad-output/
+  .ralph/
+  bmalph/state/
+  **/node_modules/
+rules:
+  braces: { min-spaces-inside: 1, max-spaces-inside: 1 }
+  comments: { min-spaces-from-content: 1 }
+  document-start: disable
+  indentation: { spaces: 2, indent-sequences: consistent }
+  line-length: disable # Prettier owns the line width
+  truthy: { check-keys: false } # `on:` in workflows
