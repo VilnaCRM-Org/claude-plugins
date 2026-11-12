@@ -1733,7 +1733,7 @@ So that a feature ends as a merge-ready PR with bounded counters and named human
 
 - `v_lint 'commands/rs-sdlc-finish-pr\.md'`
 - `C=plugins/rust-backend-sdlc/commands/rs-sdlc-finish-pr.md; v_md $C && v_sent $C && v_esc $C && v_exit finish-pr $C && v_p17 $C && v_suffix $C && v_cmdtok $C`
-- `for t in ci_fix comment_resolution fr_nfr_gate 'A<n>.B<n>.C<n>.W<n>.R<n>' -- '--conclusion' '--body-file' 'git push -u origin HEAD' 'SKIPPED-NO-CI' 'git restore --source='; do grep -qF -- "$t" plugins/rust-backend-sdlc/commands/rs-sdlc-finish-pr.md || echo "missing $t"; done | { ! grep .; }`
+- `for t in ci_fix comment_resolution fr_nfr_gate 'A<n>.B<n>.C<n>.W<n>.R<n>' '--conclusion' '--body-file' 'git push -u origin HEAD' 'SKIPPED-NO-CI' 'git restore --source='; do grep -qF -- "$t" plugins/rust-backend-sdlc/commands/rs-sdlc-finish-pr.md || echo "missing $t"; done | { ! grep .; }`
 
 ### Story 5.12: Orchestrator command: `/rs-sdlc`
 
@@ -1828,7 +1828,7 @@ So that I get a bootstrapped, set-up service and a bootstrap PR handed to PR fin
 
 - `v_lint 'commands/rs-sdlc-new-service\.md'`
 - `C=plugins/rust-backend-sdlc/commands/rs-sdlc-new-service.md; D=plugins/rust-backend-sdlc/docs/new-service-walkthrough.md; v_md $C $D && v_sent $C && v_esc $C && v_exit new-service $C && v_p17 $C && v_suffix $C && v_cmdtok $C $D`
-- `for s in S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11 S12 S13 S14 'chore(#N): import template' 'chore(#N): initialize service from template' 'chore(#N): add rust-backend-sdlc profile and governance' hooks_active is_commit_subject; do grep -qF -- "$s" $C || echo "missing $s"; done | { ! grep .; }`
+- `for s in S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11 S12 S13 S14 'chore(#N): import template' 'chore(#N): initialize service from template' 'chore(#N): add rust-backend-sdlc profile and governance' hooks_active is_commit_subject; do grep -qF -- "$s" plugins/rust-backend-sdlc/commands/rs-sdlc-new-service.md || echo "missing $s"; done | { ! grep .; }`
 
 ### Story 6.3: New-context command
 
@@ -1856,7 +1856,7 @@ So that a new bounded context is wired, tested and committed in one command, the
 
 - `v_lint 'commands/rs-sdlc-new-context\.md'`
 - `C=plugins/rust-backend-sdlc/commands/rs-sdlc-new-context.md; v_md $C && v_sent $C && v_esc $C && v_exit new-context $C && v_p17 $C && v_suffix $C && v_cmdtok $C`
-- `for t in validate_context_name 'new-context refused:' 'new-context could not run:' C1 C12 ci-preflight ci-static-analysis ci-tests ci-contracts ci-mutation ci-delivery 'CONFIG_CHANGE_APPROVED=' 'feat(#N): add <group>/<context> bounded context' --no-handoff; do grep -qF -- "$t" $C || echo "missing $t"; done | { ! grep .; }`
+- `for t in validate_context_name 'new-context refused:' 'new-context could not run:' C1 C12 ci-preflight ci-static-analysis ci-tests ci-contracts ci-mutation ci-delivery 'CONFIG_CHANGE_APPROVED=' 'feat(#N): add <group>/<context> bounded context' --no-handoff; do grep -qF -- "$t" plugins/rust-backend-sdlc/commands/rs-sdlc-new-context.md || echo "missing $t"; done | { ! grep .; }`
 
 ## Epic 7: Workflow layer (the cut line)
 
@@ -2294,7 +2294,7 @@ So that `rust-backend-sdlc-v0.1.0` is tagged only on a fully green, fully traced
 
 ## Wave Plan
 
-Stories in one wave have no dependency on each other and own disjoint files; a wave starts when every story of the previous waves it depends on is done. The single-writer library sections (`scripts/lib/common.sh`, `tests/common-lib.bats`) appear in exactly one story per wave (W2 → 1.6, W3 → 2.4, W4 → 3.1, W5 → 5.1, W6 → 5.2). Critical path: 1.3 → 1.6 → 2.4 → 3.1 → 3.9 → 5.4 → 5.9 → 6.3 → 8.3 → 8.4… → 8.5 → 8.6 → 8.7 (13 waves).
+Stories in one wave have no dependency on each other and own disjoint files; a wave starts when every story of the previous waves it depends on is done. The single-writer library sections (`scripts/lib/common.sh`, `tests/common-lib.bats`) appear in exactly one story per wave (W2 → 1.6, W3 → 2.4, W4 → 3.1, W5 → 5.1, W6 → 5.2). Critical path: 1.3 → 1.6 → 2.4 → 3.1 → 3.9 → 5.4 → 7.2 → 7.4 → 7.5 → 7.6 → 8.5 → 8.6 → 8.7 (13 waves).
 
 | Wave | Stories (parallel) | Count | Gate to enter |
 | --- | --- | --- | --- |
