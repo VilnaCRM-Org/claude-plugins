@@ -1820,3 +1820,72 @@ Outcome vocabulary is closed (`SUCCESS`, `SUCCESS-WITH-REPORT`, `ESCALATED`); an
 ## Open Questions
 
 None blocking. Two items are deliberately left to post-release evidence: (a) whether the quoted plugin-root entries (Permissions Strategy allow entry 27) and the brace-group background wrapper need the ADR-13 fallback in practice, measured in K10; (b) the measured count of skill bodies loaded for a docs-only diff (NFR-12 post-release form), also in K10.
+
+## Revision Log
+
+Revision 1 (2026-11-12) applied the review findings below; every claim was re-checked against the sources it cites (bmalph 2.11.0 `dist/` and `ralph/`, `tpl/` at `3e0bd3e`, `php/`, `react/`, the marketplace `.gitignore` and workflows, the PRD). None was rejected; where the fix differs from the one proposed, the rationale says how.
+
+| # | Sev. | Finding | Outcome | Rationale |
+| --- | --- | --- | --- | --- |
+| 1 | critical | `bmalph implement` refuses on re-entry | applied | verified `implement.js:15-22`; ADR-10a protocol via `ralph_fix_plan_prepare`/`_restore` (progress kept by id+title); the orchestrator, not `/rs-sdlc-qa` (no Edit/Write, NFR-10), appends the QA fix story; stub refusal; `feat-staging-rerun` |
+| 2 | major | `.ralph/@AGENT.md` contradicts FR-1/FR-2/G4 | applied | verified template lines and `tech-stack.js:15`; ADR-10b `ralph_agent_md_patch` (preferred option), also rewrites the `git add .`/branch-naming items |
+| 3 | major | isolated gate env weaker than react | applied | verified `react/scripts/lib/common.sh:318-325`; exact env, trap, stub env log |
+| 4 | major | lens output vs ledger contract undefined | applied | ADR-16 field table, id prefixes, fenced `json` block, fixtures redefined with purposes |
+| 5 | major | gate run ownership unassigned | applied | `fr-nfr-reviewer` runs the gate once, `code-quality-reviewer` runs Q-rows; CC-20 negative check |
+| 6 | major | background rule not bound to agents | applied | FR-22 shared agent contract, CC-11, workflow prompts; mechanism `run_in_background: true` + `wait_log` |
+| 7 | major | nested workflow name unfixed | applied | `rust-backend-sdlc:rs-sdlc-<name>` (react form verified); Naming row, harness, workflows.bats |
+| 8 | major | `onGate` default and call-graph rule | applied | default `'nested'`, feature passes `'return'`, guarded-edge rule; `pug-as-child` added (55 scenarios) |
+| 9 | major | `## Constraints` truncated at 5,000 | applied | verified `constants.js:22`; ≤ 4,500, (a) then (b); plan self-check via `stage-planning-artifacts.sh --dry-run`; refusal + bats |
+| 10 | minor | fixture tree vs FR-42 | applied | `make/service.mk` defines `load-tests` (a SUBST target in the golden would reroute the gate in every suite; SUBST cases write it at runtime); yq move marked; gate table verbatim |
+| 11 | minor | internal counts | applied | 40 + 2 skill files; 283 files; floors recomputed with every revision: 557 / 491 (not 479 / 418) |
+| 12 | minor | slug location wording | applied | Constraints, CC-28 and R8 reworded |
+| 13 | minor | finish-pr counters and cache shape | applied | `A<n>.B<n>.C<n>.W<n>.R<n>` cell; element shape; name parse exits 2 (ADR-23 usage error) |
+| 14 | minor | `branch` stage id, CC-12 scope | applied | `branch` added; per-row CC-12 scope |
+| 15 | minor | per-lens comments never posted | applied | finish-pr posts deferred lens comments; conclusion finish-pr only (amends FR-19) |
+| 16 | minor | allowlist omissions | applied | read-only git entries; `hooks_active` and `wait_log` replace `git config` and `tail` polling (a `tail … logs/*` entry would read any file through `..`) |
+| 17 | minor | unmarked PRD deviations | applied | inline markers plus the Amendments table |
+| 18 | minor | ci-fixer unmapped targets | applied | verified the seven targets exist in `tpl/Makefile`; rule + CC-21 |
+| 19 | minor | ADR-23 vs stage-planning exit 2 | applied | exception stated and bats-asserted |
+| 20 | critical | fixtures ignored by root `.gitignore` | applied | verified with `git check-ignore -v`; `dot-claude/`, `dot-bmalph/`, rename map, CC-29 |
+| 21 | major | pip vs PEP 668 in CI | applied | `pipx` (repository precedent) plus version probes |
+| 22 | major | `--exec` ineffective on existing profile | applied | explicit `--run-in-container` rewrites only that key (`UPDATED:`); bats case |
+| 23 | minor | comparison baseline unclear | applied | baseline = what `--refresh` writes; bats case |
+| 24 | minor | output literals differ from PRD | applied | PRD literals `docs-check citations`, `sync flavour` adopted (no amendment needed); hints and fixtures marked |
+| 25 | minor | finish-pr counters (duplicate of 13) | applied | same encoding; escalation field `<n>/<cap> (<label>)` |
+| 26 | minor | CC-30 sibling sources | applied | verified each name's sibling file; explicit mapping |
+| 27 | minor | human-gated label mapping | applied | shared `human_gated_labels` parser, fallback `NEXT:`, pr-state cases |
+| 28 | minor | workflow name (duplicate of 7) | applied | see 7 |
+| 29 | minor | background mechanism unspecified | applied | see 6; never `&`, `nohup` or bare `sleep` |
+| 30 | minor | read-only git not allowed | applied | see 16 |
+| 31 | minor | `curl` entry is not a boundary | applied | superseded by 41: no `curl` entry at all; NFR-10 row updated |
+| 32 | minor | clock helpers ignore `SDLC_NOW_EPOCH` | applied | python3 formatting; cache name parse (exit 2, see 13) |
+| 33 | minor | readme loses the old slug on re-run | applied | `identity_slug` in `source.json` (merged with 52) |
+| 34 | minor | 72-character cap unenforceable | applied | cap dropped (verified: template regex and `cog.toml` impose none) |
+| 35 | minor | prompt-quality jobs missing from done criteria | applied | verified `prompt-quality.yml`; Constraints and release gate; J1–J11 referenced |
+| 36 | minor | php token rule too broad | applied | AC-1.4 ERE; paths are not tokens |
+| 37 | minor | L11, counts, rule-3 rationale | applied | verified `check_descriptions.py` and `check-docs.sh:401-414` |
+| 38 | major | template deny rules are prefix rules | applied | verified `tpl/.claude/settings.json`; plugin deny entries G1–G9; commits as `git commit -F` so no subject can trip them |
+| 39 | major | `gh:*` and `bmalph:*` too broad | applied | exact bmalph entries; deny H1–H8, B1–B2 |
+| 40 | major | `scripts/*` matches `..` paths | applied | 14 per-executable entries + quoted variants; bats assertion |
+| 41 | major | `curl` pattern approves any URL/option | applied | `http_probe` dispatcher (17 names total); curl entries removed |
+| 42 | major | make variables fake gates | applied | verified no `override` in `gates.mk`; closed set, deny M1–M10, CC-36; space-hyphen subjects validated by `is_commit_subject` to avoid self-denial |
+| 43 | major | profile remaps a gate key | applied | V12 (SUBST keys included as identity); `PROFILE_CHANGED` escalation with bootstrap exemption |
+| 44 | major | global/stale `core.hooksPath` skips hooks | applied | `hooks_active` definition; `foreign` escalates; amends FR-2/FR-4/FR-18 |
+| 45 | major | breaker self-recovers on resume | applied | verified `circuit_breaker.sh`/`ralph_loop.sh`; ADR-10c pre-check, attempt classification, `BLOCKED_STAGE` |
+| 46 | major | no protected-change check before commits | applied | ADR-25 `protected_changes` + `make validate-configuration base_ref=<sha> CONFIG_CHANGE_APPROVED=` |
+| 47 | major | redaction incomplete | applied | verified reference patterns; exact `re` list, `redact --in/--out`, ADR-27 body files |
+| 48 | major | ADR-8 env (duplicate of 3) | applied | see 3 |
+| 49 | major | forgeable marker comments | applied | verified php `--bot-login`; ADR-26 author filter in resume, poster and gate; gate marker named |
+| 50 | major | zero checks faked as no CI | applied | verified `react/pr-state.sh:213-215`; profile list counts for `missing`; D8 narrowed |
+| 51 | major | publish agent commits in the foreground | applied | untyped-agent exception, FR-1 background form, prefix, log, 1,800 s budget, greps |
+| 52 | major | readme slug (duplicate of 33) | applied | see 33 |
+| 53 | major | `--in-place` can destroy history | applied | clean-tree and not-customized guards; root-commit bundle list; `SKIP: specs (modified since import)` |
+| 54 | major | untrusted threads steer the resolver | applied | `author_association`; trusted-author rule; untrusted threads stay unresolved |
+| 55 | minor | "never apply labels" contradiction | applied | reworded to the two approval labels |
+| 56 | minor | new-context `base_ref` fallback | applied | explicit `base_ref=` and `CONFIG_CHANGE_APPROVED=` everywhere |
+| 57 | minor | ai-review-loop can edit the tree | applied | `claude_run_isolated` + `git status --porcelain` check |
+| 58 | minor | merge-settings safety gaps | applied | `check-ignore` requirement, fail-closed shared mode, manual cleanup documented |
+| 59 | minor | read-only git entries | applied | see 16 |
+| 60 | minor | background wrapper approval unverified | applied | marked **[unverified]** with the fallback form; R1 updated |
+| 61 | minor | S3 commit before hooks | applied | stated as by design; S11/S13/S14 require active hooks; CC-18 |
+| 62 | minor | `--dest` could clear `target/` | applied | dest under `_bmad-output/`, removal limited to `*.md` at depth 1; bats case |
