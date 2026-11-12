@@ -79,7 +79,7 @@ Each journey names its trigger, the flow, the success outcome, the failure branc
 - **Trigger:** `/rs-sdlc "Add invoice cancellation: a cancelled invoice cannot be paid; expose REST and GraphQL."` on a configured service (profile committed, governance markers present, `_bmad/` present).
 - **Flow:** stage 0 setup-check → stage 1 issue (`ISSUE_URL:`, `ISSUE_NUMBER: 42`) → branch `feat/42-invoice-cancellation` → stage 2 plan (bundle `specs/42-invoice-cancellation/`, `## Constraints` with the literal `(#42)`, readiness "ready", regex clean, commit `docs(#42): add planning bundle 42-invoice-cancellation`) → stage 3 implement (hooks active, `stage-planning-artifacts.sh`, `bmalph implement`, `bmalph run --driver claude-code --no-dashboard` as the only implementer, whose sessions fan independent stories out under the `## Constraints` dispatch rule (DB-free targets in parallel, one serialized DB verify step), per-story commits `feat(#42): story 1.2 <title>`, post-loop subject check, final `make tests-with-coverage`) → stage 4 review (28/28 triage verdicts, code-quality + FR/NFR lenses, security lens because `*.rs` changed, gate loop to zero new findings, `fix(#42): address review gate iteration <n> findings`) → stage 5 QA (`make start`, `/ping` 200 `pong`, `/api/health` 204, REST + GraphQL probes from the committed snapshots and every acceptance criterion, `## Verdict: PASS`) → stage 6 finish-pr (title `feat(#42): add invoice cancellation`, sensor loop to READY).
 - **Success:** `=== SDLC RUN REPORT ===` with `result: SUCCESS`, stage table, artifacts (issue URL, `SPECS_DIR:`, PR URL), `degrade_notes`.
-- **Failure branches:** QA FAIL → back to stage 3 with the QA report (bounded); Ralph circuit breaker trips → terminal `ESCALATED`; a needed protected change (layer allow-list, `deny.toml` exception, equivalent mutant) → `ESCALATED` naming `approved-config-change` and `ALLOW_PROTECTED_CONFIG_EDIT=1`; a breaking contract change → `ESCALATED` naming `approved-breaking-change`; Docker unreachable at QA with `make.start` mapped → `ESCALATED` with `make doctor` output.
+- **Failure branches:** QA FAIL → back to stage 3 with the QA report (bounded); Ralph circuit breaker trips → terminal `ESCALATED`; a needed protected change (layer allow-list, `deny.toml` exception, equivalent mutant) → `ESCALATED` naming `approved-config-change` and `ALLOW_PROTECTED_CONFIG_EDIT=1`; a breaking contract change → `ESCALATED` naming `approved-breaking-change`; Docker unreachable at implement, review or QA (with `make.start` mapped) → `ESCALATED` with `make doctor` output (D2); container mode with a stack that cannot start → `ESCALATED` (D25).
 - **Reveals:** FR-1, FR-2, FR-3, FR-15 to FR-30, FR-32 to FR-39, FR-44; NFR-3 to NFR-6, NFR-9, NFR-10, NFR-12.
 
 ### J3 — New bounded context (Alex)
@@ -576,10 +576,10 @@ Implements one story end to end (code + tests) following the executed skills. In
 
 #### FR-24 — `code-quality-reviewer` (opus) (G2, G4)
 
-Reviews the diff against executed-skill rules and the quality rows of FR-19; never runs `-fix` targets (`static-analysis-fix`, `unused-dependencies-fix` are `ask` rules); never proposes a suppression, exclusion or lowered limit. Outputs findings `file:line | severity | rule | root-cause fix` and per-row PASS/FAIL/NOT RUN with the `quality.*` key. Tools `Read, Glob, Grep, Bash` (read-only make targets).
+Reviews the diff against executed-skill rules and the quality rows of FR-19; never runs `-fix` targets (`static-analysis-fix`, `unused-dependencies-fix` are `ask` rules); never proposes a suppression, exclusion or lowered limit. Outputs findings `file:line | severity | rule | root-cause fix` and one PASS/FAIL/NOT RUN verdict per FR-19 row Q1–Q15, each with its `quality.*` key or "binary gate, no quality key". Tools `Read, Glob, Grep, Bash` (read-only make targets).
 
 **Acceptance criteria**
-- AC-24.1 `component-counts.bats`: rows named; prohibition list present; `tools` lacks `Write`/`Edit`.
+- AC-24.1 `component-counts.bats`: rows Q1–Q15 named with the same row → key mapping as FR-19 (byte-identical to `rs-sdlc-review.md`); prohibition list present; `tools` lacks `Write`/`Edit`.
 
 #### FR-25 — `fr-nfr-reviewer` (opus) (G2)
 
@@ -848,8 +848,8 @@ Rules: a degrade path never loops and never fakes a pass. The Outcome column use
 
 | # | Condition | Detection | Behaviour (degrade note in quotes) | Outcome |
 | --- | --- | --- | --- | --- |
-| D1 | Make target absent | `make.<key>: null` | skip the check, `not run (capability absent)`; "make.<key> absent" | SUCCESS-WITH-REPORT |
-| D2 | Docker unreachable | `docker info` ≠ 0 before a Docker-dependent stage, or the message `This target needs a reachable container engine (docker).` in a make log (make's exit is 2 for any failure, so the message classifies, never the code) | Docker is a precondition of `ci-preflight`, `ci-tests`, `ci-contracts`, `ci-mutation`, `ci-delivery` and of the review rows Q6, Q9, Q10, Q11, Q13, Q14 and the `security-auditor` lanes `make.secrets_scan`/`make.image_scan`; affected targets are recorded `not run (no Docker)` and never fed to remediation; "Docker unreachable: <targets> not run" + `make doctor` output | ESCALATED (implement, review, QA with `make.start` mapped, new-context C12) / SUCCESS-WITH-REPORT (new-service S8 `NOT RUN (no Docker)`, which stops before S11 per J1) |
+| D1 | Make target absent | `make.<key>: null` | skip the check, `not run (capability absent)`; "`make.<key>` absent" | SUCCESS-WITH-REPORT |
+| D2 | Docker unreachable | `docker info` ≠ 0 before a Docker-dependent stage, or the message `This target needs a reachable container engine (docker).` in a make log (make's exit is 2 for any failure, so the message classifies, never the code) | Docker is a precondition of `ci-preflight`, `ci-tests`, `ci-contracts`, `ci-mutation`, `ci-delivery` and of the review rows Q6, Q9, Q10, Q11, Q13, Q14 and the `security-auditor` lanes `make.secrets_scan`/`make.image_scan`; affected targets are recorded `not run (no Docker)` and never fed to remediation; "Docker unreachable: `<targets>` not run" + `make doctor` output | ESCALATED (implement, review, QA with `make.start` mapped, new-context C12) / SUCCESS-WITH-REPORT (new-service S8 `NOT RUN (no Docker)`, which stops before S11 per J1) |
 | D3 | No host toolchain and container mode off | `cargo` absent, `capabilities.run_in_container: false` | targets `not run (no toolchain)`; "no toolchain: re-run /rs-sdlc-setup --exec container or install the toolchain" | SUCCESS-WITH-REPORT (setup step 8) / ESCALATED (loop stages, new-context) |
 | D4 | `.claude/settings.json` protected | `protected-config.toml` lists it | allowlist to `.claude/settings.local.json` or printed; "allowlist written to .claude/settings.local.json (settings.json is protected)" | SUCCESS-WITH-REPORT |
 | D5 | Dirty tracked tree at setup | `git status --porcelain --untracked-files=no` | `DEGRADED: make bmalph-setup not run (tracked changes: <files>)` + `NEXT:`; a later stage 0 halts until `_bmad/` exists (D19 wording) | SUCCESS-WITH-REPORT (setup) / ESCALATED (stage 0 while `_bmad/` is absent) |
@@ -860,7 +860,7 @@ Rules: a degrade path never loops and never fakes a pass. The Outcome column use
 | D10 | `gh` unreachable | `gh api` fails | resume from the cache; review/QA re-run when the cache is absent ("gh unreachable: resumed from cache" / "no durable record: review and QA re-run"); issue and finish-pr cannot run | ESCALATED (issue, finish-pr) / SUCCESS-WITH-REPORT (resume) |
 | D11 | No PR at review time | `gh pr view` fails | gate `--advisory`; conclusion deferred to finish-pr; "gate advisory: no PR" | SUCCESS-WITH-REPORT |
 | D12 | Comment publishing off | `capabilities.publish_pr_comments: false` | findings stay in ledgers; "comments not published (capability off)" | SUCCESS-WITH-REPORT |
-| D13 | `ask` rule in a headless run | target in the template's `ask` list (lifecycle and `-fix` targets, never a gate) | `not run (ask rule)`, never reported as passed; "<target> not run (ask rule)" | SUCCESS-WITH-REPORT |
+| D13 | `ask` rule in a headless run | target in the template's `ask` list (lifecycle and `-fix` targets, never a gate) | `not run (ask rule)`, never reported as passed; "`<target>` not run (ask rule)" | SUCCESS-WITH-REPORT |
 | D14 | Call may exceed 600 s | any `make` call outside the FR-1 foreground allowlist, `git commit`/`git push`, `bmalph run` | background + poll ≤ 30 s (designed path, no note) | SUCCESS |
 | D15 | claude without `--restricted` | `claude_supports_restricted` false | preflight FAIL; gate fails fast with upgrade remediation | ESCALATED |
 | D16 | kislyuk `yq` on host | `!!seq` probe fails | python3 + PyYAML backend (transparent substitution, no note) | SUCCESS |
@@ -1160,3 +1160,51 @@ Non-blocking; each has a recommended default.
 | RG | FR-1, FR-13, FR-30, FR-32, FR-33, FR-40 to FR-43 | NFR-2, NFR-7, NFR-8, NFR-10, NFR-11, NFR-15, NFR-16 |
 
 Reverse check: FR-1 to FR-44 and NFR-1 to NFR-16 each map to at least one goal; each goal G1–G4 and RG maps to at least one FR and one NFR; each journey J1–J6 maps to at least one FR. Brief scope items 1–13 map to FR-40 (1), FR-1/FR-3/FR-15–FR-21 (2, 8), FR-22–FR-29 (3), FR-30–FR-32 (4), FR-5–FR-7 (5), FR-4/FR-8–FR-10 (6), FR-11–FR-14 (7), FR-33–FR-39 (9), FR-44 (10), FR-41/FR-42 (11), FR-43 (12); item 13 (this bundle) needs no FR.
+
+## Revision Log
+
+Reviser pass of 2026-11-12 over 41 findings (in the order received). Each was verified against the cited source (template at `3e0bd3e`, `react/`, `php/`, bmalph `dist/`, `tools/plugin-quality`); duplicates were applied once and are marked so. 41 applied, 0 rejected.
+
+| # | Finding (location) | Verdict | Rationale / where applied |
+| --- | --- | --- | --- |
+| 1 | `ci.human_gated` vs `ci.required_checks` name spaces (PA-6, FR-5, J5, D9, AC-21.3) | applied | verified `change-control.yml:53,72,88` job names; both keys now hold check names; AC-6.5 derives the three names, AC-21.3/AC-38.1 match a spaced name |
+| 2 | required checks of service-added workflows ignored (FR-5, FR-6) | applied | verified `repository-settings.md` intro and `check-invariants.sh:686-690`; union with `docs/repository-settings-service.md` in FR-5/FR-6/FR-38, fixture in FR-42, AC-6.5 |
+| 3 | quality rows ↔ 12 keys mismatch (FR-19, NFR-4, AC-19.1) | applied | explicit Q1–Q15 table with keys or "binary gate"; image-scan and smoke keys assigned to the security lane / finish-pr; exit string now "every quality row PASS" (FR-3, FR-19) |
+| 4 | `validate_context_name` narrower than xtask (FR-14, FR-33, G3(a), FR-5) | applied | verified `scaffold.rs` `existing`/`listed` and `name/tests.rs:80-84`; four live-tree rules, group `service` accepted, AC-14.1 cases, `bounded_contexts` derivation in FR-6 (includes `internal/health-check`) |
+| 5 | `--exec` choice lost (FR-4, FR-6, FR-11, PA-12) | applied | `--exec` on setup, `--run-in-container` on the generator, precedence flag > profile > detection, S12 pass-through, AC-6.6 |
+| 6 | background rule a closed list; no container precondition (FR-1, FR-4 step 8, NFR-14) | applied | verified `Makefile:441-446` and the hooks; foreground allowlist rule (PA-21), container precondition, AC-1.1 assertion, D25 |
+| 7 | AC-5.2 dotted-key scan hits file names | applied | anchored namespace regex with file-extension exclusion stated in AC-5.2 |
+| 8 | invariant (e) uses a fixed literal (AC-8.2, G1(c), G4(d), K7, NFR-13) | applied | verified `check-invariants.sh:50-51,711-735`; AC-8.2 asserts absence of the literal and of the fixture name; FR-8 note |
+| 9 | workflow path has no bmalph step (FR-44, AC-3.4, AC-18.2, G2(c)) | applied | hybrid of option (b): workflow stages with `bmalph implement`, executes Ralph's fix plan via `rust-implementer`, never `bmalph run`, degrade note; scenarios replaced; G2(c) names `resume_point` (PA-17, PA-18) |
+| 10 | stage-3 dispatcher undefined (FR-18, FR-16) | applied | verified bmalph `context.js:89-91`; `bmalph run` is the only implementer; dispatch rule carried by `## Constraints` and checked in `.ralph/PROJECT_CONTEXT.md`; AC-16.1, AC-18.1 |
+| 11 | FR-12 usage vs FR-13 fallback; missing defaults | applied | optional source and `--description`; defaults for description, owner, intro, version; AC-12.6 |
+| 12 | AC-3.1 says 9 run-report fields | applied | 8 fields named in FR-3 and AC-3.1 |
+| 13 | status vocabulary vs run report; `DEGRADED` outcome | applied | mapping rule in FR conventions and FR-3; D5 → SUCCESS-WITH-REPORT; `FR_NFR_REVIEWER` enum stays PASS/FAIL, degrade emits FAIL (FR-1, FR-25) |
+| 14 | AC-1.4 token lacks left boundary | applied | ERE with line-start/whitespace/backtick/`(` boundary and a path negative case |
+| 15 | AC-2.3 forbids the required `git config --get core.hooksPath` | applied | read-only form exempt; writes still forbidden (P4) |
+| 16 | NFR-12 harness measurement untestable | applied | static decision-guide assertion (AC-19.3, AC-32.2); body count moved to K10 |
+| 17 | FR-27 Gate column holds gate ids, not targets | applied | verified `make-targets.md` gate table; two-step mapping, `none` → reported, never fixed |
+| 18 | S9 `set-version.sh` runs host cargo | applied | verified `set-version.sh:31-32`; container route after S8, `NEXT:` without Docker; FR-1 exception (4) |
+| 19 | G2(c) fresh-clone claim vs D10 | applied | qualified "when `gh` is reachable"; fresh-clone `resume_point` case (AC-3.4 a) |
+| 20 | observability "backend selector" key undefined | applied | row 17 → "—": template is tracing-only (`Cargo.toml:82-83`), no `observability_emf` |
+| 21 | bash 4.0 / no git floor below template's doctor | applied | verified `doctor.sh:103-106`; bash ≥ 4.4 and git ≥ 2.30 in FR-10, NFR-7, NFR-16, product surface, AC-10.1 |
+| 22 | wrong rationale "rule 3 reads only tracked files" | applied | verified `check-docs.sh:406` tests on-disk existence; reworded to CI sees only committed files |
+| 23 | Docker-less hosts break five of six stages (D2, G3(c), FR-14, J3, FR-19) | applied | verified `REQUIRE_DOCKER` recipes and `ensure-deps`; D2 rewritten as precondition with message-based classification; G3(c) and C12 restated (PA-19) |
+| 24 | human-gated job ids; plural label sentence missed | applied | duplicate of 1 plus both sentence forms parsed (FR-6, PA-6) |
+| 25 | sync-flavour deletion breaks docs-check rule 3 | applied | reproduced on a template copy; citation-repair sub-step in FR-12, AC-12.5, fixture, Open Question 6 (PA-20) |
+| 26 | 13 rows vs 12 keys (FR-19, AC-24.1) | applied | duplicate of 3; AC-24.1 now pins the Q1–Q15 mapping; openapi/graphql diff and Spectral are review rows |
+| 27 | grep ACs contradict required content | applied | single pattern set P1–P7 in NFR-5 shared by AC-2.3 and NFR-4; `request-ai-reviews.sh --force` and the read-only hooksPath form exempt |
+| 28 | container mode never starts `app`; raw calls lack container route | applied | duplicate of 6 plus container route for raw calls, `tomllib` fallback for the protected list, D25, FR-4 step 8 condition |
+| 29 | `make logs` never exits | applied | verified `Makefile:165-167`; bounded `docker compose logs --tail 200` only; `make.logs` dropped (55 keys, PA-16); token test in AC-26.1 |
+| 30 | make never returns exit 1; lock fault writes files | applied | verified `cli.rs:180,184` and make's status 2; stderr-prefix classification with `git status --porcelain` (FR-14, J3) |
+| 31 | `bounded_contexts` derivation undefined; stale profile | applied | duplicate of 4: derivation in FR-6, validation reads the live tree, stale-profile case in AC-14.1 |
+| 32 | review remediation actor unnamed | applied | verified php `sdlc-review.md`; `rust-implementer` via Task, command commits; pinned in AC-19.1 |
+| 33 | mutation row ambiguous at iteration 1 | applied | iteration-1 branch-diff rule, carried verdict `not run (not changed)` (FR-19, PA-13) |
+| 34 | FR-27 gate ids; service settings document | applied | duplicate of 17 and 2 |
+| 35 | L25 flags `persistence.rs` | applied | verified `check_references.py` regex and 3 tracked files; backticked in `docs/profile-schema.md` (FR-41), lint assertion in AC-31.1 |
+| 36 | nextest call lacks `env -u DATABASE_URL` | applied | verified `Makefile:41`; FR-1 exception (3) spelled as the template's `TEST_ENV` |
+| 37 | AC-3.1 field count | applied | duplicate of 12 |
+| 38 | PA-12 `--exec` undefined path | applied | duplicate of 5 |
+| 39 | QA never migrates a running stack; liveness flaps | applied | verified compose `migrate` service and watchexec CMD; `make migrate` before probes, bounded double-200 liveness poll (FR-20, AC-20.2, NFR-6) |
+| 40 | Ralph vs fan-out actor; workflow without bmalph | applied | duplicate of 9 and 10; wording pinned in AC-18.1 and AC-44.1 |
+| 41 | NFR-3 outcome words outside the vocabulary | applied | Outcome column normalised to SUCCESS / SUCCESS-WITH-REPORT / ESCALATED with notes in Behaviour; AC asserts the closed set |
