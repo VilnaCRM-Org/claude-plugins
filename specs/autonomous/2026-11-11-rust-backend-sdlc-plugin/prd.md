@@ -542,7 +542,7 @@ Argument hint `[SPECS_DIR | #N]`. `allowed-tools: ["Bash", "Read", "Glob", "Grep
 Argument hint `[--pr <n>]`.
 
 - PR create/edit: title `<type>(#N): <subject>` pre-validated (FR-2), issue number never from the PR number; body from `.github/pull_request_template.md` H2s with `Closes #N`, the spec bundle path, the QA verdict, and "targets run / not run (reason)"; draft state left as the user set it.
-- Sensor loop on `pr-state.sh --json --required-checks <ci.required_checks> --reviewers <review.reviewers> --human-gated-checks <ci.human_gated>`: `FIX` → `ci-fixer` for failing non-human-gated checks (counter **A** `ci_fix` ≤ 5) and `pr-comment-resolver` for unresolved threads (counter **B** `comment_resolution` ≤ 5), fixes committed and pushed by the command; `GATE` → `fr-nfr-gate.sh --pr <n> --iteration <c>` on the clean head (counter **C** ≤ 3); `REQUEST` → `request-ai-reviews.sh` (counter **R** ≤ 3); `WAIT` → `pr-state.sh --wait-seconds 540` (counter **W** ≤ 6); `BLOCKED` (closed, merged, conflicting, or a failing human-gated check) → `ESCALATED` naming the label or conflict; `READY` → a second snapshot confirms, then the deferred review conclusion is posted once and `## Status: ALL-GREEN`.
+- Sensor loop on `pr-state.sh --json --required-checks <ci.required_checks> --reviewers <review.reviewers> --human-gated-checks <ci.human_gated>` (both check lists are GitHub check names, e.g. `Protected configuration`, passed comma-separated and matched exactly against check-run `name`): `FIX` → `ci-fixer` for failing non-human-gated checks (counter **A** `ci_fix` ≤ 5) and `pr-comment-resolver` for unresolved threads (counter **B** `comment_resolution` ≤ 5), fixes committed and pushed by the command; `GATE` → `fr-nfr-gate.sh --pr <n> --iteration <c>` on the clean head (counter **C** ≤ 3); `REQUEST` → `request-ai-reviews.sh` (counter **R** ≤ 3); `WAIT` → `pr-state.sh --wait-seconds 540` (counter **W** ≤ 6); `BLOCKED` (closed, merged, conflicting, or a failing human-gated check) → `ESCALATED` naming the label or conflict; `READY` → a second snapshot confirms, then the deferred review conclusion is posted once and `## Status: ALL-GREEN`.
 - Degrades: no CI provider or zero checks → `## Status: SKIPPED-NO-CI`, `SUCCESS-WITH-REPORT`; `review.reviewers: []` and `review.coderabbit: false` → `ai-review-loop.sh` findings become the comment source; `capabilities.publish_pr_comments: false` → findings stay in ledgers.
 - Never applies or removes labels; never re-runs human-gated checks; `gh run rerun --failed` at most once per head (by `ci-fixer`).
 
@@ -551,7 +551,7 @@ Exit string: CI green + FR/NFR gate green on the head SHA + 0 unresolved review 
 **Acceptance criteria**
 - AC-21.1 `component-counts.bats`: counters A/B/C/W/R with their caps and labels `ci_fix`/`comment_resolution` identical in `rs-sdlc-finish-pr.md`, `agents/ci-fixer.md` and `docs/sdlc-loop.md` (X10); the verdict-dispatch table covers all six verdicts.
 - AC-21.2 harness (FR-44, `rs-sdlc-pr-until-green`): FIX → GATE → READY path succeeds; a failing human-gated check ends BLOCKED/`ESCALATED` naming the label; 6 WAITs exhaust W and escalate.
-- AC-21.3 `pr-state.bats`: a failing check listed in `--human-gated-checks` yields `BLOCKED`, not `FIX`.
+- AC-21.3 `pr-state.bats`: a gh payload whose failing check run is named `Protected configuration` (a name with a space), with `--human-gated-checks 'Protected configuration,OpenAPI breaking changes,GraphQL breaking changes'`, yields `BLOCKED` naming `approved-config-change`, not `FIX`; the same payload with the job id `validate-configuration` in the list does not match (pins the name space); a failing check from a service-added workflow listed in `--required-checks` yields `FIX`, never `READY`.
 
 ### Agents
 
@@ -583,10 +583,10 @@ Reviews the diff against executed-skill rules and the quality rows of FR-19; nev
 
 #### FR-25 — `fr-nfr-reviewer` (opus) (G2)
 
-Verifies every requirement id (`FR-12`, `FR12`, `NFR-3`, `G12` forms) of the bundle and of the Rust baseline catalog (FR-35) is implemented and tested, with evidence from test targets only; drives the gate loop to zero new findings; outputs a per-requirement PASS/FAIL matrix and `FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=<…>`. Tools `Read, Glob, Grep, Bash`.
+Verifies every requirement id (`FR-12`, `FR12`, `NFR-3`, `G12` forms) of the bundle and of the Rust baseline catalog (FR-35) is implemented and tested, with evidence from test targets only; drives the gate loop to zero new findings; outputs a per-requirement PASS/FAIL matrix and `FR_NFR_REVIEWER: iteration=<n>/5 new_findings=<n> verdict=<PASS|FAIL>`. Degrade paths (bundle missing or empty, gate runner unavailable) emit `verdict=FAIL` with a `DEGRADED: <reason>` line and a concrete `blocking_finding` (e.g. `SPECS MISSING: <path>` → re-run `/rs-sdlc-plan`), fail-closed like FR-35; there is no `DEGRADED` verdict. Tools `Read, Glob, Grep, Bash`.
 
 **Acceptance criteria**
-- AC-25.1 `component-counts.bats`: the four id forms, the baseline ids and the handle format present.
+- AC-25.1 `component-counts.bats`: the four id forms, the baseline ids and the handle format with the closed enum `PASS|FAIL` present; the agent file contains no `verdict=DEGRADED`.
 
 #### FR-26 — `qa-manual-tester` (sonnet) (G2)
 
