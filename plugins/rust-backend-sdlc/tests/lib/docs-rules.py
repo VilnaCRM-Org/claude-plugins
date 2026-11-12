@@ -335,7 +335,8 @@ class FileScan:
                 self.pending = False
         if is_item:
             if not self.in_list:
-                self.in_list, self.list_start, self.list_gates = True, self.number, set()
+                self.in_list, self.list_start = True, self.number
+                self.list_gates = set()
             self.pending = False
 
     def end_list(self):
