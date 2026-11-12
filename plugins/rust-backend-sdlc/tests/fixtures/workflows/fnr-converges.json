@@ -1,0 +1,141 @@
+{
+  "args": "42-invoice-totals --base origin/main --pr '#7' --summary 'invoice totals rounded half-even per currency'",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "status": "OK",
+        "profile_valid": true,
+        "blocked": null,
+        "base": "origin/main",
+        "files": [
+          "crates/billing/invoicing/domain/src/invoice.rs",
+          "crates/billing/invoicing/domain/src/invoice/tests.rs",
+          "crates/billing/invoicing/application/src/create_invoice.rs",
+          "crates/service/src/routes.rs"
+        ],
+        "specs_present": true,
+        "slug": "42-invoice-totals",
+        "spec_files": [
+          "prd.md",
+          "architecture.md",
+          "epics.md"
+        ],
+        "pr": 7,
+        "pr_requirements": true,
+        "linked_issues": [
+          42
+        ],
+        "clean": true,
+        "head_matches": true,
+        "summary": "invoice totals rounded half-even per currency",
+        "notes": []
+      }
+    },
+    {
+      "match": "^fr-nfr-reviewer ",
+      "reply": [
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=1/5 new_findings=3 verdict=FAIL",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 1 --pr 7",
+          "status_posted": "STATUS_POSTED: failure abc1234",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": [
+            {
+              "id": "FRN-1",
+              "severity": "High",
+              "file": "crates/billing/invoicing/domain/src/invoice.rs",
+              "line": 57,
+              "rule": "FR-3",
+              "summary": "totals round half-up; FR-3 demands half-even per currency and no test covers the tie case",
+              "status": "open"
+            },
+            {
+              "id": "FRN-2",
+              "severity": "Medium",
+              "file": "crates/billing/invoicing/application/src/create_invoice.rs",
+              "line": 31,
+              "rule": "FR-4",
+              "summary": "a zero-line invoice is accepted; FR-4 requires a 422 problem document and no test asserts it",
+              "status": "open"
+            },
+            {
+              "id": "FRN-3",
+              "severity": "Low",
+              "file": null,
+              "line": null,
+              "rule": "NFR-BASE-OBS",
+              "summary": "the create-invoice handler opens no tracing span carrying request_id",
+              "status": "open"
+            }
+          ]
+        },
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=2/5 new_findings=1 verdict=FAIL",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 2 --pr 7",
+          "status_posted": "STATUS_POSTED: failure abc1234",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": [
+            {
+              "id": "FRN-4",
+              "severity": "High",
+              "file": "crates/billing/invoicing/domain/src/invoice/tests.rs",
+              "line": 12,
+              "rule": "FR-3",
+              "summary": "the half-even fix lacks the negative-amount tie case FR-3 names",
+              "status": "open"
+            }
+          ]
+        },
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=3/5 new_findings=0 verdict=PASS",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 3 --pr 7",
+          "status_posted": "STATUS_POSTED: success abc1234",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": []
+        }
+      ]
+    },
+    {
+      "match": "^fix:",
+      "reply": [
+        {
+          "status": "IN_PROGRESS",
+          "files_modified": 2,
+          "tests_status": "PASSING",
+          "recommendation": "serialized verify step: the DB-backed keys"
+        },
+        {
+          "status": "IN_PROGRESS",
+          "files_modified": 2,
+          "tests_status": "PASSING",
+          "recommendation": "serialized verify step: the DB-backed keys"
+        },
+        {
+          "status": "COMPLETE",
+          "files_modified": 2,
+          "tests_status": "PASSING",
+          "recommendation": "re-run the FR/NFR gate"
+        }
+      ]
+    },
+    {
+      "match": "^verify ",
+      "reply": {
+        "status": "COMPLETE",
+        "files_modified": 0,
+        "tests_status": "PASSING",
+        "recommendation": "re-run the FR/NFR gate"
+      }
+    }
+  ]
+}

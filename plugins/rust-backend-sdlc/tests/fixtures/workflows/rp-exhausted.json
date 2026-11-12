@@ -1,0 +1,20 @@
+{"args": {"slug": "12-invoice-due-date", "maxIterations": 9}, "replies": [
+ {"match": "^scope$", "reply": {"profile_valid": true, "blocked": null, "base": "3e0bd3e5f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0", "files": ["crates/billing/invoice/domain/src/invoice.rs"], "protected": [], "specs_dir": "specs/12-invoice-due-date/", "pr": 34, "execute_skills": ["code-review", "quality-standards"], "not_applicable": [{"skill": "database-migrations", "reason": "no migration changed"}], "degrade_notes": []}},
+ {"match": "^code-quality-reviewer$", "reply": [
+  {"status": "OK", "verdict": "FAIL", "findings": [{"id": "CQ-1", "severity": "High", "file": "crates/billing/invoice/domain/src/invoice.rs", "line": 10, "rule": "Q2", "summary": "indexing on the line items", "status": "open"}]},
+  {"status": "OK", "verdict": "FAIL", "findings": [{"id": "CQ-2", "severity": "High", "file": "crates/billing/invoice/domain/src/invoice.rs", "line": 20, "rule": "Q2", "summary": "unwrap on the currency parse", "status": "open"}]},
+  {"status": "OK", "verdict": "FAIL", "findings": [{"id": "CQ-3", "severity": "High", "file": "crates/billing/invoice/domain/src/invoice.rs", "line": 30, "rule": "Q2", "summary": "panic on an empty invoice", "status": "open"}]},
+  {"status": "OK", "verdict": "FAIL", "findings": [{"id": "CQ-4", "severity": "High", "file": "crates/billing/invoice/domain/src/invoice.rs", "line": 40, "rule": "Q2", "summary": "as cast on the line count", "status": "open"}]},
+  {"status": "OK", "verdict": "FAIL", "findings": [{"id": "CQ-5", "severity": "High", "file": "crates/billing/invoice/domain/src/invoice.rs", "line": 50, "rule": "Q2", "summary": "expect on the due date", "status": "open"}]}
+ ]},
+ {"match": "^fr-nfr-reviewer$", "reply": {"status": "OK", "verdict": "PASS", "note": "FR_NFR_NEW_FINDINGS: 0", "findings": []}},
+ {"match": "^security-auditor:all$", "reply": {"status": "OK", "verdict": "PASS", "findings": []}},
+ {"match": "^verify:", "reply": {"refuted": false, "reason": "real"}},
+ {"match": "^fix:", "reply": [
+  {"status": "COMPLETE", "files_modified": 2, "tests_status": "PASSING", "recommendation": "none"},
+  {"status": "COMPLETE", "files_modified": 2, "tests_status": "PASSING", "recommendation": "none"},
+  {"status": "COMPLETE", "files_modified": 2, "tests_status": "PASSING", "recommendation": "none"},
+  {"status": "COMPLETE", "files_modified": 2, "tests_status": "PASSING", "recommendation": "none"},
+  {"status": "IN_PROGRESS", "files_modified": 1, "tests_status": "FAILING", "recommendation": "the due-date parse still panics on an empty value"}
+ ]}
+]}

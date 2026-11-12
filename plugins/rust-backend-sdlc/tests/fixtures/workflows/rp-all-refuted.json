@@ -1,0 +1,7 @@
+{"args": {"slug": "12-invoice-due-date", "base": "origin/main"}, "replies": [
+ {"match": "^scope$", "reply": {"profile_valid": true, "blocked": null, "base": "3e0bd3e5f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0", "files": ["crates/billing/invoice/domain/src/invoice.rs"], "protected": [], "specs_dir": "specs/12-invoice-due-date/", "pr": null, "execute_skills": ["code-review", "quality-standards"], "not_applicable": [{"skill": "database-migrations", "reason": "no migration changed"}], "degrade_notes": []}},
+ {"match": "^code-quality-reviewer$", "reply": {"status": "OK", "verdict": "FAIL", "note": null, "degrade_notes": [], "findings": [{"id": "CQ-1", "severity": "Medium", "file": "crates/billing/invoice/domain/src/invoice.rs", "line": 42, "rule": "code-review/naming", "summary": "rename total to total_due", "status": "open", "evidence": "fn total", "fix": "rename the method"}]}},
+ {"match": "^fr-nfr-reviewer$", "reply": {"status": "OK", "verdict": "PASS", "note": "FR_NFR_NEW_FINDINGS: 0", "degrade_notes": [], "findings": []}},
+ {"match": "^security-auditor:all$", "reply": {"status": "OK", "verdict": "PASS", "note": null, "degrade_notes": [], "findings": []}},
+ {"match": "^verify:", "reply": {"refuted": true, "reason": "a naming preference, not a rule of an executed skill"}}
+]}

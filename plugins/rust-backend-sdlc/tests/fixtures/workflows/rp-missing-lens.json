@@ -1,0 +1,6 @@
+{"args": "12-invoice-due-date", "replies": [
+ {"match": "^scope$", "reply": {"profile_valid": true, "blocked": null, "base": "3e0bd3e5f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0", "files": ["crates/billing/invoice/domain/src/invoice.rs"], "protected": [], "specs_dir": "specs/12-invoice-due-date/", "pr": 34, "execute_skills": ["code-review", "quality-standards"], "not_applicable": [{"skill": "database-migrations", "reason": "no migration changed"}], "degrade_notes": []}},
+ {"match": "^code-quality-reviewer$", "reply": {"status": "OK", "verdict": "PASS", "findings": []}},
+ {"match": "^fr-nfr-reviewer$", "reply": null},
+ {"match": "^security-auditor:all$", "reply": {"status": "OK", "verdict": "PASS", "findings": []}}
+]}
