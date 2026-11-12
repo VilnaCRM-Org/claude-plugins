@@ -590,17 +590,17 @@ Verifies every requirement id (`FR-12`, `FR12`, `NFR-3`, `G12` forms) of the bun
 
 #### FR-26 — `qa-manual-tester` (sonnet) (G2)
 
-Black-box QA per FR-20; verdicts only from observed HTTP behaviour; forbidden reads `crates/`, `tests/`, `features/`, `xtask/`, `migrations/`, `.sqlx/`, `Cargo.toml`; allowed reads: profile, spec bundle, committed snapshots, service logs (`make logs` or `docker compose logs --no-log-prefix app`); loopback URLs only (`service.base_url`), URL-first `curl` form. Tools `Bash, Read` only.
+Black-box QA per FR-20; verdicts only from observed HTTP behaviour; forbidden reads `crates/`, `tests/`, `features/`, `xtask/`, `migrations/`, `.sqlx/`, `Cargo.toml`; allowed reads: profile, spec bundle, committed snapshots, service logs through the one bounded form `docker compose logs --no-log-prefix --tail 200 app` (FR-1 raw-call exception (5); allowed by the template's `Bash(docker compose logs:*)` rule; `make logs` follows forever and is never used); loopback URLs only (`service.base_url`), URL-first `curl` form. Tools `Bash, Read` only.
 
 **Acceptance criteria**
-- AC-26.1 L33 0 findings; `component-counts.bats`: `tools` equals `Bash, Read`; forbidden-read list present.
+- AC-26.1 L33 0 findings; `component-counts.bats`: `tools` equals `Bash, Read`; forbidden-read list present; the bounded log form present; the token `make logs` appears in no file under `agents/` or `commands/` (except a prohibition line).
 
 #### FR-27 — `ci-fixer` (sonnet) (G2)
 
-Turns failing required checks green by root-cause fixes; maps check names to make targets from `docs/repository-settings.md` (Job → Gate columns); human-gated checks (`ci.human_gated`) reported separately and never "fixed"; RUSTSEC advisory without a fixed version → `ESCALATED` (a `deny.toml` exception is protected); one `gh run rerun --failed` per head for infrastructure flakes; outputs a per-iteration check table and `## Status: ALL-GREEN|FIXES-READY|SKIPPED-NO-CI|BLOCKED`; counter label `ci_fix`. Tools `Read, Edit, Write, Glob, Grep, Bash`.
+Turns failing required checks green by root-cause fixes; maps a failing check to make targets in two steps: (1) check name → gate id(s) from the "Gate" cell of its row in `docs/repository-settings.md` or `docs/repository-settings-service.md` (e.g. `Tests and coverage` → `G11, G12, G14`); (2) gate id → target from the gate table of `docs/make-targets.md` (e.g. `| G1 | format-check |`); a check whose Gate cell is `none` (e.g. the `changes` jobs) or whose gate has no target row gets no target and is reported with its log URL, never "fixed"; human-gated checks (`ci.human_gated`: `Protected configuration`, `OpenAPI breaking changes`, `GraphQL breaking changes` today) reported separately and never "fixed"; RUSTSEC advisory without a fixed version → `ESCALATED` (a `deny.toml` exception is protected); one `gh run rerun --failed` per head for infrastructure flakes; outputs a per-iteration check table and `## Status: ALL-GREEN|FIXES-READY|SKIPPED-NO-CI|BLOCKED`; counter label `ci_fix`. Tools `Read, Edit, Write, Glob, Grep, Bash`.
 
 **Acceptance criteria**
-- AC-27.1 `component-counts.bats`: status values, `ci_fix` label, human-gated rule, rerun-once rule present.
+- AC-27.1 `component-counts.bats`: status values, `ci_fix` label, human-gated rule, rerun-once rule, and the two-step check → gate id → target mapping naming both documents and the `none` rule present.
 
 #### FR-28 — `pr-comment-resolver` (sonnet) (G2, G4)
 
@@ -611,7 +611,7 @@ Drives every review thread to resolved: a code fix or a reasoned reply, never si
 
 #### FR-29 — `security-auditor` (opus) (G2, G4)
 
-Static lanes `make.check_security`, `make.secrets_scan`, `make.image_scan` (when Docker), clippy findings; when `make.check_security` is null, its built-in static review lane only (degrade note). Families: injection (sqlx dynamic SQL taint; `query!` macros vs string-built SQL), BOLA/IDOR, mass assignment (`deny_unknown_fields`), DoS (body limit, timeouts, GraphQL depth/complexity), information disclosure (problem details, logs), secrets in code/config, dependency advisories; memory safety recorded N/A (`unsafe_code = "forbid"`); dynamic probing only on the loopback base URL. Outputs ledger-format findings with severity. Tools `Read, Glob, Grep, Bash`.
+Static lanes `make.check_security`, `make.secrets_scan` (Docker), `make.image_scan` (Docker; judged against `quality.max_image_vulnerabilities_high_critical`, the review-time enforcement of that key, FR-19), clippy findings; a Docker-dependent lane with Docker unreachable is `not run (no Docker)` (D2); when `make.check_security` is null, its built-in static review lane only (degrade note). Families: injection (sqlx dynamic SQL taint; `query!` macros vs string-built SQL), BOLA/IDOR, mass assignment (`deny_unknown_fields`), DoS (body limit, timeouts, GraphQL depth/complexity), information disclosure (problem details, logs), secrets in code/config, dependency advisories; memory safety recorded N/A (`unsafe_code = "forbid"`); dynamic probing only on the loopback base URL. Outputs ledger-format findings with severity. Tools `Read, Glob, Grep, Bash`.
 
 **Acceptance criteria**
 - AC-29.1 `component-counts.bats`: lanes, families and the loopback boundary present; `tools` lacks `Write`/`Edit`.
@@ -638,7 +638,7 @@ Static lanes `make.check_security`, `make.secrets_scan`, `make.image_scan` (when
 | 14 | `documentation-sync` | same | yes | — |
 | 15 | `implementing-ddd-architecture` | same | — | — |
 | 16 | `load-testing` | same | yes | `capabilities.load_testing` |
-| 17 | `observability-instrumentation` | same | — | backend selector, not skip-gated |
+| 17 | `observability-instrumentation` | same | — | — (tracing-based, no backend selector: the template ships only `tracing` + `tracing-subscriber` JSON logs, `tpl/Cargo.toml:82-83`; php's `capabilities.observability_emf` has no Rust counterpart) |
 | 18 | `quality-standards` | same | yes | — |
 | 19 | `query-performance-analysis` | same | — | `persistence.engine` |
 | 20 | `security-audit` | same | — | `capabilities.dynamic_security_testing` |
@@ -658,14 +658,14 @@ Static lanes `make.check_security`, `make.secrets_scan`, `make.image_scan` (when
 | Skill | Must cover (each verified as present by a token test) |
 | --- | --- |
 | `service-scaffolding` | S1–S14; `is_template` probe and clone-and-push; OpenAPI title = `<description> API` → regenerate snapshot before the first PR; checkout directory = Compose project; version only via `scripts/set-version.sh`; keep the example context, removal as a guided story (edit the three docs-check rule-3 lines, update `.templatesyncignore`, replace — never delete — GraphQL roots, regenerate snapshots); sync flavour; local mode `base_ref=HEAD` until `origin/main` exists |
-| `bounded-context-scaffolding` | name rules and reserved names; C1–C12 with evidence targets; `workspace.dsl` one component per crate and one relationship per dependency edge; `[workspace.dependencies]` at first use (cargo-deny `unused = "deny"`); composition-root wiring points incl. `Adapters { .. }` literals and contract-pinning tests; context gate set; branch rule; in-loop story-1 variant |
+| `bounded-context-scaffolding` | name rules, reserved context names and xtask's existence rule (live tree, any group, `crates/<c>`, member path or package name); C1–C12 with evidence targets; `workspace.dsl` one component per crate and one relationship per dependency edge; `[workspace.dependencies]` at first use (cargo-deny `unused = "deny"`); composition-root wiring points incl. `Adapters { .. }` literals and contract-pinning tests; context gate set; branch rule; in-loop story-1 variant |
 | `rust-error-handling` | domain `thiserror` enums with `property_path()`/`code()`; one application error enum per context; `BusError` → `Problem` types `about:blank`, `/problems/validation-failed` (`violations[]`), `/problems/dependency-unavailable` (`failures[]`); `?` propagation; banned `unwrap`/`expect`/`panic`/indexing/`as`; no type named `Error`; `#[expect]` policy |
 | `async-runtime-safety` | no blocking calls in async code (`std::fs`, `std::thread::sleep`, sync DNS) → `tokio` equivalents or `spawn_blocking`; no lock guard held across `.await`; cancellation safety and timeouts; `#[async_trait]` delegation to inherent `async fn`; `Clock`/`UuidGenerator` ports; `Arc::clone(&x)` |
 | `dependency-policy` | `deny.toml` lanes (advisories, licences, bans, sources), `cargo shear`, per-layer allow-lists in `architecture.toml` (changes are protected → escalate), domain dependency whitelist, RUSTSEC without fix → escalate, diagnosis with `cargo tree -i`, workspace inheritance |
 | `configuration-management` | configuration through `crates/service/src/{cli,config}.rs` (clap), `.env`/`.env.test`, never `std::env::var`; a `docs/environment.md` row for every `?=` variable and environment variable (docs-check rule 5); secrets never committed; `scripts/with-env.sh` |
 
 **Acceptance criteria**
-- AC-31.1 `component-counts.bats`: each skill contains its listed tokens; each passes FR-30's format checks.
+- AC-31.1 `component-counts.bats`: each skill contains its listed tokens; each passes FR-30's format checks; `lint_all.py` reports 0 L25 findings on them, which requires `persistence.rs` and `architecture.toml` (the two template file names that match L25's prefix regex without a whitelisted extension) to be backticked in `docs/profile-schema.md` (FR-41).
 
 #### FR-32 — Meta-guides and applicability triage (G2, RG)
 
@@ -674,7 +674,7 @@ Static lanes `make.check_security`, `make.secrets_scan`, `make.image_scan` (when
 
 **Acceptance criteria**
 - AC-32.1 `lint_all.py`: 0 findings for L5, L30.
-- AC-32.2 `component-counts.bats`: the decision guide has a row for each of the 28 skill names and the verbatim sentence.
+- AC-32.2 `component-counts.bats`: the decision guide has a row for each of the 28 skill names and the verbatim sentence; its change class "workflow/docs-only" marks ≤ 6 skills `EXECUTE` (NFR-12 release-gate form).
 
 ### Review, gate and PR scripts
 
@@ -682,11 +682,11 @@ Static lanes `make.check_security`, `make.secrets_scan`, `make.image_scan` (when
 
 - Skeleton for every script: `#!/usr/bin/env bash`, `set -euo pipefail`, `SCRIPT_DIR`, `source "$SCRIPT_DIR/lib/common.sh"`; a header with `Usage:` and exit codes; `--help` prints it and exits 0; logs to stderr with prefix `[rust-sdlc]`, handles and data to stdout; executing `common.sh` directly exits 64.
 - Writes: `mktemp` in the target directory + `mv`; refuse symlinked or non-regular targets; never write outside documented paths.
-- Functions: `log_info`, `log_warn`, `log_error`, `die`; `have_yq` (mikefarah only: `printf 'a: [1]\n' | yq '.a | type'` must print `!!seq`; cached in `_SDLC_YQ_OK`; `SDLC_FORCE_PYTHON_YAML=1` forces PyYAML); `yaml_get`, `yaml_get_list`, `yaml_has`, `yaml_squote`; `json_get` (jq, else python3); `toml_get`, `toml_get_list`, `toml_has` (python3 `tomllib`); `profile_path` (`.claude/rust-sdlc.yml`); `resolve_plugin_root`; `resolve_repo_slug`; `default_branch`; `is_kebab`, `is_slug`, `is_semver`, `is_commit_subject`, `derive_issue_number`, `validate_context_name`; `strip_zeros`, `num_gt`, `num_lt`; `redact`; `claude_run_once` (`claude -p … --output-format json --permission-mode acceptEdits --max-turns 30`, one retry on transport failure), `claude_run_isolated`, `claude_supports_restricted`.
+- Functions: `log_info`, `log_warn`, `log_error`, `die`; `have_yq` (mikefarah only: `printf 'a: [1]\n' | yq '.a | type'` must print `!!seq`; cached in `_SDLC_YQ_OK`; `SDLC_FORCE_PYTHON_YAML=1` forces PyYAML); `yaml_get`, `yaml_get_list`, `yaml_has`, `yaml_squote`; `json_get` (jq, else python3); `toml_get`, `toml_get_list`, `toml_has` (python3 `tomllib`); `profile_path` (`.claude/rust-sdlc.yml`); `resolve_plugin_root`; `resolve_repo_slug`; `default_branch`; `is_kebab`, `is_slug`, `is_semver`, `is_commit_subject`, `derive_issue_number`, `validate_context_name <group> <context> [ROOT]` (the four FR-14 rules over the live tree: `toml_get_list` of `[workspace].members`, each member's `package.name`, `crates/<c>` and `crates/*/<c>` directories; returns 0, or 1 with one `REFUSED:` line); `resume_point [--cache FILE]` (reads the `<!-- rust-sdlc-state -->` table from stdin or the cache JSON, applies the PA-7 rules with `git merge-base --is-ancestor` and `git rev-parse HEAD`, prints `RESUME_STAGE: <stage>`, one `DONE_STAGE: <stage> <head_sha7> <iteration>` per stage still valid and `COUNTERS: <stage>=<n>,…`; never calls `gh`); `strip_zeros`, `num_gt`, `num_lt`; `redact`; `claude_run_once` (`claude -p … --output-format json --permission-mode acceptEdits --max-turns 30`, one retry on transport failure), `claude_run_isolated`, `claude_supports_restricted`.
 - Shared names kept byte-identical with siblings: `SDLC_FORCE_PYTHON_YAML`, `SDLC_LEDGER_DIR`, commit-status context `BMAD FR/NFR Review Gate`; new variables use the `RUST_SDLC_` prefix.
 
 **Acceptance criteria**
-- AC-33.1 `common-lib.bats`: one or more cases per function; a kislyuk `yq` stub is rejected by `have_yq`; YAML helpers pass with both backends (parity cases); `toml_*` read the fixture `Cargo.toml`/`rust-toolchain.toml`; executing the library exits 64.
+- AC-33.1 `common-lib.bats`: one or more cases per function (`validate_context_name`: AC-14.1; `resume_point`: AC-3.4 a); a kislyuk `yq` stub is rejected by `have_yq`; YAML helpers pass with both backends (parity cases); `toml_*` read the fixture `Cargo.toml`/`rust-toolchain.toml`; executing the library exits 64.
 - AC-33.2 `component-counts.bats`: every `scripts/*.sh` has the skeleton, a `Usage:` header, and answers `--help` with exit 0; CI `shellcheck -x` 0 findings.
 
 #### FR-34 — `scripts/ai-review-loop.sh` (G2)
@@ -728,13 +728,13 @@ Usage `post-review-findings.sh <lens> [--pr N] [--file F]... [--dry-run] [--json
 
 #### FR-38 — `scripts/pr-state.sh` (G2)
 
-Usage `pr-state.sh [--pr N] [--reviewers LIST] [--required-checks LIST] [--human-gated-checks LIST] [--wait-seconds S] [--interval-seconds S] [--wait-verdicts LIST] [--json]`; defaults from `review.reviewers`, `ci.required_checks`, `ci.human_gated`.
+Usage `pr-state.sh [--pr N] [--reviewers LIST] [--required-checks LIST] [--human-gated-checks LIST] [--wait-seconds S] [--interval-seconds S] [--wait-verdicts LIST] [--json]`; defaults from `review.reviewers`, `ci.required_checks`, `ci.human_gated`. Check lists are comma-separated GitHub check names (spaces allowed, e.g. `Protected configuration`), matched exactly and case-sensitively against check-run `name`; an explicit `--required-checks` narrows the CI scope to that list (react semantics, `react/scripts/pr-state.sh:198-212`), which is why `ci.required_checks` must include the service document's rows (FR-6).
 
 - One snapshot per read (PR, reviews, issue comments, unresolved threads via `get-pr-comments.sh`); reviewer states `APPROVED NOT_APPROVED REQUESTED STALE NONE SKIPPED` against the current head; the `BMAD FR/NFR Review Gate` status judged on its own (`success failure pending missing`).
 - Exactly one verdict, priority `BLOCKED > FIX > GATE > REQUEST > WAIT > READY`; a failing human-gated check → `BLOCKED` with `NEXT:` naming the label from `docs/repository-settings.md`. Output `KEY: value` lines + `VERDICT:` + `NEXT:`, or `--json` `{pr, repo, head, state, draft, mergeable, ci, fr_nfr, unresolved, reviewers, human_gated, notes, verdict, next}`. Exit 0 whenever a snapshot was rendered, 1 on usage or gh failure. `SDLC_NOW_EPOCH` overrides now (tests).
 
 **Acceptance criteria**
-- AC-38.1 `pr-state.bats` (≥ 30 cases): each verdict from gh fixtures; priority ordering; human-gated BLOCKED; wait mode bounded by `--wait-seconds`; JSON shape; missing gate status → GATE.
+- AC-38.1 `pr-state.bats` (≥ 30 cases): each verdict from gh fixtures; priority ordering; human-gated BLOCKED by check name (AC-21.3); a check name containing spaces parsed from `--required-checks` and matched against the payload's check-run names; wait mode bounded by `--wait-seconds`; JSON shape; missing gate status → GATE.
 
 #### FR-39 — `scripts/request-ai-reviews.sh` (G2)
 
@@ -757,7 +757,7 @@ Usage `request-ai-reviews.sh [--pr N] [--reviewers LIST] [--full] [--min-interva
 
 | Doc | Required content |
 | --- | --- |
-| `docs/profile-schema.md` | every FR-5 key (type, R/O, default, source, consumers); detection-source table (backticks `architecture.toml`, `clippy.toml`, `deny.toml`, `protected-config.toml`); tighten-only table (NFR-4); "null means absent; omitted means error"; annotated `# profile-example` profile |
+| `docs/profile-schema.md` | every FR-5 key (type, R/O, default, source, consumers); detection-source and cited-file table (backticks `architecture.toml`, `persistence.rs`, `clippy.toml`, `deny.toml`, `protected-config.toml`, `docs/repository-settings-service.md`; `architecture.toml` and `persistence.rs` are the template file names L25 would otherwise flag); tighten-only table (NFR-4); "null means absent; omitted means error"; annotated `# profile-example` profile |
 | `docs/setup-walkthrough.md` | install → `/rs-sdlc-setup` → single commit; protected settings and `.claude/settings.local.json`; dirty-tree degrade; re-run after template sync (J6) |
 | `docs/sdlc-loop.md` | stage table with byte-identical exit strings; counters A/B/C/W/R; state comment format; resume rules; run report; escalation block |
 | `docs/permissions.md` | plugin `claude -p` calls use `acceptEdits`; gate session isolation; allowlist entries and `--with-qa-network`; Ralph's `CLAUDE_PERMISSION_MODE="bypassPermissions"` default in `.ralph/.ralphrc` stated truthfully, never changed by the plugin; template guard hooks still fire; deny > ask > allow; headless `ask` rules recorded `not run (ask rule)` |
@@ -773,7 +773,7 @@ Usage `request-ai-reviews.sh [--pr N] [--reviewers LIST] [--full] [--min-interva
 #### FR-42 — Test suites and fixtures (RG)
 
 - 16 suites (Scope inventory table), hermetic: no network, stubs on `PATH`, all writes under `$BATS_TEST_TMPDIR`.
-- Fixtures: `tests/fixtures/rust-repo/` stub (`acme/billing-service`): virtual workspace with `crates/billing/invoice/{domain,application,infrastructure}`, `crates/shared/*`, `crates/internal/health-check/*`, `crates/service`, `tests/support`, `tests/e2e`, `xtask/Cargo.toml`, `rust-toolchain.toml`, `architecture.toml`, `clippy.toml`, `deny.toml`, `protected-config.toml`, `make/gates.mk`, `make/service.mk`, a Makefile with `##` targets and `CI_*_TARGETS`, `workspace.dsl`, `.env`, `.github/workflows/*.yml` incl. both sync workflows with `TEMPLATE_REPOSITORY: acme/rust-template`, `.github/openapi-spec/spec.yaml`, `.github/graphql-spec/spec`, `.coderabbit.yaml`, `bmalph/config.json`, `.claude/settings.json`, copies of the template's `.yamllint.yml`, `.prettierrc.yml`, `.markdownlint-cli2.yaml`, `_typos.toml`; Markdown files (`README.md`, `CHANGELOG.md`, `CLAUDE.md`, `AGENTS.md` with verification markers, `docs/new-service.md`, `docs/repository-settings.md`, `.github/ISSUE_TEMPLATE/feature_request.md`, `.github/pull_request_template.md`) and any `_bmad`/`.ralph` directories generated at runtime (heredocs or `*.md.tpl`); profiles (golden + one invalid variant per rule); ledgers; gh JSON payloads; stubs `tests/fixtures/bin/{claude,gh,bmalph,cargo,make,docker,yq}` driven by `STUB_*` variables with call logs.
+- Fixtures: `tests/fixtures/rust-repo/` stub (`acme/billing-service`): virtual workspace with `crates/billing/invoice/{domain,application,infrastructure}`, `crates/shared/*`, `crates/internal/health-check/*`, `crates/service`, `tests/support`, `tests/e2e`, `xtask/Cargo.toml`, `rust-toolchain.toml`, `architecture.toml`, `clippy.toml`, `deny.toml`, `protected-config.toml`, `make/gates.mk`, `make/service.mk`, a Makefile with `##` targets and `CI_*_TARGETS`, `workspace.dsl`, `.env`, `.github/workflows/*.yml` incl. both sync workflows with `TEMPLATE_REPOSITORY: acme/rust-template`, `.github/openapi-spec/spec.yaml`, `.github/graphql-spec/spec`, `.coderabbit.yaml`, `bmalph/config.json`, `.claude/settings.json`, copies of the template's `.yamllint.yml`, `.prettierrc.yml`, `.markdownlint-cli2.yaml`, `_typos.toml`; `.templatesyncignore`; Markdown files (`README.md`, `CHANGELOG.md`, `CLAUDE.md`, `AGENTS.md` with verification markers, `docs/new-service.md`, `docs/repository-settings.md` reproducing the template's seven workflow job tables and its "Labels to create" table verbatim (singular and plural sentence forms), an optional `docs/repository-settings-service.md` variant adding one `Required: yes` row, `docs/make-targets.md` with the gate table, `docs/extension-seams.md` citing both `.github/TEMPLATE_SYNC_APP.md` and `.github/TEMPLATE_SYNC_PAT.md`, the two guides themselves, `.github/ISSUE_TEMPLATE/feature_request.md`, `.github/pull_request_template.md`) and any `_bmad`/`.ralph` directories generated at runtime (heredocs or `*.md.tpl`); profiles (golden + one invalid variant per rule); ledgers; gh JSON payloads; stubs `tests/fixtures/bin/{claude,gh,bmalph,cargo,make,docker,yq}` driven by `STUB_*` variables with call logs.
 
 **Acceptance criteria**
 - AC-42.1 CI `bats` job runs all suites with 0 failures; `find plugins/rust-backend-sdlc -name '*.md' -path '*fixtures*'` returns nothing; L29 0 findings.
@@ -795,12 +795,12 @@ Usage `request-ai-reviews.sh [--pr N] [--reviewers LIST] [--full] [--min-interva
 - `workflows/rs-sdlc-fr-nfr-review.js` (leaf): scope (bundle, PR sources, clean tree, head match) → gate loop ≤ 5 via `fr-nfr-gate.sh` → advisory mode when the tree is dirty or not the PR head.
 - `workflows/rs-sdlc-review-panel.js` (leaf): scope + triage, parallel lenses (code-quality, FR/NFR, security with `securityFamilies: ['all']`), 3 refuters per finding, fixes grouped by the first three path segments (`crates/<group>/<context>`), ≤ 5 iterations, Rust fix prohibitions, agent types `rust-backend-sdlc:<agent>`.
 - `workflows/rs-sdlc-pr-until-green.js`: sensor loop Snapshot → Request → Wait → Fix → Gate → Publish with counters fix 5, wait 6, request 3, gate 3; `onGate: 'nested' | 'return'` (default `'nested'` only when top-level); accepts `carry: {counters, journal, degrade_notes}`; publish commits `fix(#N): …` with issue derivation per FR-2; hooks on.
-- `workflows/rs-sdlc-feature.js`: setup check → plan resolution → layer-first implementation rounds (DB-free parallel, serialized verify) → review panel → gate → QA (`make start`, REST/GraphQL/health probes) → PR → `pr-until-green` with `onGate: 'return'`; on a `GATE` result it runs `rs-sdlc-fr-nfr-review` itself, publishes, and re-enters with `carry` (feature-owned gate counter ≤ 3). No path nests `workflow()` deeper than one level; every nested call site escalates gracefully with the manual command line when resolution fails (A12).
+- `workflows/rs-sdlc-feature.js`: setup check → plan resolution → **staging**: `stage-planning-artifacts.sh "$SPECS_DIR"` + `bmalph implement` (never `--force`) and the same two-part `.ralph/PROJECT_CONTEXT.md` check as FR-18 step 2 → layer-first implementation rounds that execute the stories of Ralph's fix plan (`.ralph/@fix_plan.md`, read-only) through `rust-implementer` agents (DB-free parallel, serialized verify; reply schema `status: COMPLETE | IN_PROGRESS | BLOCKED`, `BLOCKED` → `ESCALATED`; rounds ≤ 5) → review panel → gate → QA (`make start`, `make migrate`, REST/GraphQL/health probes) → PR → `pr-until-green` with `onGate: 'return'`; on a `GATE` result it runs `rs-sdlc-fr-nfr-review` itself, publishes, and re-enters with `carry` (feature-owned gate counter ≤ 3). The workflow **never runs `bmalph run`** (Ralph's own loop cannot be driven from inside a Workflow script, and two implementers would race): its report records `bmalph run: not used (workflow path)` as a degrade note, so a workflow run ends at best `SUCCESS-WITH-REPORT` for stage 3 (PA-17). It keeps no state comment: resume within a run is `carry`; resume across sessions is the command path (`/rs-sdlc <N>`, FR-3). No path nests `workflow()` deeper than one level; every nested call site escalates gracefully with the manual command line when resolution fails (A12).
 - Runtime constraints: `meta` is a pure literal; no `Date.now()`, `Math.random()` or argless `new Date()`.
-- `tests/lib/workflow-harness.mjs`: meta extraction, scenario-matched agent replies, mocked `workflow()`, and `--as-child` (any `workflow()` call throws). `tests/workflows.bats`: scenarios incl. those named in AC-3.4, AC-18.2, AC-19.2, AC-21.2, and a static call-graph test.
+- `tests/lib/workflow-harness.mjs`: meta extraction, scenario-matched agent replies, mocked `workflow()`, and `--as-child` (any `workflow()` call throws). `tests/workflows.bats`: scenarios incl. those named in AC-3.4 (b), AC-19.2, AC-21.2, and a static call-graph test. The harness asserts only behaviour the scripts implement (control flow over mocked replies); it never claims to observe what a real model loaded or how Ralph behaves.
 
 **Acceptance criteria**
-- AC-44.1 `workflows.bats` (≥ 45 cases) green; static call-graph depth ≤ 1; each leaf workflow passes under `--as-child`.
+- AC-44.1 `workflows.bats` (≥ 45 cases) green; static call-graph depth ≤ 1; each leaf workflow passes under `--as-child`; scenarios: an implementer `BLOCKED` reply → `ESCALATED` with 7 fields; the staging step's script calls appear in order (`stage-planning-artifacts.sh`, then `bmalph implement`) and no shell command the workflow issues or asks an agent to run invokes `bmalph run`; `carry` re-entry keeps counters; the report carries the `bmalph run: not used (workflow path)` degrade note.
 - AC-44.2 `component-counts.bats` pins 4 workflows; a grep test finds no `Date.now`, `Math.random` or `new Date()` in `workflows/`.
 
 ## Non-Functional Requirements
@@ -813,12 +813,12 @@ Usage `request-ai-reviews.sh [--pr N] [--reviewers LIST] [--full] [--min-interva
 | NFR-4 | Tighten-only bars: 12 threshold keys can only equal or tighten the template's values | 12 `validate-profile.bats` rejections, grep tests |
 | NFR-5 | Safety: never bypass hooks, force-push, edit protected config, reset the Ralph breaker, set `bypassPermissions`, or apply approval labels | grep/contract tests, merge-settings bats |
 | NFR-6 | Boundedness: every loop has a numeric cap; breach ends in the 7-field escalation | contract tests, harness, script tests |
-| NFR-7 | Portability: bash ≥ 4, Linux + macOS, mikefarah-yq-or-PyYAML, jq-or-python3, python3 `tomllib` | parity tests, banned-construct grep, shellcheck |
+| NFR-7 | Portability: bash ≥ 4.4, git ≥ 2.30, Linux + macOS, mikefarah-yq-or-PyYAML, jq-or-python3, python3 `tomllib` | parity tests, banned-construct grep, shellcheck |
 | NFR-8 | Testability: every script bats-covered per flag/exit code; ≥ 460 tests; lint/shellcheck/markdownlint 0 | CI jobs, floors table |
 | NFR-9 | Observability: every run ends with a report; state comment, ledgers, logs and targets-run list are produced | contract tests, ledger schema tests |
 | NFR-10 | Security: redaction before publishing, isolated gate session, least-privilege tools, loopback-only QA network, input validation | redaction/isolation/containment bats |
 | NFR-11 | Installability: install exposes 10/7/28/2 components; no `_bmad`/`.ralph` in the tree | `component-counts.bats`, L29 |
-| NFR-12 | Token cost: triage verdicts for 28/28 skills from frontmatter; ≤ 6 full bodies for a docs-only change | review report |
+| NFR-12 | Token cost: triage verdicts for 28/28 skills from frontmatter; ≤ 6 `EXECUTE` skills for a docs-only change class | `component-counts.bats` over the decision guide; measured body count in K10 |
 | NFR-13 | Template compatibility: every file written into a service passes its linters and docs-check rules 1–4 | K7 bats in CI |
 | NFR-14 | Runtime bounds: no foreground call > 600 s; script timings; hands-on and wall-clock targets | contract tests, bats timing, K9/K13 |
 | NFR-15 | Drift resistance: template lists read at runtime; shared names and counts pinned | grep tests, `component-counts.bats` |
@@ -844,36 +844,37 @@ Usage `request-ai-reviews.sh [--pr N] [--reviewers LIST] [--full] [--min-interva
 
 ### NFR-3 — Degrade matrix (G2)
 
-Rules: a degrade path never loops and never fakes a pass; it emits one degrade note; an **absent** capability ends `SUCCESS-WITH-REPORT`; a **mapped capability that cannot run** or a safety block ends `ESCALATED`.
+Rules: a degrade path never loops and never fakes a pass. The Outcome column uses only the stage-level status vocabulary of the FR conventions — `SUCCESS` (designed path, no degrade note), `SUCCESS-WITH-REPORT` (exit string met, exactly one degrade note emitted, shown in the Behaviour column) and `ESCALATED` (7-field block) — and maps to the run report as stated there (`SUCCESS-WITH-REPORT` → `result: SUCCESS` + a `degrade_notes` entry + `met: yes (degraded)`). An **absent** capability ends `SUCCESS-WITH-REPORT`; a **mapped capability that cannot run** or a safety block ends `ESCALATED`. Where one condition hits several stages, the outcome is given per stage.
 
-| # | Condition | Detection | Behaviour | Outcome |
+| # | Condition | Detection | Behaviour (degrade note in quotes) | Outcome |
 | --- | --- | --- | --- | --- |
-| D1 | Make target absent | `make.<key>: null` | skip the check, `not run (capability absent)` | SUCCESS-WITH-REPORT |
-| D2 | Docker unreachable, HOST target needed | `docker info` ≠ 0 | QA with `make.start` mapped → escalate with `make doctor` output; `ci-delivery` in gate sets → `not run (no Docker)`, left to PR CI; new-service S8 `NOT RUN (no Docker)` | ESCALATED (QA) / SUCCESS-WITH-REPORT (others) |
-| D3 | No host toolchain and container mode off | `cargo` absent, `capabilities.run_in_container: false` | setup docs-check degraded; implement/review gates → escalate | ESCALATED (loop) |
-| D4 | `.claude/settings.json` protected | `protected-config.toml` lists it | allowlist to `.claude/settings.local.json` or printed | normal (note) |
-| D5 | Dirty tracked tree at setup | `git status --porcelain --untracked-files=no` | `DEGRADED: make bmalph-setup not run …` + `NEXT:`; stage 0 halts until `_bmad/` exists | DEGRADED |
-| D6 | bmalph absent but installable | Makefile `bmalph-setup` + node ≥ 20 + npm | preflight WARN; floor re-checked after install | normal |
-| D7 | No AI reviewer | `review.reviewers: []`, `review.coderabbit: false` | `ai-review-loop.sh` is the comment source | SUCCESS-WITH-REPORT |
-| D8 | No CI | `ci.provider: null` or zero checks | `## Status: SKIPPED-NO-CI` | SUCCESS-WITH-REPORT |
-| D9 | Human-gated check failing | check ∈ `ci.human_gated` | BLOCKED naming the label; never labelled by an agent | ESCALATED |
-| D10 | `gh` unreachable | `gh api` fails | resume from cache; review/QA re-run when the cache is absent; issue and finish-pr cannot run | ESCALATED (issue, finish-pr) / note (resume) |
-| D11 | No PR at review time | `gh pr view` fails | gate `--advisory`; conclusion deferred to finish-pr | normal (note) |
-| D12 | Comment publishing off | `capabilities.publish_pr_comments: false` | findings stay in ledgers | normal (note) |
-| D13 | `ask` rule in a headless run | target in the template's `ask` list | `not run (ask rule)`, never reported as passed | note |
-| D14 | Call exceeds 600 s | known long target | background + poll | normal |
+| D1 | Make target absent | `make.<key>: null` | skip the check, `not run (capability absent)`; "make.<key> absent" | SUCCESS-WITH-REPORT |
+| D2 | Docker unreachable | `docker info` ≠ 0 before a Docker-dependent stage, or the message `This target needs a reachable container engine (docker).` in a make log (make's exit is 2 for any failure, so the message classifies, never the code) | Docker is a precondition of `ci-preflight`, `ci-tests`, `ci-contracts`, `ci-mutation`, `ci-delivery` and of the review rows Q6, Q9, Q10, Q11, Q13, Q14 and the `security-auditor` lanes `make.secrets_scan`/`make.image_scan`; affected targets are recorded `not run (no Docker)` and never fed to remediation; "Docker unreachable: <targets> not run" + `make doctor` output | ESCALATED (implement, review, QA with `make.start` mapped, new-context C12) / SUCCESS-WITH-REPORT (new-service S8 `NOT RUN (no Docker)`, which stops before S11 per J1) |
+| D3 | No host toolchain and container mode off | `cargo` absent, `capabilities.run_in_container: false` | targets `not run (no toolchain)`; "no toolchain: re-run /rs-sdlc-setup --exec container or install the toolchain" | SUCCESS-WITH-REPORT (setup step 8) / ESCALATED (loop stages, new-context) |
+| D4 | `.claude/settings.json` protected | `protected-config.toml` lists it | allowlist to `.claude/settings.local.json` or printed; "allowlist written to .claude/settings.local.json (settings.json is protected)" | SUCCESS-WITH-REPORT |
+| D5 | Dirty tracked tree at setup | `git status --porcelain --untracked-files=no` | `DEGRADED: make bmalph-setup not run (tracked changes: <files>)` + `NEXT:`; a later stage 0 halts until `_bmad/` exists (D19 wording) | SUCCESS-WITH-REPORT (setup) / ESCALATED (stage 0 while `_bmad/` is absent) |
+| D6 | bmalph absent but installable | Makefile `bmalph-setup` + node ≥ 20 + npm | preflight WARN; setup step 2 installs; floor re-checked after install (no capability lost, no degrade note) | SUCCESS |
+| D7 | No AI reviewer | `review.reviewers: []`, `review.coderabbit: false` | `ai-review-loop.sh` is the comment source; "no AI reviewer configured" | SUCCESS-WITH-REPORT |
+| D8 | No CI | `ci.provider: null` or zero checks | `## Status: SKIPPED-NO-CI`; "CI absent: CI half of the exit condition not verified" | SUCCESS-WITH-REPORT |
+| D9 | Human-gated check failing, or an intended breaking contract change without the label | check name ∈ `ci.human_gated` (check names, e.g. `Protected configuration`); review row Q14 | BLOCKED naming the label read from `docs/repository-settings.md`; never labelled by an agent | ESCALATED |
+| D10 | `gh` unreachable | `gh api` fails | resume from the cache; review/QA re-run when the cache is absent ("gh unreachable: resumed from cache" / "no durable record: review and QA re-run"); issue and finish-pr cannot run | ESCALATED (issue, finish-pr) / SUCCESS-WITH-REPORT (resume) |
+| D11 | No PR at review time | `gh pr view` fails | gate `--advisory`; conclusion deferred to finish-pr; "gate advisory: no PR" | SUCCESS-WITH-REPORT |
+| D12 | Comment publishing off | `capabilities.publish_pr_comments: false` | findings stay in ledgers; "comments not published (capability off)" | SUCCESS-WITH-REPORT |
+| D13 | `ask` rule in a headless run | target in the template's `ask` list (lifecycle and `-fix` targets, never a gate) | `not run (ask rule)`, never reported as passed; "<target> not run (ask rule)" | SUCCESS-WITH-REPORT |
+| D14 | Call may exceed 600 s | any `make` call outside the FR-1 foreground allowlist, `git commit`/`git push`, `bmalph run` | background + poll ≤ 30 s (designed path, no note) | SUCCESS |
 | D15 | claude without `--restricted` | `claude_supports_restricted` false | preflight FAIL; gate fails fast with upgrade remediation | ESCALATED |
-| D16 | kislyuk `yq` on host | `!!seq` probe fails | python3 + PyYAML backend | normal |
-| D17 | Template repository flag off | `is_template` false | clone-and-push + `NEXT:` advice | normal |
-| D18 | Sync flavour undecided (headless) | `--sync-flavour` omitted | `SKIP:` + `NEXT:`; G1(a) not met for that run | SUCCESS-WITH-REPORT |
+| D16 | kislyuk `yq` on host | `!!seq` probe fails | python3 + PyYAML backend (transparent substitution, no note) | SUCCESS |
+| D17 | Template repository flag off | `is_template` false | clone-and-push + `IMPORT_PENDING:` + `NEXT:` advice; "template flag off: imported by clone-and-push" | SUCCESS-WITH-REPORT |
+| D18 | Sync flavour undecided (headless) | `--sync-flavour` omitted | `SKIP:` + `NEXT:`; "sync flavour undecided"; G1(a) not met for that run | SUCCESS-WITH-REPORT |
 | D19 | Governance markers missing | marker grep | stage 0 / review halt with the setup wording | ESCALATED |
-| D20 | Not template-derived | A1 markers missing | preflight WARN; profile with null/false capabilities | SUCCESS-WITH-REPORT |
+| D20 | Not template-derived | A1 markers missing | preflight WARN; profile with null/false capabilities; "not template-derived: capabilities off" | SUCCESS-WITH-REPORT |
 | D21 | Workflow name unresolved | nested `workflow()` throws | escalate with the manual command line | ESCALATED |
-| D22 | Ralph circuit breaker trips | `---RALPH_STATUS---` / `.ralph/` state | stop; never reset | ESCALATED |
+| D22 | Ralph circuit breaker trips | `---RALPH_STATUS---` / `.ralph/` state | stop; never reset; no second `bmalph run` | ESCALATED |
 | D23 | Protected change needed (allow-list, `deny.toml` exception, equivalent mutant, budget) | implementer/reviewer finding | `BLOCKED` naming `approved-config-change` + `ALLOW_PROTECTED_CONFIG_EDIT=1` | ESCALATED |
-| D24 | Base ref unavailable (local repo) | `git rev-parse <ci.base_ref>` fails | `git fetch origin <default>` once; local-only → `base_ref=HEAD` with a note | note |
+| D24 | Base ref unavailable (local repo) | `git rev-parse <ci.base_ref>` fails | `git fetch origin <default>` once; local-only → `base_ref=HEAD`; "base ref unavailable: using HEAD" | SUCCESS-WITH-REPORT |
+| D25 | Container mode, `app` not running | `capabilities.run_in_container: true` and `docker compose ps --status running --quiet app` empty, or an exec fails with "service app is not running" | `make.start` in the background (≤ 900 s), one restart attempt; still down or Docker unreachable → targets `not run (no Docker)`; "container stack unavailable" + `make doctor` output | SUCCESS (stack started) / SUCCESS-WITH-REPORT (setup step 8; new-service, which prints the remaining steps as `NEXT:` and stops before S11) / ESCALATED (loop stages, new-context) |
 
-- **AC:** `docs/degrade-matrix.md` lists D1–D24 (bats asserts each id); `docs/testing/test-strategy.md` maps each row to ≥ 1 bats, contract or harness case.
+- **AC:** `docs/degrade-matrix.md` lists D1–D25 with exactly these outcome words (bats asserts each id and that the Outcome column uses only `SUCCESS`, `SUCCESS-WITH-REPORT`, `ESCALATED`); `docs/testing/test-strategy.md` maps each row to ≥ 1 bats, contract or harness case, including for D2 a `component-counts.bats` assertion that `rs-sdlc-review.md`, `rs-sdlc-implement.md` and `rs-sdlc-new-context.md` state the Docker precondition and the message-based classification, and for D25 the container-precondition sentence (AC-1.1).
 
 ### NFR-4 — Tighten-only bars (G4)
 
@@ -893,25 +894,37 @@ Rules: a degrade path never loops and never fakes a pass; it emits one degrade n
 | `quality.max_smoke_budget_breaches` | ceiling 0 (budget quoted from `tests/Load/config.json.dist`) | `smoke-load-tests` |
 
 - Floors above 100 and negative ceilings are invalid values; because the template's bars sit at their extremes, tighten-only means "equal to the template value" for all 12 keys.
-- No plugin component instructs `#[allow]`, an unjustified `#[expect]`, `#[mutants::skip]`, `#[coverage(off)]`, an `exclude_re`/`exclude_globs` entry in `.cargo/mutants.toml`, an `--ignore-filename-regex` coverage flag, or a `clippy.toml` limit change, except inside prohibition sentences.
-- **AC:** 12 rejection cases (AC-7.1); a bats grep over `commands/ agents/ skills/ workflows/` finds those tokens only on lines containing `never`, `Never`, `forbidden` or `decline`.
+- No plugin component instructs `#[allow]`, `#[mutants::skip]`, `#[coverage(off)]`, an `exclude_re`/`exclude_globs` entry in `.cargo/mutants.toml`, an `--ignore-filename-regex` coverage flag, or a `clippy.toml` limit change, except inside prohibition sentences. An `#[expect]` without `reason` cannot be detected by grep in prompt text and needs none: the template's static-analysis gate rejects it (gate G2 negative test "a suppression without a reason"), and `code-quality-reviewer`/`pr-comment-resolver` decline unjustified ones (FR-24, FR-28).
+- **AC:** 12 rejection cases (AC-7.1); pattern P6 of the NFR-5 set — the fixed-string token list `#[allow`, `#[mutants::skip]`, `#[coverage(off)]`, `exclude_re`, `exclude_globs`, `--ignore-filename-regex` — matches in `commands/ agents/ skills/ workflows/` only on prohibition lines (containing `never`, `Never`, `forbidden` or `decline`).
 
 ### NFR-5 — Safety (G2, G4)
 
 The plugin never: passes `--no-verify`/`-n` to `git commit` or `--no-verify` to `git push`; force-pushes; writes `core.hooksPath`; writes any file listed by `protected-config.toml` / `cargo xtask config-guard --list` (incl. `.claude/settings.json`); asks the user to set `ALLOW_PROTECTED_CONFIG_EDIT` as part of normal flow (only in escalation text); edits `.ralph/.ralphrc`, resets or restarts around a tripped Ralph breaker, or passes `--force` to `bmalph implement`; sets `bypassPermissions` (every plugin `claude -p` call uses `--permission-mode acceptEdits`; the gate uses the isolated restricted session); applies or removes `approved-config-change` / `approved-breaking-change`; creates secrets, variables or branch protection; edits an applied migration or hand-edits contract snapshots or `.sqlx/`; stops the shared dev stack in QA; runs DB-backed targets in parallel; discards uncommitted user changes (`git reset --hard`, `git checkout -- .`, `git clean -fd`); copies plugin skills or scripts into the service.
 
-- **AC:** bats grep tests over `commands/ agents/ skills/ workflows/ scripts/` for each forbidden construct (allowed only in prohibition lines); claude-stub argv assertions in `ai-review-loop.bats` and `fr-nfr-gate.bats`; `grep -rn bypassPermissions scripts/ commands/ agents/ workflows/` returns only prohibition lines; `merge-settings.bats` protected-file cases.
+- **Forbidden-pattern set** (single source for AC-2.3, NFR-4 and this AC; Python `re` syntax, evaluated with python3 for macOS/Linux parity, matched per line, case-sensitive):
+
+| Id | Pattern | Exemptions |
+| --- | --- | --- |
+| P1 | `git (commit\|push)\b.*(--no-verify\|\s-n\b)` | — |
+| P2 | `git push\b.*(--force\|--force-with-lease\|\s-f\b)` | — |
+| P3 | `git -c core\.hooksPath` | — |
+| P4 | `git config ((--local\|--global) )?core\.hooksPath` (a write; the read-only `git config --get core.hooksPath` does not match) | — |
+| P5 | `bmalph implement.*--force` | the option `--force` of `request-ai-reviews.sh` (its usage, parser and `WAIT` lines, FR-39) is not a git or bmalph construct and matches none of P1–P5 |
+| P6 | fixed strings `#[allow`, `#[mutants::skip]`, `#[coverage(off)]`, `exclude_re`, `exclude_globs`, `--ignore-filename-regex` | — |
+| P7 | `bypassPermissions` | `docs/permissions.md` (states Ralph's default truthfully) |
+
+- **AC:** `component-counts.bats` applies P1–P7 over `commands/ agents/ skills/ workflows/` (matches allowed only on prohibition lines containing `never`, `Never`, `forbidden` or `decline`) and over `scripts/` (matches allowed only in comment lines containing `never`); a positive case proves `request-ai-reviews.sh --force` and `git config --get core.hooksPath` match nothing; claude-stub argv assertions in `ai-review-loop.bats` and `fr-nfr-gate.bats`; `merge-settings.bats` protected-file cases.
 
 ### NFR-6 — Boundedness (G2, G3)
 
-- Stage guard `MAX_ITERATIONS=5`; finish-pr counters A 5, B 5, C 3, W 6 (each wait ≤ 540 s), R 3; workflow counters fix 5, wait 6, request 3, gate 3; `ai-review-loop.sh` default 5 (cap 20); setup `--refresh` retries 5; new-context remediation 5; new-service poll 10 × 3 s, bootstrap ≤ 60 min; `make start` wait ≤ 900 s.
+- Stage guard `MAX_ITERATIONS=5`; finish-pr counters A 5, B 5, C 3, W 6 (each wait ≤ 540 s), R 3; workflow counters fix 5, wait 6, request 3, gate 3; `ai-review-loop.sh` default 5 (cap 20); setup `--refresh` retries 5; new-context remediation 5; new-service poll 10 × 3 s, bootstrap ≤ 60 min; `make start` wait ≤ 900 s (QA boot and the FR-1 container precondition, one restart attempt); QA liveness poll ≤ 900 s; every backgrounded call polled at most every 30 s and bounded by its stage's budget (a poll that outlives the budget ends `ESCALATED` with the log tail).
 - Scripts contain no unbounded loop (`while true`, `until false`) without a numeric guard.
 - On any breach: the 7-field escalation block and a run report.
 - **AC:** contract tests for every cap (AC-1.1, AC-21.1); harness exhaustion scenarios (AC-19.2, AC-21.2); a bats grep finds no `while true` in `scripts/`; overflow inputs rejected (AC-7.1, AC-34.1).
 
 ### NFR-7 — Portability (RG, G1)
 
-- bash ≥ 4.0 (scripts check `BASH_VERSINFO` and exit 1 with a remediation on bash 3.2); Linux (GNU userland) and macOS (BSD userland); no `readlink -f`, `sed -i`, `date -d`, `grep -P` or `stat -c` (in-place edits go through `mktemp` + `mv` or python3); python3 is used for portable path, JSON, YAML and TOML work.
+- bash ≥ 4.4 and git ≥ 2.30, the floors of the template's `make doctor` that every gate runs behind (scripts check `BASH_VERSINFO` and exit 1 with the remediation "install Bash 4.4 or newer" below 4.4, e.g. macOS's bash 3.2); Linux (GNU userland) and macOS (BSD userland); no `readlink -f`, `sed -i`, `date -d`, `grep -P` or `stat -c` (in-place edits go through `mktemp` + `mv` or python3); python3 is used for portable path, JSON, YAML and TOML work.
 - YAML: mikefarah `yq` v4 (by `!!seq` probe) else python3 + PyYAML; JSON: jq else python3; TOML: python3 ≥ 3.11 `tomllib` only.
 - **AC:** backend-parity cases (`SDLC_FORCE_PYTHON_YAML=1`) in `common-lib.bats`, `validate-profile.bats`, `generate-profile.bats`, `ai-review-loop.bats`; a bats grep for the banned constructs over `scripts/`; CI `shellcheck -x` 0 findings.
 
@@ -948,17 +961,17 @@ The plugin never: passes `--no-verify`/`-n` to `git commit` or `--no-verify` to 
 ### NFR-12 — Token-cost bounds (G2)
 
 - Triage verdicts for 28/28 skills from frontmatter + decision guide; full bodies and reference files only for EXECUTE verdicts; one verdict per counterpart pair.
-- **AC:** the review report shows 28 verdicts; for a docs-only reference diff ≤ 6 skills load full bodies (recorded in the reference run and as a harness scenario).
+- **AC:** release gate (static): `component-counts.bats` asserts that `rs-sdlc-review.md` pins 28 verdicts (AC-19.1) and that the decision guide's "workflow/docs-only" change class marks ≤ 6 skills `EXECUTE` (AC-19.3, AC-32.2). Post-release: the reference run (K10) records the number of full skill bodies loaded for a docs-only diff (target ≤ 6). The harness cannot observe which bodies a model loads, so it asserts nothing here.
 
 ### NFR-13 — Template compatibility of written files (G1, G4)
 
-- Files the plugin writes into a service pass the service's own tooling: `.claude/rust-sdlc.yml` → yamllint (template config) + `prettier --check`; `bmalph/config.json` → Prettier; `CLAUDE.md`, `AGENTS.md`, `README.md`, `CHANGELOG.md` → markdownlint-cli2 (template config) + typos; governance block → docs-check rules 1–4 and invariant (e).
+- Files the plugin writes into a service pass the service's own tooling: `.claude/rust-sdlc.yml` → yamllint (template config) + `prettier --check`; `bmalph/config.json` → Prettier; `CLAUDE.md`, `AGENTS.md`, `README.md`, `CHANGELOG.md` → markdownlint-cli2 (template config) + typos; governance block → docs-check rules 1–4 and invariant (e) (no literal `rust-service-template`, FR-8); docs after a sync-flavour deletion → docs-check rule 3 (FR-12 citation repair).
 - Plugin state lives only in git-ignored locations (`target/rust-sdlc/`, `_bmad-output/planning-artifacts/`, `.claude/settings.local.json`); bundles under `specs/` (excluded from the template's linters); nothing written into `.claude/skills/` or `scripts/`.
 - **AC:** K7 cases in `generate-profile.bats`, `inject-governance.bats`, `new-service.bats` run in CI with the pinned tools.
 
 ### NFR-14 — Runtime bounds (G1, G2)
 
-- No foreground tool call exceeds 600 s (FR-1); `generate-profile.sh`, `validate-profile.sh`, `inject-governance.sh`, `merge-settings.sh` each finish in ≤ 5 s on the stub fixture (no cargo, no make, no network); the plugin's bats suites finish in ≤ 10 min in the CI `bats` job; new-service hands-on ≤ 15 min (K9); bootstrap PR ≤ 2 h wall clock (K13).
+- No foreground tool call exceeds 600 s: every `make` call outside the five-target foreground allowlist, every `git commit`/`git push` and `bmalph run` are backgrounded and polled (FR-1), and container mode starts the stack first (D25); `generate-profile.sh`, `validate-profile.sh`, `inject-governance.sh`, `merge-settings.sh` each finish in ≤ 5 s on the stub fixture (no cargo, no make, no network); the plugin's bats suites finish in ≤ 10 min in the CI `bats` job; new-service hands-on ≤ 15 min (K9); bootstrap PR ≤ 2 h wall clock (K13).
 - **AC:** bats timing cases with a 5 s budget per script; CI job duration; K9/K13 in the walkthrough.
 
 ### NFR-15 — Drift resistance and maintainability (RG, G2)
@@ -969,7 +982,7 @@ The plugin never: passes `--no-verify`/`-n` to `git commit` or `--no-verify` to 
 
 ### NFR-16 — Version floors (G1, RG)
 
-- bmalph ≥ 2.11.0; `claude` ≥ 2.1.248 (`--restricted`); `gh` ≥ 2.0; python3 ≥ 3.11; GNU make ≥ 4.0; bash ≥ 4.0; node ≥ 20 (bmalph installer, workflow harness); jq optional.
+- bmalph ≥ 2.11.0; `claude` ≥ 2.1.248 (`--restricted`); `gh` ≥ 2.0; python3 ≥ 3.11; GNU make ≥ 4.0; bash ≥ 4.4; git ≥ 2.30; node ≥ 20 (bmalph installer, workflow harness); jq optional.
 - **AC:** AC-10.1; `README.md` and `docs/setup-walkthrough.md` list the same floors (bats compares).
 
 ## Success Criteria
@@ -989,7 +1002,7 @@ The plugin never: passes `--no-verify`/`-n` to `git commit` or `--no-verify` to 
 4. K4 — 16 bats suites (15 post-cut), ≥ 460 tests (≥ 415 post-cut), 0 failures, per-suite floors met, skips only for uid 0 or an absent optional tool with a reason.
 5. K5 — 0 `shellcheck -x` findings; 0 markdownlint-cli2 findings under `plugins/`.
 6. K6 — 0 denylist hits in the four scanned directories outside profile-example fences.
-7. K7 — on the stub fixture: yamllint + Prettier on the profile, Prettier on `bmalph/config.json`, markdownlint-cli2 + typos on `CLAUDE.md`, `AGENTS.md`, `README.md`, `CHANGELOG.md`, static docs-check rules 1–4 and invariant (e) on the governance block, byte-identical second injection — all in CI.
+7. K7 — on the stub fixture: yamllint + Prettier on the profile, Prettier on `bmalph/config.json`, markdownlint-cli2 + typos on `CLAUDE.md`, `AGENTS.md`, `README.md`, `CHANGELOG.md`, static docs-check rules 1–4 and invariant (e) (neither `rust-service-template` nor the fixture's `TEMPLATE_REPOSITORY` name in anything written to `CLAUDE.md`/`AGENTS.md`) on the governance block, 0 rule-3 violations after either sync-flavour deletion, byte-identical second injection — all in CI.
 8. K8 — (epic 8) all harness scenarios pass, static call-graph depth ≤ 1, leaves pass under `--as-child`.
 9. Every FR acceptance criterion marked as a bats, lint or contract check passes; the traceability matrix has no orphan FR/NFR and no uncovered goal (verified in implementation readiness).
 
@@ -1017,7 +1030,7 @@ PRD-level decisions (this stage):
 >
 > Assumption: **PA-5 — Security lens trigger (brief OQ4).** The lens runs when the diff since the merge base touches `*.rs`, `Cargo.toml`, `Cargo.lock`, `migrations/`, `.sqlx/`, `deny.toml`, `Dockerfile` or `.github/workflows/`; later iterations re-run it only if that iteration's remediation touched those paths.
 >
-> Assumption: **PA-6 — Human-gated checks (brief OQ5).** `generate-profile.sh` derives `ci.human_gated` from the "Labels to create" table of `docs/repository-settings.md` (rows of the form "without it the job `<job>` fails", mapped to check names via the job tables: today `validate-configuration`, `openapi-diff`, `graphql-diff`); the profile may override; `pr-state.sh --human-gated-checks` consumes it.
+> Assumption: **PA-6 — Human-gated checks (brief OQ5).** `ci.human_gated` holds GitHub **check names**, the same name space as `ci.required_checks` and a subset of it, because GitHub reports check runs under the job `name:` (`tpl/.github/workflows/change-control.yml:53,72,88`). `generate-profile.sh` parses both sentence forms of the "Labels to create" table of `docs/repository-settings.md` ("without it the job `<j>` fails", "without it the jobs `<a>` and `<b>` fail") and maps each job id to its "Check name" through the job tables of `docs/repository-settings.md` or `docs/repository-settings-service.md`: today `Protected configuration` (job `validate-configuration`), `OpenAPI breaking changes` (`openapi-diff`) and `GraphQL breaking changes` (`graphql-diff`). The profile may override; `pr-state.sh --human-gated-checks` consumes it; job ids never appear in either list.
 >
 > Assumption: **PA-7 — Stage validity on resume.** Requiring `head_sha == HEAD` for every stage (brief A9 wording) would re-run implement after each review remediation commit. Issue, plan and implement therefore count as done when their `head_sha` is an ancestor of `HEAD`; review and QA only when equal; finish-pr is always re-derived live.
 >
@@ -1029,13 +1042,25 @@ PRD-level decisions (this stage):
 >
 > Assumption: **PA-11 — Section names.** The orchestrator's required H2 set governs this file; the template's planning skill format (with `Product Scope`) governs bundles that `/rs-sdlc-plan` writes in services (FR-16).
 >
-> Assumption: **PA-12 — Container switch.** `capabilities.run_in_container` is a gating boolean (L18-visible) generated from Docker reachability and host `cargo` absence; the user may flip it, and setup/new-service `--exec` set it.
+> Assumption: **PA-12 — Container switch.** `capabilities.run_in_container` is a gating boolean (L18-visible). Precedence: `generate-profile.sh --run-in-container true|false` (passed by `/rs-sdlc-setup --exec host|container`, which new-service S12 calls with its own resolved `--exec`) > the value already in the profile (kept on `--refresh`, so a hand flip survives) > detection (Docker reachable and no host `cargo`). In container mode the commands start the stack before the first TOOL target (FR-1, D25).
 >
-> Assumption: **PA-13 — Mutation per iteration.** `make mutation-tests-diff` runs once per review iteration and only when production `*.rs` changed in that iteration (after `git add` of new files), because it is the slowest gate and diff-scoped.
+> Assumption: **PA-13 — Mutation per iteration.** `make mutation-tests-diff` is the slowest gate and diff-scoped, so review iteration 1 runs it when the branch diff against `ci.base_ref` touches production `*.rs` (after `git add` of new files), and iteration n > 1 re-runs it only when that iteration's remediation touched production `*.rs`; a skipped row carries the previous verdict as `not run (not changed)`. `quality.max_surviving_mutants` is therefore always verified before the PR whenever production code changed.
 >
 > Assumption: **PA-14 — QA allowlist spelling.** The URL-first loopback `curl` entry form is fixed in architecture after checking Claude Code's prefix semantics; `qa-manual-tester` always uses that exact form.
 >
 > Assumption: **PA-15 — Stage exit strings.** The strings in FR-3's table are the single source; commands, report and docs copy them byte for byte (AC-1.3).
+>
+> Assumption: **PA-16 — `make.logs` dropped from the key set (amends PA-1).** The template's `logs` target runs `docker compose logs --follow` and never exits (`tpl/Makefile:165-167`), so no plugin component may invoke it (NFR-14). The only log read is the bounded raw call `docker compose logs --no-log-prefix --tail 200 app` (FR-1 exception (5)). The `make` group has 55 keys.
+>
+> Assumption: **PA-17 — Two implementation paths, one implementer each.** Command path: `bmalph run` is the only implementer; the command dispatches nothing while it runs, and Ralph's own sessions apply the story-dispatch rule carried by `architecture.md ## Constraints` → `.ralph/PROJECT_CONTEXT.md` (FR-16, FR-18). Workflow path (`rs-sdlc-feature.js`): it runs `stage-planning-artifacts.sh` + `bmalph implement` so the plan is staged and Ralph's fix plan exists, then executes that fix plan through orchestrated `rust-implementer` rounds and never runs `bmalph run` (a Workflow script cannot drive Ralph's loop, and two implementers would race); this is recorded as the degrade note `bmalph run: not used (workflow path)`. This matches the task framing ("stories are executed by orchestrated agents following the Ralph fix plan") and G2's bmalph/Ralph implementation holds on the command path.
+>
+> Assumption: **PA-18 — Resume logic is a tested helper.** The PA-7 rules live in `resume_point` (`lib/common.sh`), so G2(c) is proven by `common-lib.bats` (fresh clone without cache, ancestor/equal/live rules, stale QA) rather than by prompt text alone; the workflow path resumes only within a run (`carry`).
+>
+> Assumption: **PA-19 — Docker is a precondition, not a gate result.** Because the template's HOST targets exit 2 with `This target needs a reachable container engine (docker).` and the test targets need the compose database, a Docker-less host can run only `ci-static-analysis` in host mode; review, implement, new-context C12 and QA therefore escalate without Docker (D2), and the `CI_DELIVERY_TARGETS` that review never runs are recorded `not run (deferred to PR CI)` and judged by finish-pr from the required checks.
+>
+> Assumption: **PA-20 — Sync-flavour citation repair.** Deleting one sync flavour exactly as `docs/new-service.md` §9 says breaks docs-check rule 3 through `tpl/docs/extension-seams.md:82` (verified on a template copy). `new-service.sh` repairs the citation (bare file name + `.templatesyncignore` entry) instead of stopping with a `NEXT:` line, because G1(a) promises 0 manual file edits; the template defect is raised upstream (Open Question 6).
+>
+> Assumption: **PA-21 — Background by allowlist.** Long-running calls are identified by a closed foreground allowlist (`make.ci_list`, `make help`, `make.check_commit_message`, `make.doctor`, `make.install_hooks`) rather than a list of slow targets, because any TOOL target and every hooked `git commit`/`git push` can exceed 600 s on a cold `target/` (FR-1, NFR-14).
 
 Carried brief assumptions (binding; full text in `product-brief.md`): A1 template-derived repositories are first-class, detected by seven markers + `CI_PREFLIGHT_TARGETS`; A2 the 12 threshold keys (NFR-4); A3 profile namespaces (now fixed by PA-1); A4 QA network opt-in via `--with-qa-network`, precondition of K10; A5 example context never removed by the script; A6 lint widening after the plugin; A7 `is_template` probe then template flow or clone-and-push; A8 GraphQL roots replaced, never deleted; A9 state comment as the durable record (refined by PA-7); A10 Docker-less QA escalates when `make.start` is mapped; A11 React not added to the key check; A12 workflow names escalate gracefully; A13 workflow epic included; A14 15-minute hands-on excludes downloads/compiles; A15 live evidence is post-release; A16 28 skills over the "about 25" guidance; A17 tool floors; A18 new contexts need an issue; A19 the plugin creates only its own label; A20 new-service ownership (script edits, command commits); A21 standalone context runs hand off to review → QA → finish-pr; A22 setup on a dirty tree continues with a `DEGRADED:` line.
 
