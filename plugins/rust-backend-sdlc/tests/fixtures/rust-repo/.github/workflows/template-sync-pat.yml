@@ -1,0 +1,73 @@
+name: Template sync (PAT)
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: template-sync
+  cancel-in-progress: false
+
+env:
+  TEMPLATE_REPOSITORY: acme/rust-template
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sync:
+    name: Template sync
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Skip in the template repository
+        id: source
+        run: |
+          if [ "$GITHUB_REPOSITORY" = "$TEMPLATE_REPOSITORY" ]; then
+            echo '::notice::Template sync skipped: this is the template repository'
+            echo 'proceed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect credentials
+        id: credentials
+        if: steps.source.outputs.proceed == 'true'
+        env:
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          APP_ID: ${{ secrets.ACME_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ACME_APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "$PERSONAL_ACCESS_TOKEN" ]; then
+            echo '::notice::Template sync skipped: PERSONAL_ACCESS_TOKEN is not configured'
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+          elif [ -n "$APP_ID" ] && [ -n "$APP_PRIVATE_KEY" ]; then
+            echo '::notice::Template sync skipped: the GitHub App secrets exist, so the App workflow synchronises'
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out the repository
+        if: steps.credentials.outputs.available == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] the sync action pushes its own sync branch with the credentials of this checkout
+        with:
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          persist-credentials: true
+
+      - name: Synchronise with the template
+        if: steps.credentials.outputs.available == 'true'
+        uses: AndreasAugustin/actions-template-sync@6e1d0089686f8940604fc15baae62367bf6ee860 # v2.6.0
+        with:
+          source_gh_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          target_gh_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          source_repo_path: ${{ env.TEMPLATE_REPOSITORY }}
+          upstream_branch: main
+          pr_labels: template_sync
+          pr_title: 'chore(template): merge template changes'
+          is_force_push_pr: true

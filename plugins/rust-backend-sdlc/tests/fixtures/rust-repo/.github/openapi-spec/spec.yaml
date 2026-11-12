@@ -1,0 +1,304 @@
+openapi: 3.1.0
+info:
+  title: Rust Service Template API
+  description: This API provides endpoints to manage Rust Service Template data within Acme.
+  contact:
+    name: Acme Support
+    url: https://github.com/acme/rust-template
+    email: support@example.invalid
+  license:
+    name: CC0-1.0
+    url: https://creativecommons.org/publicdomain/zero/1.0/
+  version: 1.0.0
+servers:
+- url: /
+  description: Current host
+paths:
+  /api/example_api_resources:
+    get:
+      tags:
+      - ExampleApiResource
+      summary: Retrieves the collection of ExampleApiResource resources.
+      description: Returns one page of resources, newest first.
+      operationId: api_example_api_resources_get
+      parameters:
+      - name: page
+        in: query
+        description: Page number, starting at 1.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 1
+          minimum: 1
+      - name: itemsPerPage
+        in: query
+        description: Number of items per page.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          default: 30
+          maximum: 100
+          minimum: 1
+      responses:
+        '200':
+          description: ExampleApiResource collection
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExampleApiResource'
+        '400':
+          description: Invalid query parameter.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          description: Problem response.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    post:
+      tags:
+      - ExampleApiResource
+      summary: Creates an ExampleApiResource resource.
+      description: Validates the input, stores the resource and returns it.
+      operationId: api_example_api_resources_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExampleApiResourceRequest'
+        required: true
+      responses:
+        '201':
+          description: ExampleApiResource resource created
+          headers:
+            location:
+              schema:
+                type: string
+              description: Path of the created resource.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExampleApiResource'
+        '400':
+          description: Invalid input.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '413':
+          description: Request body too large.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '415':
+          description: Unsupported media type.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Validation failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          description: Problem response.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/example_api_resources/{id}:
+    get:
+      tags:
+      - ExampleApiResource
+      summary: Retrieves an ExampleApiResource resource.
+      description: Returns the resource identified by id.
+      operationId: api_example_api_resources_id_get
+      parameters:
+      - name: id
+        in: path
+        description: ExampleApiResource identifier
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ExampleApiResource resource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExampleApiResource'
+        '400':
+          description: Invalid identifier.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          description: Resource not found.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          description: Problem response.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/health:
+    get:
+      tags:
+      - HealthCheck
+      summary: Checks the health of the service.
+      description: Returns 204 when the database, the cache and the message broker respond. Returns a 500 problem document that lists every failing dependency otherwise.
+      operationId: api_health_get
+      responses:
+        '204':
+          description: Health check passed with no content to return.
+        '500':
+          description: Health check failed.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        default:
+          description: Problem response.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+components:
+  schemas:
+    CreateExampleApiResourceRequest:
+      type: object
+      description: Body of the create operation.
+      required:
+      - name
+      - description
+      properties:
+        description:
+          type: string
+          description: Free-text description of the resource.
+          example: Example description
+          maxLength: 1024
+          minLength: 1
+          pattern: ^[^\u0000]*$
+        name:
+          type: string
+          description: Display name of the resource.
+          example: Example name
+          maxLength: 255
+          minLength: 1
+          pattern: ^[^\u0000]*$
+      additionalProperties: false
+    DependencyFailure:
+      type: object
+      description: One dependency that did not answer its probe.
+      required:
+      - dependency
+      - message
+      properties:
+        dependency:
+          type: string
+          description: '`database`, `cache` or `message_broker`.'
+        message:
+          type: string
+          description: Failure message of the probe.
+    ExampleApiResource:
+      type: object
+      description: Template example resource.
+      required:
+      - id
+      - name
+      - description
+      properties:
+        description:
+          type: string
+          description: Free-text description of the resource.
+          maxLength: 1024
+          minLength: 1
+          pattern: ^[^\u0000]*$
+        id:
+          type: string
+          format: uuid
+          description: Identifier of the resource.
+        name:
+          type: string
+          description: Display name of the resource.
+          maxLength: 255
+          minLength: 1
+          pattern: ^[^\u0000]*$
+    Problem:
+      type: object
+      description: An RFC 9457 problem document.
+      required:
+      - type
+      - title
+      - status
+      properties:
+        detail:
+          type:
+          - string
+          - 'null'
+          description: Explanation specific to this occurrence.
+        failures:
+          type: array
+          items:
+            $ref: '#/components/schemas/DependencyFailure'
+          description: Failed probes, for `/problems/dependency-unavailable`.
+        status:
+          type: integer
+          format: int32
+          description: HTTP status code.
+          maximum: 599
+          minimum: 100
+        title:
+          type: string
+          description: Canonical reason phrase of the status.
+        type:
+          type: string
+          description: '`about:blank` or a relative URI reference.'
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Violation'
+          description: Violated constraints, for `/problems/validation-failed`.
+    Violation:
+      type: object
+      description: One violated constraint.
+      required:
+      - propertyPath
+      - message
+      - code
+      properties:
+        code:
+          type: string
+          description: Stable code of the violated constraint.
+        message:
+          type: string
+          description: Human-readable explanation.
+        propertyPath:
+          type: string
+          description: Wire name of the invalid field.
+tags:
+- name: ExampleApiResource
+  description: Template example resource endpoints.
+- name: HealthCheck
+  description: Runtime health-check endpoints.

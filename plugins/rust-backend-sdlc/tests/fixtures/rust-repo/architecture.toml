@@ -1,0 +1,89 @@
+# Architecture model, checked by `cargo xtask arch`.
+# A workspace crate must match exactly one layer pattern. Dependencies between
+# layers, between bounded contexts and on third-party crates are allow-lists.
+
+[contexts]
+# A crate matched by a pattern that contains `*` belongs to the bounded context
+# named by the text the `*` matched (`invoice-domain` -> `invoice`).
+# A context may depend on itself and on the contexts listed here, nothing else.
+shared = ["shared"]
+
+[[layer]]
+name = "domain"
+crates = ["*-domain"]
+directory = "domain"
+depends_on = ["domain"]
+# Domain is framework-free: these third-party crates and no others.
+external = ["async-trait", "thiserror", "uuid"]
+dev_external = ["proptest", "rstest", "tokio"]
+# These must not even be reachable through non-dev dependencies.
+forbidden_transitive = ["axum", "hyper", "reqwest", "sqlx", "tokio"]
+
+[[layer]]
+name = "application"
+crates = ["*-application"]
+directory = "application"
+depends_on = ["domain", "application"]
+dev_depends_on = ["test-support"]
+external = [
+    "async-graphql",
+    "async-trait",
+    "axum",
+    "futures-util",
+    "humantime",
+    "serde",
+    "thiserror",
+    "tokio",
+    "tracing",
+    "utoipa",
+    "utoipa-axum",
+    "uuid",
+    "validator",
+]
+dev_external = ["http-body-util", "proptest", "rstest", "serde_json", "tokio", "tower"]
+forbidden_transitive = ["aws-config", "aws-sdk-sqs", "moka", "sqlx"]
+
+[[layer]]
+name = "infrastructure"
+crates = ["*-infrastructure"]
+directory = "infrastructure"
+depends_on = ["domain", "infrastructure"]
+dev_depends_on = ["test-support"]
+external = [
+    "async-trait",
+    "aws-config",
+    "aws-sdk-sqs",
+    "moka",
+    "sqlx",
+    "thiserror",
+    "tracing",
+    "uuid",
+]
+dev_external = ["aws-smithy-mocks", "rstest", "tokio"]
+forbidden_transitive = ["async-graphql", "axum", "utoipa"]
+
+[[layer]]
+name = "composition-root"
+crates = ["service"]
+depends_on = ["domain", "application", "infrastructure"]
+dev_depends_on = ["test-support"]
+external = ["*"]
+
+[[layer]]
+name = "test-support"
+crates = ["test-support"]
+depends_on = ["domain"]
+# `tracing` is here for the log recorder that tests use to assert on log entries.
+external = ["async-trait", "fake", "rand", "tracing", "uuid"]
+
+[[layer]]
+name = "e2e"
+crates = ["e2e-tests"]
+depends_on = ["domain", "application", "infrastructure", "composition-root", "test-support"]
+external = ["*"]
+
+[[layer]]
+name = "tooling"
+crates = ["xtask"]
+depends_on = []
+external = ["*"]

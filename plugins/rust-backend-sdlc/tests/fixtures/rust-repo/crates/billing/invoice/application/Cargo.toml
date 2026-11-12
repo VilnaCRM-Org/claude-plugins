@@ -1,0 +1,33 @@
+[package]
+name = "invoice-application"
+description = "Invoice context, application layer: commands, queries, subscriber, HTTP and GraphQL adapters"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-graphql.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+invoice-domain.workspace = true
+serde.workspace = true
+shared-application.workspace = true
+shared-domain.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+rstest.workspace = true
+serde_json.workspace = true
+test-support.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

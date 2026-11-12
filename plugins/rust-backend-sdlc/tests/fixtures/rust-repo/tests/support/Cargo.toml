@@ -1,0 +1,22 @@
+[package]
+name = "test-support"
+description = "Test doubles, fixtures and seeded random data shared by the test levels"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+fake.workspace = true
+health-check-domain.workspace = true
+invoice-domain.workspace = true
+rand.workspace = true
+shared-domain.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

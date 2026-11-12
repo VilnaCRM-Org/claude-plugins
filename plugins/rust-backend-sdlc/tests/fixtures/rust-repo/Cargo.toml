@@ -1,0 +1,94 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/billing/invoice/application",
+    "crates/billing/invoice/domain",
+    "crates/billing/invoice/infrastructure",
+    "crates/internal/health-check/application",
+    "crates/internal/health-check/domain",
+    "crates/internal/health-check/infrastructure",
+    "crates/service",
+    "crates/shared/application",
+    "crates/shared/domain",
+    "crates/shared/infrastructure",
+    "tests/e2e",
+    "tests/support",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The same full version as `rust-toolchain.toml`.
+rust-version = "1.99.1"
+license = "CC0-1.0"
+publish = false
+# Service identity: the OpenAPI title is "<description> API" and the contact URL is `repository`.
+description = "Rust Template"
+repository = "https://github.com/acme/rust-template"
+
+[workspace.dependencies]
+# Workspace crates
+health-check-application = { path = "crates/internal/health-check/application" }
+health-check-domain = { path = "crates/internal/health-check/domain" }
+health-check-infrastructure = { path = "crates/internal/health-check/infrastructure" }
+invoice-application = { path = "crates/billing/invoice/application" }
+invoice-domain = { path = "crates/billing/invoice/domain" }
+invoice-infrastructure = { path = "crates/billing/invoice/infrastructure" }
+service = { path = "crates/service" }
+shared-application = { path = "crates/shared/application" }
+shared-domain = { path = "crates/shared/domain" }
+shared-infrastructure = { path = "crates/shared/infrastructure" }
+test-support = { path = "tests/support" }
+
+# Runtime
+async-graphql = { version = "7.2.1", default-features = false, features = ["uuid"] }
+async-trait = "0.1.92"
+axum = { version = "0.8.9", features = ["macros"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sqlx = { version = "0.9.0", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls-aws-lc-rs",
+    "postgres",
+    "macros",
+    "migrate",
+    "uuid",
+] }
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["macros", "rt-multi-thread", "net", "signal", "time", "sync"] }
+tracing = "0.1.44"
+utoipa = { version = "6.0.0", features = ["axum_extras", "uuid", "yaml"] }
+utoipa-axum = "0.3.0"
+uuid = { version = "1.29.2", default-features = false, features = ["std"] }
+
+# Tests
+cucumber = "0.23.0"
+fake = { version = "5.1.0", features = ["uuid"] }
+proptest = "1.12.0"
+rand = "0.10.3"
+rstest = "0.28.0"
+
+# Tooling (xtask)
+cargo_metadata = "0.23.1"
+toml = "1.2.1"
+
+[profile.release]
+strip = "symbols"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+unused = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+allow_attributes_without_reason = "warn"
+# -- complexity budget (thresholds live in clippy.toml)
+cognitive_complexity = "warn"
+excessive_nesting = "warn"
