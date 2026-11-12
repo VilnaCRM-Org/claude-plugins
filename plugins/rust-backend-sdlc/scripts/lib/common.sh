@@ -719,13 +719,87 @@ yaml_type() {
   esac
 }
 
+# _sdlc_json_go — re-emit the JSON document on stdin with the PyYAML
+# backend's writer (2-space indent, the same string escaping, numbers in Go
+# encoding/json form), so both backends print the same bytes. mikefarah yq
+# keeps a float's YAML spelling (8.0, 1.50, 1e3) and turns an int beyond
+# int64 into a float (3e+19); this prints 8, 1.5, 1000 and
+# 30000000000000000000. Unparsable input or a non-finite number exits 1 with
+# one error line on stderr.
+_sdlc_json_go() {
+  local prog
+  prog="$(
+    cat <<'JSONGO'
+import decimal
+import json
+import math
+import re
+import sys
+
+
+def go_float(number):
+    if not math.isfinite(number):
+        raise ValueError("json: unsupported value: %r" % number)
+    size = abs(number)
+    if size and (size < 1e-6 or size >= 1e21):
+        return re.sub(r"e-0([0-9])\Z", r"e-\1", repr(number))
+    out = format(decimal.Decimal(repr(number)), "f")
+    return out.rstrip("0").rstrip(".") if "." in out else out
+
+
+def string(value):
+    out = json.dumps(value, ensure_ascii=False)
+    return out.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+
+def to_json(value, depth=0):
+    pad, end = "  " * (depth + 1), "\n" + "  " * depth
+    if isinstance(value, dict):
+        rows = [pad + string(k) + ": " + to_json(v, depth + 1)
+                for k, v in value.items()]
+        return "{\n" + ",\n".join(rows) + end + "}" if rows else "{}"
+    if isinstance(value, list):
+        rows = [pad + to_json(v, depth + 1) for v in value]
+        return "[\n" + ",\n".join(rows) + end + "]" if rows else "[]"
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return go_float(value)
+    return string(value)
+
+
+try:
+    doc = json.loads(sys.stdin.read())
+    sys.stdout.write(to_json(doc) + "\n")
+except Exception as exc:  # any parse or conversion error ends the call cleanly
+    lines = str(exc).strip().splitlines() or [type(exc).__name__]
+    sys.stderr.write(lines[0] + "\n")
+    sys.exit(1)
+JSONGO
+  )"
+  _sdlc_py -c "$prog"
+}
+
 # yaml_to_json FILE — the whole document as JSON (2-space indent) on stdout;
 # exit 1 with the parser's first error line (logged) when FILE does not parse.
+# On the yq path the output goes through _sdlc_json_go when python3 exists,
+# so both backends print the same bytes.
 yaml_to_json() {
-  local file="${1-}" rc=0
+  local file="${1-}" rc=0 json
   [[ -f "$file" ]] || die "yaml_to_json: no such file: $file"
   if have_yq; then
-    _sdlc_err_first "yaml: $file: " yq -o=json '.' "$file" || rc=$?
+    json="$(_sdlc_err_first "yaml: $file: " yq -o=json '.' "$file")" || rc=$?
+    if ((rc == 0)); then
+      if command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "$json" | _sdlc_err_first "yaml: $file: " _sdlc_json_go || rc=$?
+      else
+        printf '%s\n' "$json"
+      fi
+    fi
   else
     _sdlc_yaml_python json "$file" || rc=$?
   fi
