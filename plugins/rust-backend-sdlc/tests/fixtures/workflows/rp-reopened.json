@@ -18,12 +18,88 @@
         "pr": 34,
         "execute_skills": [
           "code-review",
-          "quality-standards"
+          "quality-standards",
+          "bmad-fr-nfr-review-gate",
+          "clean-architecture-llm",
+          "complexity-management",
+          "implementing-ddd-architecture",
+          "rust-error-handling",
+          "security-audit",
+          "testing-workflow",
+          "verification-workflow"
         ],
         "not_applicable": [
           {
             "skill": "database-migrations",
             "reason": "no migration changed"
+          },
+          {
+            "skill": "api-contract-development",
+            "reason": "no application-layer, crates/service wiring or contract change and no contract target is red"
+          },
+          {
+            "skill": "api-resource-development",
+            "reason": "no application-layer or composition-root file changed and no context is added"
+          },
+          {
+            "skill": "architecture-boundary-fixer",
+            "reason": "no boundary target is red and no code moved between layers or contexts"
+          },
+          {
+            "skill": "architecture-model-sync",
+            "reason": "no workspace member, crate-to-crate dependency or external system appears or disappears"
+          },
+          {
+            "skill": "async-runtime-safety",
+            "reason": "the change touches no async code, no shared state and no time or identifier source"
+          },
+          {
+            "skill": "bmad-autonomous-planning",
+            "reason": "the planning bundle is already committed with a ready verdict"
+          },
+          {
+            "skill": "bounded-context-scaffolding",
+            "reason": "every context the change touches already exists at the merge base"
+          },
+          {
+            "skill": "cache-management",
+            "reason": "no cache adapter is added or changed and the story gives no staleness budget"
+          },
+          {
+            "skill": "code-organization",
+            "reason": "no crate, module, source file or test file is added, moved, renamed or split"
+          },
+          {
+            "skill": "configuration-management",
+            "reason": "no setting, environment variable, make or compose variable or port changes"
+          },
+          {
+            "skill": "dependency-policy",
+            "reason": "no manifest or lock file changed and neither dependency target reports a finding"
+          },
+          {
+            "skill": "documentation-creation",
+            "reason": "the change adds no documentation page"
+          },
+          {
+            "skill": "documentation-sync",
+            "reason": "no make target, command, environment variable, endpoint or documentation file changed"
+          },
+          {
+            "skill": "load-testing",
+            "reason": "no load-test file changed and no smoke run is red"
+          },
+          {
+            "skill": "observability-instrumentation",
+            "reason": "the change touches no application, infrastructure or crates/service Rust source"
+          },
+          {
+            "skill": "query-performance-analysis",
+            "reason": "no query or index changes and no slow query is reported"
+          },
+          {
+            "skill": "service-scaffolding",
+            "reason": "an existing service whose bootstrap pull request has merged"
           }
         ],
         "degrade_notes": []

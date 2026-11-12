@@ -19,12 +19,89 @@
           "code-review",
           "quality-standards",
           "database-migrations",
-          "documentation-sync"
+          "documentation-sync",
+          "bmad-fr-nfr-review-gate",
+          "query-performance-analysis",
+          "security-audit",
+          "testing-workflow",
+          "verification-workflow"
         ],
         "not_applicable": [
           {
             "skill": "load-testing",
             "reason": "no scenario or latency budget changed"
+          },
+          {
+            "skill": "api-contract-development",
+            "reason": "no application-layer, crates/service wiring or contract change and no contract target is red"
+          },
+          {
+            "skill": "api-resource-development",
+            "reason": "no application-layer or composition-root file changed and no context is added"
+          },
+          {
+            "skill": "architecture-boundary-fixer",
+            "reason": "no boundary target is red and no code moved between layers or contexts"
+          },
+          {
+            "skill": "architecture-model-sync",
+            "reason": "no workspace member, crate-to-crate dependency or external system appears or disappears"
+          },
+          {
+            "skill": "async-runtime-safety",
+            "reason": "the change touches no async code, no shared state and no time or identifier source"
+          },
+          {
+            "skill": "bmad-autonomous-planning",
+            "reason": "the planning bundle is already committed with a ready verdict"
+          },
+          {
+            "skill": "bounded-context-scaffolding",
+            "reason": "every context the change touches already exists at the merge base"
+          },
+          {
+            "skill": "cache-management",
+            "reason": "no cache adapter is added or changed and the story gives no staleness budget"
+          },
+          {
+            "skill": "clean-architecture-llm",
+            "reason": "no layered Rust source changed"
+          },
+          {
+            "skill": "code-organization",
+            "reason": "no crate, module, source file or test file is added, moved, renamed or split"
+          },
+          {
+            "skill": "complexity-management",
+            "reason": "no Rust function body changed and make.complexity reports nothing"
+          },
+          {
+            "skill": "configuration-management",
+            "reason": "no setting, environment variable, make or compose variable or port changes"
+          },
+          {
+            "skill": "dependency-policy",
+            "reason": "no manifest or lock file changed and neither dependency target reports a finding"
+          },
+          {
+            "skill": "documentation-creation",
+            "reason": "the change adds no documentation page"
+          },
+          {
+            "skill": "implementing-ddd-architecture",
+            "reason": "no domain crate changed and no context is added"
+          },
+          {
+            "skill": "observability-instrumentation",
+            "reason": "the change touches no application, infrastructure or crates/service Rust source"
+          },
+          {
+            "skill": "rust-error-handling",
+            "reason": "no Rust source changed and the static analysis reports none of its lints"
+          },
+          {
+            "skill": "service-scaffolding",
+            "reason": "an existing service whose bootstrap pull request has merged"
           }
         ],
         "degrade_notes": [

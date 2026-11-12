@@ -15,7 +15,7 @@ This stage talks to GitHub only through `gh` and to the plugin only through two 
   - task text (one or more sentences) → **create mode**;
   - `#<N>`, a bare `<N>`, or an issue URL `https://github.com/<owner>/<repo>/issues/<N>` → **adopt mode**;
   - nothing → `ESCALATED` (`blocking_finding: no task text and no issue reference`, `recommended_action: run /rs-sdlc-issue with a task text or #N`).
-- **Profile** `.claude/rust-sdlc.yml`, validated first (step 1). Keys read: `project.repo` (the repository the issue must belong to; an issue URL that names another repository is never adopted) and `project.description` (one line of context for the problem statement when the task text leaves the service's purpose open). `gh` resolves the repository from the checkout, whose origin is the one `project.repo` records.
+- **Profile** `.claude/rust-sdlc.yml`, validated first (step 1). Keys read: `project.repo` (the repository the issue must belong to; an issue URL that names another repository is never adopted), `project.description` (one line of context for the problem statement when the task text leaves the service's purpose open) and `service.liveness_path` (the probe path the health criterion of step 4 names). `gh` resolves the repository from the checkout, whose origin is the one `project.repo` records.
 - **Issue template** `.github/ISSUE_TEMPLATE/feature_request.md` of the repository, read with the Read tool when present: its level-2 headings, in their order, are the body headings of a new issue.
 - **Iteration counter** `issue iteration <n>/5`, handed over by the orchestrator on a resume (restored from the state comment), else 1.
 
@@ -63,7 +63,7 @@ Classify the argument as described under "Inputs". An issue URL must have the ho
 4. **Acceptance criteria.** At least 3 bullets under `## Acceptance criteria` (≥ 3 testable acceptance criteria), each phrased as observable HTTP status or GraphQL result, so that the QA stage can prove it with one request:
    - REST: `POST /<resource>` with a valid body returns `201` and a `Location` header naming the new `<Entity>`; `GET /<resource>/<id>` for an unknown id returns `404` with an `application/problem+json` body;
    - GraphQL: the `<operation>` mutation with a valid input returns the new value in `data.<operation>` and no `errors` entry; with an invalid input it returns an `errors` entry whose `extensions.code` names the failure;
-   - health: `GET <liveness path>` returns `200` while the change is deployed.
+   - health: `GET <service.liveness_path>` (the path as the profile records it) returns `200` while the change is deployed.
 5. **Tasks.** One checkbox per change the task implies (domain, application, infrastructure, contract snapshot, documentation), so the plan stage can seed stories from them.
 
 ### Step 5 — Self-check the criteria (the stage loop)
@@ -84,6 +84,8 @@ Fewer than 3 passing criteria fails the check: rewrite the failing bullets and r
 gh label list --search rust-backend-sdlc --json name --jq '.[].name'
 gh label list --search enhancement --json name --jq '.[].name'
 ```
+
+The first lookup runs whenever the issue needs the `rust-backend-sdlc` label: on every create, and on an adopted issue whose `labels` lack it. The second runs in create mode only, so an adoption never depends on it.
 
 - `rust-backend-sdlc` not listed exactly → create it once:
 

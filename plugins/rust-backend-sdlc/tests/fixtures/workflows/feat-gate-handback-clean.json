@@ -201,7 +201,8 @@
         "journal": [
           "1: GATE -> hand-back (gate 1/3) -> GATE on b2c3d4e returned to the caller",
           "2: GATE hand-back -> rs-sdlc-fr-nfr-review --pr 34 --head b2c3d4e (gate 1/3) -> SUCCESS, iterations 1, 0 fixed",
-          "3: READY -> confirmation snapshot -> READY on b2c3d4e"
+          "3: READY -> D7 review pass (fix 1/5) -> remaining_unresolved 0, no changed file: clean on b2c3d4e",
+          "4: READY -> confirmation snapshot -> READY on b2c3d4e"
         ],
         "degrade_notes": [
           "no AI reviewer is configured — the verdict waits for no review approval (D7)",

@@ -75,7 +75,7 @@ LAYER = re.compile(r"[a-z][a-z0-9-]*")
 CONTEXT = re.compile(r"[a-z0-9-]+/[a-z0-9-]+")
 MEMBER = re.compile(r"crates/([^/]+)/([^/]+)/(domain|application|infrastructure)")
 RULE = re.compile(r"([A-Za-z0-9_-]+)(?::(?![:=])|::(?![:=]))(.*)")
-APP_PORT = re.compile(r"APP_PORT=([0-9]+)")
+APP_PORT = re.compile(r"""\s*(?:export\s+)?APP_PORT\s*=\s*(["']?)([0-9]+)\1(?:\s+#.*)?\s*""")
 REVIEWERS = ("coderabbit", "cubic", "qodo", "qlty", "sonarcloud")
 YAML_WORDS = ("null", "true", "false", "yes", "no", "on", "off")
 MARKERS = ("rust-toolchain.toml", "architecture.toml", "protected-config.toml",
@@ -425,11 +425,11 @@ def detect(argv):
     for line in (env or "").split("\n"):
         match = APP_PORT.fullmatch(line)
         if match:
-            if 1 <= int(match.group(1)) <= 65535:
-                port = int(match.group(1))
+            if 1 <= int(match.group(2)) <= 65535:
+                port = int(match.group(2))
             else:
                 warn(".env APP_PORT %s is outside 1-65535; service.port falls back to 8081"
-                     % match.group(1))
+                     % match.group(2))
             break
 
     # make map

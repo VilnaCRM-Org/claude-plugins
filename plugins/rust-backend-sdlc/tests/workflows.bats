@@ -208,6 +208,15 @@ function checkAgents(root) {
   }
 }
 
+// FR-32: the review panel checks the triage against PLUGIN_SKILLS, so the list
+// names exactly the skills/*/SKILL.md directories, each once.
+function checkSkills(root) {
+  const m = /^const PLUGIN_SKILLS = \[([^\]]*)\]/m.exec(read(root, "rs-sdlc-review-panel"))
+  const named = m ? [...m[1].matchAll(/'([^']*)'/g)].map((x) => x[1]).sort() : []
+  const dirs = fs.readdirSync(path.join(root, "skills")).filter((d) => fs.existsSync(path.join(root, "skills", d, "SKILL.md"))).sort()
+  if (!same(named, dirs)) fail(`rs-sdlc-review-panel: PLUGIN_SKILLS names ${named.join(", ") || "nothing"}, expected the ${dirs.length} skills/*/SKILL.md names ${dirs.join(", ")}`)
+}
+
 const qualified = (name) => STEMS.some((s) => name === `rust-backend-sdlc:${s}`)
 
 function checkNames(root) {
@@ -291,7 +300,7 @@ function checkP17(root) {
   }
 }
 
-const CHECKS = { meta: checkMeta, agents: checkAgents, names: checkNames, graph: checkGraph, handback: checkHandBack, commits: checkCommits, p17: checkP17 }
+const CHECKS = { meta: checkMeta, agents: checkAgents, skills: checkSkills, names: checkNames, graph: checkGraph, handback: checkHandBack, commits: checkCommits, p17: checkP17 }
 
 if (mode === "expect") expectMode(rest[0], rest[1], rest.slice(2))
 else if (CHECKS[rest[0]]) CHECKS[rest[0]](rest[1])
@@ -384,8 +393,9 @@ wf_same_as_child() {
   [ "$first" = "$second" ]
 }
 
-@test "workflows: agents: every rust-backend-sdlc:<agent> type names a file under agents/ and each workflow uses exactly its agents" {
+@test "workflows: agents: every rust-backend-sdlc:<agent> type names a file under agents/, each workflow uses exactly its agents and the review panel's PLUGIN_SKILLS are the skills/*/SKILL.md names" {
   wf_static agents
+  wf_static skills
 }
 
 @test "workflows: names: every workflow() literal and scenario workflows key is rust-backend-sdlc:<one of the 4 stems>" {
@@ -818,11 +828,27 @@ wf_same_as_child() {
   wf_expect '!("result" in o) && has(o.error, "schema gap: reply for agent label=\"scope\" lacks required key(s) \"protected\"") && seq("scope")'
 }
 
-@test "workflows: rp-scope-blocked: an invalid profile escalates before any lens runs" {
+@test "workflows: rp-scope-blocked: an invalid profile or an incomplete skill triage escalates before any lens runs" {
   wf_scenario rs-sdlc-review-panel rp-scope-blocked
   wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && seq("scope")' \
     'has(field("blocking_finding"), "run /rs-sdlc-setup on the default branch and commit the result")' \
     'has(field("recommended_action"), "run /rs-sdlc-setup")'
+  # A triage without one verdict per plugin skill (FR-32: every skill verdict recorded, no silent skips) is never used.
+  local short="$BATS_TEST_TMPDIR/rp-triage-short.json" demoted="$BATS_TEST_TMPDIR/rp-triage-demoted.json" renamed="$BATS_TEST_TMPDIR/rp-triage-renamed.json"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.replies.find((x) => x.match === "^scope$").reply.not_applicable.pop(); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/rp-converges.json" "$short"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const t = s.replies.find((x) => x.match === "^scope$").reply; t.execute_skills = t.execute_skills.filter((n) => n !== "code-review"); t.not_applicable.push({skill: "code-review", reason: ""}); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/rp-converges.json" "$demoted"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const t = s.replies.find((x) => x.match === "^scope$").reply; t.not_applicable = t.not_applicable.map((n) => (n.skill === "load-testing" ? {skill: "session-start-hook", reason: "no hook changed"} : n)); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/rp-converges.json" "$renamed"
+  wf_scenario rs-sdlc-review-panel "$short"
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && seq("scope") && field("iteration") === "0/5"' \
+    'field("blocking_finding") === "skill triage incomplete: no verdict for documentation-creation" && has(field("iteration_log"), "0: scope triage -> no verdict for documentation-creation")' \
+    'has(field("recommended_action"), "one verdict for each of the 28 plugin skills", "every skill verdict recorded, no silent skips")'
+  # 28 unique names are not enough: a name outside the plugin's skills never stands in for a plugin skill.
+  wf_scenario rs-sdlc-review-panel "$renamed"
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && seq("scope")' \
+    'field("blocking_finding") === "skill triage incomplete: no verdict for load-testing; not a plugin skill: session-start-hook"'
+  wf_scenario rs-sdlc-review-panel "$demoted"
+  wf_expect 'r.result === "ESCALATED" && r.iterations === 0 && seq("scope")' \
+    'field("blocking_finding") === "skill triage incomplete: code-review is not EXECUTE; code-review is NOT APPLICABLE without a reason"'
 }
 
 @test "workflows: rp-security-not-rerun: a fix that touches no PA-5 path re-runs only the code-quality and FR/NFR lenses, SUCCESS in 2 iterations" {
@@ -1189,6 +1215,13 @@ wf_same_as_child() {
     'has(field("blocking_finding"), "rust-implementer BLOCKED on story 1.1", "BLOCKED: protected configuration deny.toml")' \
     'has(field("recommended_action"), "(D22)") && has(field("iteration_log"), "story 1.1 BLOCKED")' \
     'labels[labels.length - 1] === "story 1.1" && count("publish implement") === 0'
+  # A halt after an earlier round completed a story names that story: the publish step never ran for it.
+  local later="$BATS_TEST_TMPDIR/feat-implementer-blocked-later.json"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.replies.unshift({match: "^story 1\\.1$", reply: {status: "COMPLETE", exit_signal: true, tests_status: "PASSING", files_modified: 1, files: ["crates/billing/invoice/domain/src/invoice.rs"], recommendation: "none"}}); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/feat-implementer-blocked.json" "$later"
+  wf_scenario rs-sdlc-feature "$later"
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "implement" && field("iteration") === "2/5" && count("publish implement") === 0' \
+    'has(field("blocking_finding"), "rust-implementer BLOCKED on story 1.2") && has(field("iteration_log"), "1/1 complete", "story 1.2 BLOCKED")' \
+    'field("recommended_action").startsWith("commit the stories completed in earlier rounds first (1.1), each as its own story commit") && has(field("recommended_action"), "(D22)")'
 }
 
 @test "workflows: feat-staging-order: stage-planning-artifacts.sh runs before bmalph implement and nothing runs bmalph run (AC-44.1)" {

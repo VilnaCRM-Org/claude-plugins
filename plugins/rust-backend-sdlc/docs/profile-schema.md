@@ -114,7 +114,7 @@ Runtime address and the HTTP paths that QA probes and the security lanes use.
 
 | Key | Type | R/O | Nullable | Fallback (no source) | Allowed values / format | Detection source | Refresh | Consumers |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `service.port` | int | R | no | `8081` | 1–65535 | `.env`, first line matching `^APP_PORT=([0-9]+)$` (`.env.local` is never read) | | `/rs-sdlc-qa`, `service.base_url` derivation, `security-auditor`; skills: `configuration-management` |
+| `service.port` | int | R | no | `8081` | 1–65535 | `.env`, first line matching `^\s*(?:export\s+)?APP_PORT\s*=\s*(["']?)([0-9]+)\1(?:\s+#.*)?\s*$` (the forms the template's `scripts/with-env.sh` reads: an `export` prefix, spaces around `=`, quotes, an inline comment; `.env.local` is never read) | | `/rs-sdlc-qa`, `service.base_url` derivation, `security-auditor`; skills: `configuration-management` |
 | `service.base_url` | string | R | no | `'http://localhost:<port>'` | `^http://(localhost\|127\.0\.0\.1):[0-9]+$` | derived from `service.port` | | `http_probe` (URL base for `qa-manual-tester` and `security-auditor`), schemathesis lane; skills: `security-audit` |
 | `service.liveness_path` | string | R | no | `'/ping'` | starts with `/` | constant (template route) | | `/rs-sdlc-qa`; skills: `observability-instrumentation` |
 | `service.readiness_path` | string | R | no | `'/api/health'` | starts with `/` | constant | | `/rs-sdlc-qa`; skills: `observability-instrumentation` |
@@ -315,7 +315,7 @@ Every file `generate-profile.sh` reads, every protected file a quality bar is de
 | `tests/Load/` | directory test | detection | `capabilities.load_testing` (with `make.smoke_load_tests` mapped) |
 | `migrations/` | directory test | detection | `persistence.migrations_dir` |
 | `.sqlx/` | directory test | detection | `persistence.offline_metadata` |
-| `.env` | python3 `re`, first line matching `^APP_PORT=([0-9]+)$` | detection | `service.port` and through it `service.base_url`; `.env.local` is never read |
+| `.env` | python3 `re`, first line matching `^\s*(?:export\s+)?APP_PORT\s*=\s*(["']?)([0-9]+)\1(?:\s+#.*)?\s*$` (the forms the template's `scripts/with-env.sh` reads: an `export` prefix, spaces around `=`, quotes, an inline comment) | detection | `service.port` and through it `service.base_url`; `.env.local` is never read |
 | `.github/workflows/*.yml`, `.github/workflows/*.yaml` | directory listing | detection | `ci.provider`, `ci.workflows` (stems sorted with `LC_ALL=C`) |
 | `.github/workflows/template-sync-app.yml`, `.github/workflows/template-sync-pat.yml` | existence; `TEMPLATE_REPOSITORY:` line | detection | `template.sync_flavour`, `template.repository`, `capabilities.template_sync` |
 | `.github/openapi-spec/spec.yaml` | existence | detection | `service.openapi_snapshot` |

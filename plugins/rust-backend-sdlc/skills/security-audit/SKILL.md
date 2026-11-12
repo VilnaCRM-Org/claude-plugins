@@ -36,7 +36,7 @@ The caller passes the diff since the merge base, the profile `.claude/rust-sdlc.
 
 Three rules shape every step:
 
-- **Verification by reproduction.** A grep hit, a tool line or a suspicious handler is a candidate. It becomes a finding only when it is reproduced: by a dynamic probe against the running service, or, for a class that has no HTTP surface or while the dynamic lane is `not run`, by a deterministic static demonstration (step 6). A candidate that cannot be reproduced is recorded `dropped` and never reported as `open`.
+- **Verification by reproduction.** A grep hit, a tool line or a suspicious handler is a candidate. It becomes a finding only when it is reproduced: by a dynamic probe against the running service, or, for a class that has no HTTP surface or while the dynamic lane is `not run`, by a deterministic static demonstration (step 6). A candidate that cannot be reproduced is recorded `dropped` and never reported as `open`, with one exception: a missing defence-in-depth layer whose attack did not reproduce is kept as an `Info` hardening note, and the `file:line` that shows the layer missing is its static reproduction (the `Info` row of [reference/owasp-catalog.md](reference/owasp-catalog.md)); an `Info` note never fails the verdict.
 - **Read-only.** The skill changes no repository file. The only file it may create is a probe body under `target/rust-sdlc/tmp/`. Fixes are made by the implementer that the calling stage dispatches, following [reference/remediation-patterns.md](reference/remediation-patterns.md).
 - **Loopback only.** Dynamic probes reach only `service.base_url`, only through the service's own API, with the smallest payload that proves the defect, and only against data the probe itself created.
 
@@ -126,7 +126,7 @@ Run this step only when the [Dynamic probing gate](#dynamic-probing-gate) is ope
 
 1. **Dynamic reproduction.** The probe's status, headers or body show the vulnerable behaviour that the playbook names as observed, where the secure behaviour was expected. Record the exact `http_probe` call, the expected and the observed result.
 2. **Static reproduction**, for a family without an HTTP surface or while the dynamic lane is `not run`: a lane output line (`error[` line, secret-scan rule and location, image vulnerability), or a source trace from the extractor field to the sink with `file:line` at every hop and no binding, validation or allow-list step between them.
-3. A candidate with neither is recorded with status `dropped`.
+3. A candidate with neither is recorded with status `dropped`, except a missing defence-in-depth layer, which is kept as an `Info` hardening note with the `file:line` that shows the layer missing.
 4. Give each finding the next free `SEC-<n>` id, a severity band from [reference/owasp-catalog.md](reference/owasp-catalog.md), the repository-relative `file` and `line` of the sink (`line` null for a file-level finding), the family id as `rule` and a one-line `summary` of at most 300 characters. Merge findings with the same `(file, line, rule)` into one.
 5. **Re-verification.** Repeat the reproduction of every `open` finding of the previous ledger. It no longer reproduces: keep its id and set `fixed`. It still reproduces: keep its id and `open`.
 6. A `dependency-advisories` finding for an advisory with no patched version says `no fixed version` in its summary, so that the calling stage escalates it; an exception for it is a protected change that this skill never makes.
@@ -181,6 +181,6 @@ The dynamic lane is `passed` when every probe sent showed the expected behaviour
 - [ ] The lanes table has four rows; each mapped lane ran once, and a null key or an unreachable Docker is recorded with its `not run (<reason>)`.
 - [ ] The dependency-policy lane's `error[` count is compared with `quality.max_dependency_policy_findings`, and the image lane's exit status with `quality.max_image_vulnerabilities_high_critical`.
 - [ ] With `capabilities.dynamic_security_testing` false the output holds `SKIPPED: capabilities.dynamic_security_testing is false` and no probe was sent; with it true, every probe in the evidence list is an `http_probe` call on `service.base_url`.
-- [ ] Every `open` finding has a reproduction, every non-reproduced candidate is `dropped`, and every previous `open` finding is now `open` or `fixed` under its old id.
+- [ ] Every `open` finding has a reproduction, every non-reproduced candidate is `dropped` (except an `Info` hardening note with its `file:line`), and every previous `open` finding is now `open` or `fixed` under its old id.
 - [ ] The output ends with the verdict line followed by one fenced `json` block whose findings carry exactly the seven ledger fields.
 - [ ] `git status --porcelain` shows no change made by this skill outside `target/`.

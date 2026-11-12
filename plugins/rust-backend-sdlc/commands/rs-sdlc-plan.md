@@ -101,7 +101,7 @@ The section holds no fenced block and no further level-2 heading. `/rs-sdlc-impl
 
 After the skill prints `SPECS_DIR: specs/<N>-<kebab-title>`, this stage checks the bundle itself. Every check passes, or the round fails:
 
-1. the bundle meets step 5: the commands of the `## Verification` section of `${CLAUDE_PLUGIN_ROOT}/skills/bmad-autonomous-planning/SKILL.md`, run from the repository root with `N` and `SPECS_DIR` set, print nothing (seven files, required H2s, `## Constraints` size, parts (a) and (b) in that order, one `Depends on:` line per story); they check the contract whichever skill wrote the bundle;
+1. the bundle meets step 5: the commands of the `## Verification` section of `${CLAUDE_PLUGIN_ROOT}/skills/bmad-autonomous-planning/SKILL.md`, run from the repository root with `N` and `SPECS_DIR` set, print nothing (seven files, required H2s, `## Constraints` size, parts (a) and (b) in that order, as many `Depends on:` lines and criteria blocks as stories, no duplicate story id); they check the contract whichever skill wrote the bundle. The `epics.md` rules those commands only count are then checked on the file itself with the Read tool: each `### Story N.M:` block, up to the next story or epic heading, holds its own `**Acceptance Criteria:**` with at least one `**Given**`, one `**When**` and one `**Then**` line and exactly one `**Depends on:**` line; the story ids ascend in file order; and every id a `Depends on:` line names is an earlier story (else the line reads `none`);
 2. `implementation-readiness.md` holds the verdict line `Verdict: ready` (verdict "ready");
 3. the readiness file has no match for `/NO[-\s]?GO/i`, bmalph's preflight regex, searched case-insensitive across line breaks with the Grep tool (pattern `NO[-\s]?GO`, multiline);
 4. the staging dry run exits 0:
@@ -118,7 +118,14 @@ A failed round names its artifact; the correction is made in that artifact (the 
 
 ### Step 7 — Container precondition and hooks
 
-1. Container mode (`capabilities.run_in_container: true`): before `make install-hooks`, `make check-commit-message` or the hooked commit runs, run `docker compose ps --status running --quiet app`. Empty output and `make.start` mapped → `make start RUN_IN_CONTAINER=1` in the background, in the wrapper of step 8 item 6 (≤ 900 s, one restart attempt); `make.start: null`, `docker info` failing or the stack still not running → `ESCALATED` (D25) with the probe output.
+1. Container mode (`capabilities.run_in_container: true`): before `make install-hooks`, `make check-commit-message` or the hooked commit runs, run `docker info`, then `docker compose ps --status running --quiet app`. Empty output and `make.start` mapped → start the stack in its own background call and log:
+
+   ```bash
+   mkdir -p target/rust-sdlc/logs
+   { make start RUN_IN_CONTAINER=1; echo "RUST_SDLC_EXIT=$?"; } > target/rust-sdlc/logs/plan-<UTC>.log 2>&1  # Bash tool, run_in_background: true
+   ```
+
+   Wait for it with the background completion notice, else `"${CLAUDE_PLUGIN_ROOT}/scripts/lib/common.sh" wait_log target/rust-sdlc/logs/plan-<UTC>.log`, called again on `WAITING:` (≤ 900 s in all), then run the `docker compose ps` check again; `app` still not running → one restart attempt with a new log and the same wait, then the check once more. `make.start: null`, `docker info` failing, a wait past 900 s or the stack still not running → `ESCALATED` (D25) with the probe output.
 2. Check the hooks:
 
    ```bash
@@ -136,7 +143,7 @@ A failed round names its artifact; the correction is made in that artifact (the 
    git diff --cached --name-only
    ```
 
-   Every listed path must be one of the seven files of step 5 directly under `specs/<N>-<kebab-title>/`; any other staged path, inside the directory or outside it → `ESCALATED`, naming it, nothing committed (the stage never commits a file it did not write). An empty list means the bundle already equals `HEAD`: nothing is committed, and step 9 reports `UNCHANGED: specs/<N>-<kebab-title> (bundle already committed)`.
+   Every listed path must be one of the seven files of step 5 directly under `specs/<N>-<kebab-title>/`; any other staged path, inside the directory or outside it → `ESCALATED`, naming it, nothing committed (the stage never commits a file it did not write). An empty list means the bundle already equals `HEAD`: nothing is committed, items 2–7 are skipped, and step 9 reports `UNCHANGED: specs/<N>-<kebab-title> (bundle already committed)`.
 2. Merge base (D24):
 
    ```bash
@@ -188,7 +195,7 @@ SPECS_DIR: specs/<N>-<kebab-title>
 
 Exit string (stage `plan`, byte-identical in /rs-sdlc and the loop documentation): bundle complete, readiness "ready", readiness regex clean, bundle committed
 
-The loop is the self-check round of step 6 with the corrections it names; the commit runs once, after a passing round. The stage ends `SUCCESS` when step 6 passes and step 8 committed the bundle (or step 3 found it already committed), `SUCCESS-WITH-REPORT` when it got there with a degrade note (D24 base ref, D1 `make.check_commit_message` null), and `ESCALATED` on any stop named above or an exhausted guard. Nothing is committed on an `ESCALATED` exit.
+The loop is the self-check round of step 6 with the corrections it names; the commit runs once, after a passing round. The stage ends `SUCCESS` when step 6 passes and step 8 committed the bundle (or the bundle was found already committed, by step 3 or by the empty staged list of step 8 item 1, which goes straight to step 9 with the `UNCHANGED:` line and no commit), `SUCCESS-WITH-REPORT` when it got there with a degrade note (D24 base ref, D1 `make.check_commit_message` null), and `ESCALATED` on any stop named above or an exhausted guard. Nothing is committed on an `ESCALATED` exit.
 
 ## Iteration guard
 

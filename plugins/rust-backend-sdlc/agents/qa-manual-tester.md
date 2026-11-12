@@ -84,7 +84,7 @@ One report, returned as the final message, in this order:
    | AC-<n>.<m> | <METHOD> | <base URL><PATH> | <headers and body sent, or none> | <status> | <content-type header> | <x-request-id header> | <first lines of the body> | <status, content type, type or fields> | <what came back> |
    ```
 
-4. The failures: for each FAIL check, its id, expected against observed, and one reproduction command line written as text, never executed by the agent. The reproduction keeps the placeholder `<service.base_url>` for the reader to fill from the profile, spells out the concrete path and carries exactly what the check sent: one `-H` per header it sent (none when it sent none) and `--data-binary` only when it sent a body:
+4. The failures: for each FAIL check, its id, expected against observed, and one reproduction command line written as text, never executed by the agent. The reproduction keeps the placeholder `<service.base_url>` for the reader to fill from the profile, spells out the concrete path and carries exactly what the check sent: one `-H` per header it sent (none when it sent none) and `--data-binary` only when it sent a body, with every `'` inside a header or the body written `'\''`, as in the probe call:
 
    ```text
    curl '<service.base_url><PATH>' -sS -i -X <METHOD> [-H '<Name>: <value>']... [--data-binary '<request body>']

@@ -633,12 +633,17 @@ function track(id, reply, round) {
 
 const subjectOf = (s) => (s.qa ? `fix(#<N>): address QA findings ${s.n}` : `${run.type}(#<N>): story ${s.id} ${subjectTitle(s.title)}`)
 
-const implementBlocked = (round, what, recommendation) =>
-  escalate('implement', 'Implement', `${round}/${CAP.implement}`, `rust-implementer BLOCKED on ${what} — ${clip(recommendation || 'no recommendation', 400)}`, BLOCKED_ACTION)
+// The publish step runs after the last round, so a halt leaves the stories
+// that earlier rounds of this call completed uncommitted: the action names them.
+const commitFirst = (doneNow, action) =>
+  doneNow.length ? `commit the stories completed in earlier rounds first (${doneNow.map((s) => s.id).join(', ')}), each as its own story commit through the git rules, since they are uncommitted in the working tree; then ${action}` : action
 
-function roundCapSpent(pending) {
+const implementBlocked = (round, what, recommendation, doneNow) =>
+  escalate('implement', 'Implement', `${round}/${CAP.implement}`, `rust-implementer BLOCKED on ${what} — ${clip(recommendation || 'no recommendation', 400)}`, commitFirst(doneNow, BLOCKED_ACTION))
+
+function roundCapSpent(pending, doneNow) {
   record(`implement round ${counters.implement + 1}`, 'not started: the round cap is spent')
-  return escalate('implement', 'Implement', `${CAP.implement}/${CAP.implement}`, `stories still open: ${pending.map((s) => s.id).join(', ')}`, 'inspect the open stories and their RALPH_STATUS recommendations in the iteration log (the working tree still holds the uncommitted work), finish them by hand or through /rs-sdlc-implement, then re-run')
+  return escalate('implement', 'Implement', `${CAP.implement}/${CAP.implement}`, `stories still open: ${pending.map((s) => s.id).join(', ')}`, commitFirst(doneNow, 'inspect the open stories and their RALPH_STATUS recommendations in the iteration log (the working tree still holds the uncommitted work), finish them by hand or through /rs-sdlc-implement, then re-run'))
 }
 
 // One round of rust-implementer agents over the next batch. Returns the round
@@ -664,13 +669,13 @@ const serialEnd = ({ replies }) => ({ completed: replies.filter(({ r }) => r && 
 // A parallel round ends with the serialized verify step: the written stories
 // count only when it completes. Returns {halt} on BLOCKED, else {completed,
 // verifyText}.
-async function verifyEnd({ round, batch, replies, ran }) {
+async function verifyEnd({ round, batch, replies, ran }, doneNow) {
   const written = replies.filter(({ r }) => r && r.status === 'COMPLETE')
   const v = await agent(verifyPrompt(round, batch), { label: `verify ${round}`, phase: 'Implement', agentType: IMPLEMENTER, schema: STORY_SCHEMA })
   track(`verify ${round}`, v, round)
   if (v && v.status === 'BLOCKED') {
     record(`${ran}, verify ${round}`, 'verify BLOCKED')
-    return { halt: implementBlocked(round, `the serialized verify step of round ${round}`, v.recommendation) }
+    return { halt: implementBlocked(round, `the serialized verify step of round ${round}`, v.recommendation, doneNow) }
   }
   const verified = Boolean(v && v.status === 'COMPLETE' && v.exit_signal === true)
   const verifyText = `, verify ${v ? `${v.status}${v.exit_signal === true ? '' : ' (EXIT_SIGNAL false)'}` : 'returned nothing'}`
@@ -692,14 +697,14 @@ function closeRound({ round, mode, batch, replies, ran }, { completed, verifyTex
 // Returns the escalation that stops the run, else null (doneNow collects the
 // stories this round completed).
 async function implementRound(pending, doneNow) {
-  if (counters.implement >= CAP.implement) return roundCapSpent(pending)
+  if (counters.implement >= CAP.implement) return roundCapSpent(pending, doneNow)
   const rd = await dispatchRound(pending)
   const blocked = rd.replies.find(({ r }) => r && r.status === 'BLOCKED')
   if (blocked) {
     record(rd.ran, `story ${blocked.s.id} BLOCKED`)
-    return implementBlocked(rd.round, `story ${blocked.s.id}`, blocked.r.recommendation)
+    return implementBlocked(rd.round, `story ${blocked.s.id}`, blocked.r.recommendation, doneNow)
   }
-  const end = rd.mode === 'serial' ? serialEnd(rd) : await verifyEnd(rd)
+  const end = rd.mode === 'serial' ? serialEnd(rd) : await verifyEnd(rd, doneNow)
   if (end.halt) return end.halt
   closeRound(rd, end, doneNow)
   return null

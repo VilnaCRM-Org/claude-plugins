@@ -668,6 +668,21 @@ gp_workflows_without() {
   gp_same "$EXPECTED" "$OUT"
 }
 
+@test "generate-profile: .env APP_PORT in the dotenv forms the template's with-env.sh reads" {
+  printf '# host port\nexport APP_PORT = "7002" # published by compose\n' >"$STUB/.env"
+  gp_detect
+  [ ! -s "$ERR" ]
+  gp_expect service.port 7002 service.base_url "'http://localhost:7002'"
+  gp_same "$EXPECTED" "$OUT"
+  printf "APP_PORT='7003'\r\n" >"$STUB/.env"
+  gp_detect
+  gp_expect service.port 7003 service.base_url "'http://localhost:7003'"
+  gp_same "$EXPECTED" "$OUT"
+  printf 'APP_PORT=7004#no space before the hash\n' >"$STUB/.env"
+  gp_detect
+  gp_same "$GOLDEN" "$OUT"
+}
+
 @test "generate-profile: fallback — no sync workflows; one sync workflow gives its flavour" {
   rm "$STUB/.github/workflows/template-sync-app.yml" "$STUB/.github/workflows/template-sync-pat.yml"
   gp_detect

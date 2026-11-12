@@ -14,6 +14,17 @@ export const meta = {
 
 const MAX_ITERATIONS = 5
 const MAX_FIX_GROUPS = 4
+// The 28 plugin skills, the names of skills/*/SKILL.md (FR-32: one verdict per plugin skill).
+const PLUGIN_SKILLS = [
+  'api-contract-development', 'api-resource-development', 'architecture-boundary-fixer', 'architecture-model-sync',
+  'async-runtime-safety', 'bmad-autonomous-planning', 'bmad-fr-nfr-review-gate', 'bounded-context-scaffolding',
+  'cache-management', 'clean-architecture-llm', 'code-organization', 'code-review',
+  'complexity-management', 'configuration-management', 'database-migrations', 'dependency-policy',
+  'documentation-creation', 'documentation-sync', 'implementing-ddd-architecture', 'load-testing',
+  'observability-instrumentation', 'quality-standards', 'query-performance-analysis', 'rust-error-handling',
+  'security-audit', 'service-scaffolding', 'testing-workflow', 'verification-workflow',
+]
+const ALWAYS_EXECUTE = ['code-review', 'quality-standards']
 const EXIT_CONDITION = 'zero new gate findings AND every quality row PASS'
 const SECURITY_FAMILIES = ['injection', 'bola-idor', 'mass-assignment', 'dos', 'information-disclosure', 'secrets', 'dependency-advisories', 'memory-safety']
 const SEVERITIES = ['Critical', 'High', 'Medium', 'Low', 'Info']
@@ -179,6 +190,25 @@ function quotedBlock(f) {
   return hit ? { lens: f.lens, id: f.id, line: hit[0], path: hit[1] } : null
 }
 
+// FR-32: every skill verdict recorded, no silent skips. A triage without one
+// verdict for each of the 28 plugin skills, with a name that is not a plugin
+// skill, with code-review or quality-standards not EXECUTE, or with a NOT
+// APPLICABLE that names no reason is never used.
+function triageGaps(execute, notApplicable) {
+  const executed = execute.map(oneLine)
+  const names = [...executed, ...notApplicable.map((n) => oneLine(n.skill))]
+  const unique = new Set(names.filter(Boolean))
+  const missing = PLUGIN_SKILLS.filter((s) => !unique.has(s))
+  const foreign = [...unique].filter((s) => !PLUGIN_SKILLS.includes(s))
+  return [
+    unique.size !== names.length && `${names.length - unique.size} repeated or unnamed verdict(s)`,
+    missing.length > 0 && `no verdict for ${missing.join(', ')}`,
+    foreign.length > 0 && `not a plugin skill: ${foreign.join(', ')}`,
+    ...ALWAYS_EXECUTE.filter((s) => !executed.includes(s)).map((s) => `${s} is not EXECUTE`),
+    ...notApplicable.filter((n) => !oneLine(n.reason)).map((n) => `${oneLine(n.skill) || 'a skill'} is NOT APPLICABLE without a reason`),
+  ].filter(Boolean)
+}
+
 function escalationBlock(finding, action) {
   return [
     '=== SDLC ESCALATION ===',
@@ -280,6 +310,11 @@ if (!files.length) {
 const triage = {
   execute: arr(scope.execute_skills).filter((s) => typeof s === 'string'),
   notApplicable: arr(scope.not_applicable).filter((n) => n && typeof n === 'object'),
+}
+const gaps = triageGaps(triage.execute, triage.notApplicable)
+if (gaps.length) {
+  journal.push(`0: scope triage -> ${gaps.join('; ')}`)
+  return escalate(`skill triage incomplete: ${gaps.join('; ')}`, `re-run the review panel; a triage is used only with one verdict for each of the ${PLUGIN_SKILLS.length} plugin skills, code-review and quality-standards EXECUTE and a reason on every NOT APPLICABLE (every skill verdict recorded, no silent skips)`)
 }
 log(`scope: ${files.length} files, base ${scope.base}, ${triage.execute.length} EXECUTE / ${triage.notApplicable.length} NOT APPLICABLE skills, specs ${scope.specs_dir || 'none'}, PR ${scope.pr ? `#${scope.pr}` : 'none'}`)
 
