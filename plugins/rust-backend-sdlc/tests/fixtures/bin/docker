@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Stub `docker` for the hermetic bats suites (§ Test Architecture › Stub executables).
+# Docker is unreachable by default: `docker info` fails unless a suite opts in.
+# Env config:
+#   STUB_DOCKER_INFO_EXIT  exit code of `docker info`                 (default: 1)
+#   STUB_DOCKER_EXIT       exit code of every other call              (default: 0)
+#   STUB_DOCKER_LOG        append-log of `docker <argv>` per call     (default: off)
+set -euo pipefail
+
+if [[ -n "${STUB_DOCKER_LOG:-}" ]]; then
+  printf 'docker %s\n' "$*" >>"$STUB_DOCKER_LOG"
+fi
+if [[ "${1:-}" == "info" ]]; then
+  code="${STUB_DOCKER_INFO_EXIT:-1}"
+  if [[ "$code" == 0 ]]; then
+    printf 'Server Version: 27.3.1\n'
+  else
+    printf 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?\n' >&2
+  fi
+  exit "$code"
+fi
+exit "${STUB_DOCKER_EXIT:-0}"

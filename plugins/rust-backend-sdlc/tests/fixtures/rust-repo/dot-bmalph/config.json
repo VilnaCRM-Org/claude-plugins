@@ -1,0 +1,9 @@
+{
+  "name": "rust-template",
+  "description": "Acme Rust service template",
+  "createdAt": "2026-11-10T16:20:16.760Z",
+  "platform": "claude-code",
+  "upstreamVersions": {
+    "bmadCommit": "d1163f85"
+  }
+}

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Stub `cargo` for the hermetic bats suites (§ Test Architecture › Stub executables).
+# It only records calls, so a suite can assert that a script never runs cargo.
+# Env config:
+#   STUB_CARGO_EXIT  exit code of every call                  (default: 0)
+#   STUB_CARGO_LOG   append-log of `cargo <argv>` per call    (default: off)
+set -euo pipefail
+
+if [[ -n "${STUB_CARGO_LOG:-}" ]]; then
+  printf 'cargo %s\n' "$*" >>"$STUB_CARGO_LOG"
+fi
+exit "${STUB_CARGO_EXIT:-0}"

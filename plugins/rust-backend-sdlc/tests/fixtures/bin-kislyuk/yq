@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Stub of the kislyuk (python, jq-wrapper) `yq` for the hermetic bats suites
+# (§ Test Architecture › Stub executables, ADR-22). It lives outside
+# tests/fixtures/bin/ so it never shadows a real mikefarah `yq`; a suite puts this
+# directory first on PATH only in the cases that need it.
+# Behaviour: `--version` prints `yq 3.4.3`; any expression prints `"array"` (the
+# jq answer to `.a | type`), never mikefarah's `!!seq`, so `have_yq` rejects it.
+# Like the real tool it reads stdin when no file argument follows the expression
+# (bounded: a one-second idle read ends it), so a producer piping into it never
+# dies of SIGPIPE.
+set -euo pipefail
+
+if [[ "${1:-}" == "--version" ]]; then
+  printf 'yq 3.4.3\n'
+  exit 0
+fi
+
+expression_seen=0
+files=0
+for arg in "$@"; do
+  case "$arg" in
+    -*) ;;
+    *)
+      if [[ "$expression_seen" == 0 ]]; then
+        expression_seen=1
+      else
+        files=$((files + 1))
+      fi
+      ;;
+  esac
+done
+if [[ "$files" == 0 && ! -t 0 ]]; then
+  while IFS= read -r -t 1 _line; do
+    :
+  done
+fi
+printf '"array"\n'
