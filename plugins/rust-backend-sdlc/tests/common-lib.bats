@@ -2276,3 +2276,904 @@ PY
   [ "$status" -eq 1 ]
   [[ "$output" == 'REFUSED: name-format '* ]]
 }
+
+# section: publishing and model sessions
+
+# pm_workdir — cd into $BATS_TEST_TMPDIR/pm-repo (PM_DIR), a working directory
+# (the repository root of the redact and ledger_write cases) holding
+# target/rust-sdlc/tmp.
+pm_workdir() {
+  PM_DIR="$BATS_TEST_TMPDIR/pm-repo"
+  mkdir -p "$PM_DIR/target/rust-sdlc/tmp"
+  cd "$PM_DIR"
+}
+
+# pm_fake KIND — a synthetic, scanner-safe secret of KIND, assembled at run
+# time from halves so no secret-shaped literal sits in this file.
+pm_fake() {
+  case "$1" in
+    akia) printf '%s%s' 'AK''IA' 'IOSFODNN7EXAMPLE' ;;
+    asia) printf '%s%s' 'AS''IA' 'IOSFODNN7EXAMPLE' ;;
+    jwt) printf '%s.%s.%s' 'ey''JhbGciOiJub25lIn0' 'eyJzdWIiOiJleGFtcGxlIn0' 'ZXhhbXBsZS1zaWduYXR1cmU' ;;
+    ghp) printf '%s%s' 'gh''p_' 'aaaaBBBBccccDDDDeeee' ;;
+    pat) printf '%s%s' 'github''_pat_' '11EXAMPLE0example_only_body' ;;
+    aws-secret) printf '%s%s' 'wJalrXUtnFEMI/K7MDENG/' 'bPxRfiCYEXAMPLEKEY' ;;
+    begin) printf '%s%s%s' '-----BEGIN ' "${2:+$2 }" 'PRIV''ATE KEY-----' ;;
+    end) printf '%s%s%s' '-----END ' "${2:+$2 }" 'PRIV''ATE KEY-----' ;;
+    *)
+      printf 'pm_fake: unknown kind %s\n' "$1" >&2
+      return 1
+      ;;
+  esac
+}
+
+# pm_run N — N repetitions of `Ab1` (a run with upper, lower and digit).
+pm_run() {
+  local i out=""
+  for ((i = 0; i < $1; i++)); do
+    out+="Ab1"
+  done
+  printf '%s' "$out"
+}
+
+# pm_redacts INPUT EXPECTED — redact turns INPUT into exactly EXPECTED, both
+# executed through the dispatcher and as the sourced function.
+pm_redacts() {
+  local got="$BATS_TEST_TMPDIR/pm-redacted" want="$BATS_TEST_TMPDIR/pm-expected"
+  printf '%s' "$2" >"$want"
+  printf '%s' "$1" | "$LIB" redact >"$got"
+  if ! cmp -s "$want" "$got"; then
+    printf 'input:    %s\nexpected: %s\nactual:   %s\n' "$1" "$2" "$(cat "$got")"
+    return 1
+  fi
+  # shellcheck disable=SC2119 # redact reads stdin; it takes no argument here
+  printf '%s' "$1" | redact >"$got"
+  cmp "$want" "$got"
+}
+
+# pm_spy — puts a `claude` spy first on PATH. Each call appends `call=<n>
+# gh_config=<GH_CONFIG_DIR> state=<none|empty|non-empty> stdin=<bytes>` to
+# $PM_SPY_LOG and writes its argv NUL-separated to $PM_SPY_DIR/argv.<n>; with
+# PM_SPY_SIGNAL=TERM it sends SIGTERM to its parent, with PM_SPY_FAIL_FIRST=1
+# the first call exits 1; otherwise it runs the shared stub with the same
+# arguments (its STUB_CLAUDE_* settings, call log and env log apply).
+pm_spy() {
+  export PM_SPY_DIR="$BATS_TEST_TMPDIR/pm-spy" PM_SPY_LOG="$BATS_TEST_TMPDIR/pm-spy.log"
+  export PM_REAL_CLAUDE="$PLUGIN_ROOT/tests/fixtures/bin/claude"
+  mkdir -p "$PM_SPY_DIR"
+  : >"$PM_SPY_LOG"
+  cat >"$PM_SPY_DIR/claude" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+n=$(($(grep -c '^call=' "$PM_SPY_LOG" || true) + 1))
+printf '%s\0' "$@" >"$PM_SPY_DIR/argv.$n"
+dir="${GH_CONFIG_DIR-}"
+state=none
+if [[ -n "$dir" && -d "$dir" ]]; then
+  state=empty
+  if [[ -n "$(ls -A "$dir")" ]]; then
+    state=non-empty
+  fi
+fi
+printf 'call=%s gh_config=%s state=%s stdin=%s\n' "$n" "$dir" "$state" "$(wc -c | tr -d ' ')" >>"$PM_SPY_LOG"
+if [[ "${PM_SPY_SIGNAL:-}" == TERM ]]; then
+  kill -TERM "$PPID"
+fi
+if [[ "${PM_SPY_FAIL_FIRST:-}" == 1 && "$n" == 1 ]]; then
+  exit 1
+fi
+exec "$PM_REAL_CLAUDE" "$@"
+EOF
+  chmod 755 "$PM_SPY_DIR/claude"
+  PATH="$PM_SPY_DIR:$PATH"
+}
+
+# pm_gh_dirs — the GH_CONFIG_DIR of every spied call, one per line.
+pm_gh_dirs() {
+  sed -n 's/^call=[0-9]* gh_config=\([^ ]*\) .*/\1/p' "$PM_SPY_LOG"
+}
+
+# pm_private_tmp — a fresh TMPDIR below $BATS_TEST_TMPDIR (PM_TMP), so every
+# `mktemp -d` of a case lands where the case can list it.
+pm_private_tmp() {
+  export PM_TMP="$BATS_TEST_TMPDIR/pm-tmp"
+  mkdir -p "$PM_TMP"
+  export TMPDIR="$PM_TMP"
+}
+
+# pm_sessions — the number of claude session calls in the shared stub's log.
+pm_sessions() {
+  grep -c '^claude -p' "$STUB_CLAUDE_LOG" || true
+}
+
+# pm_env_block FILE — the ADR-8 isolation lines of FILE: from the line naming
+# `env -u GH_TOKEN` to the line naming `Bash(git credential:*)`, each without
+# its indentation and without a leading `cmd=(`.
+pm_env_block() {
+  awk '/env -u GH_TOKEN/ { f = 1 }
+    f { line = $0; sub(/^[[:space:]]+/, "", line); sub(/^cmd=\(/, "", line); print line }
+    f && /Bash\(git credential:\*\)/ { exit }' "$1"
+}
+
+# pm_findings — a valid code-review findings array: one file-level finding
+# with a line and one requirement-level finding (file and line null).
+pm_findings() {
+  printf '%s\n' '[{"id": "CQ-1", "severity": "High", "file": "crates/billing/invoice/domain/src/invoice.rs", "line": 42, "rule": "Q9", "summary": "unwrap() on a repository result can panic", "status": "open"}, {"id": "CQ-2", "severity": "Info", "file": null, "line": null, "rule": "Q12", "summary": "the export query has no integration test", "status": "fixed"}]'
+}
+
+# pm_set INDEX KEY JSON — stdin findings with finding INDEX's KEY set to JSON
+# (a new key is added).
+pm_set() {
+  python3 -I -c '
+import json
+import sys
+
+doc = json.load(sys.stdin)
+doc[int(sys.argv[1])][sys.argv[2]] = json.loads(sys.argv[3])
+print(json.dumps(doc))
+' "$@"
+}
+
+# pm_ledger INPUT ARG... — `common.sh ledger_write ARG...` executed through the
+# dispatcher with INPUT on stdin, under bats `run --separate-stderr`.
+pm_ledger() {
+  local input="$1"
+  shift
+  run --separate-stderr bash -c 'printf "%s" "$1" | "$2" ledger_write "${@:3}"' _ "$input" "$LIB" "$@"
+}
+
+# pm_sha — the head sha of the ledger cases.
+pm_sha() {
+  printf '%s' 0123456789abcdef0123456789abcdef01234567
+}
+
+# pm_refused INPUT ARG... — ledger_write refuses INPUT (exit 1, no stdout) and
+# writes no ledger below the working directory.
+pm_refused() {
+  pm_ledger "$@"
+  if [ "$status" -ne 1 ] || [ -n "$output" ] || [ -e target/rust-sdlc/review-ledgers ]; then
+    printf 'status %s, stdout %s, stderr %s\n' "$status" "$output" "$stderr"
+    return 1
+  fi
+}
+
+# --- layout and dispatch of the publishing and model sessions -----------------------
+
+@test "common-lib: layout: the publishing and model sessions section follows command helpers and holds its seven functions" {
+  local ch pm next line fn suite from to
+  ch="$(grep -nxF '# section: command helpers' "$LIB" | cut -d: -f1)"
+  pm="$(grep -nxF '# section: publishing and model sessions' "$LIB" | cut -d: -f1)"
+  [ -n "$pm" ]
+  [ "$pm" -gt "$ch" ]
+  # A3 order: core, command helpers, publishing and model sessions, then a
+  # later section or the dispatch trailer, which stays last.
+  [ "$(grep '^# section: ' "$LIB" | sed -n 3p)" = '# section: publishing and model sessions' ]
+  case "$(grep '^# section: ' "$LIB" | sed -n 4p)" in
+    '# section: stage state and resume' | '# section: dispatch (keep last)') ;;
+    *) return 1 ;;
+  esac
+  [ "$(grep '^# section: ' "$LIB" | tail -n 1)" = '# section: dispatch (keep last)' ]
+  next="$(awk -v from="$pm" 'NR > from && /^# section: / { print NR; exit }' "$LIB")"
+  for fn in redact fence_safe claude_is_error claude_extract_result claude_run_once \
+    claude_run_isolated ledger_write; do
+    line="$(grep -nxF "$fn() {" "$LIB" | cut -d: -f1)"
+    [ -n "$line" ]
+    [ "$line" -gt "$pm" ]
+    [ "$line" -lt "$next" ]
+  done
+  run awk -v from="$pm" -v to="$next" 'NR > from && NR < to && /^[A-Za-z_][A-Za-z0-9_]*\(\) \{$/' "$LIB"
+  printf '%s\n' "$output" | grep -vE '^(_pm_[a-z_]+|redact|fence_safe|claude_is_error|claude_extract_result|claude_run_once|claude_run_isolated|ledger_write)\(\) \{$' && return 1
+  # This suite's section defines pm_ helpers only.
+  suite="$BATS_TEST_FILENAME"
+  from="$(grep -nxF '# section: publishing and model sessions' "$suite" | cut -d: -f1)"
+  to="$(awk -v from="$from" 'NR > from && /^# section: / { print NR; exit }' "$suite")"
+  run awk -v from="$from" -v to="${to:-999999}" 'NR > from && NR < to && /^[A-Za-z_][A-Za-z0-9_]*\(\) \{$/' "$suite"
+  [ -n "$output" ]
+  printf '%s\n' "$output" | grep -vE '^pm_[a-z_]+\(\) \{$' && return 1
+  true
+}
+
+@test "common-lib: _sdlc_dispatch: redact and ledger_write run executed with their contract status" {
+  pm_workdir
+  run --separate-stderr bash -c 'printf "DB_PASSWORD=hunter2hunter2\n" | "$1" redact' _ "$LIB"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'DB_PASSWORD=[REDACTED]' ]
+  run --separate-stderr "$LIB" redact --bogus
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  pm_ledger "$(pm_findings)" code-review 1 "$(pm_sha)"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'WROTE: target/rust-sdlc/review-ledgers/code-review.json' ]
+  pm_ledger "$(pm_findings)" code-review 1 not-a-sha
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+}
+
+# --- redact: one case per pattern (NFR-10, ADR-27) ------------------------------------
+
+@test "common-lib: redact: AKIA and ASIA key ids become [REDACTED] with the prefix kept" {
+  pm_redacts "aws key $(pm_fake akia) in a log" 'aws key AKIA[REDACTED] in a log'
+  pm_redacts "session key $(pm_fake asia)." 'session key ASIA[REDACTED].'
+  # 15 characters after the prefix are not a key id.
+  pm_redacts 'AKIA0123456789ABCDE' 'AKIA0123456789ABCDE'
+}
+
+@test "common-lib: redact: a JWT becomes [REDACTED]" {
+  local jwt
+  jwt="$(pm_fake jwt)"
+  pm_redacts "cookie $jwt; path=/" 'cookie [REDACTED]; path=/'
+  # Two segments are not a JWT.
+  pm_redacts "${jwt%.*}" "${jwt%.*}"
+}
+
+@test "common-lib: redact: a 20-character ghp_ token and its gh[ousr]_ siblings keep their prefix" {
+  local token body
+  token="$(pm_fake ghp)"
+  body="${token#*_}"
+  [ "${#body}" -eq 20 ]
+  pm_redacts "push with $token now" 'push with ghp_[REDACTED] now'
+  pm_redacts "gho_$body ghu_$body ghs_$body ghr_$body" \
+    'gho_[REDACTED] ghu_[REDACTED] ghs_[REDACTED] ghr_[REDACTED]'
+  # A 19-character body is not a token.
+  pm_redacts "ghp_${body:1}" "ghp_${body:1}"
+}
+
+@test "common-lib: redact: a github_pat_ token becomes [REDACTED] with the prefix kept" {
+  pm_redacts "fine-grained $(pm_fake pat) end" 'fine-grained github_pat_[REDACTED] end'
+}
+
+@test "common-lib: redact: a multi-line PEM private-key block becomes one [REDACTED]" {
+  local body1 body2
+  body1='bm90IGEgcmVhbCBrZXkgLSBzeW50aGV0aWMgdGVzdCBkYXRhIG9ubHkgMTIzNA=='
+  body2='c3ludGhldGljIHNlY29uZCBsaW5lIDU2Nzg='
+  pm_redacts "before
+$(pm_fake begin RSA)
+$body1
+$body2
+$(pm_fake end RSA)
+after
+" 'before
+[REDACTED]
+after
+'
+  # PKCS#8 without an algorithm word, and a block cut before its END line,
+  # which is redacted to the end of the text.
+  pm_redacts "a $(pm_fake begin)
+$body2
+$(pm_fake end) b" 'a [REDACTED] b'
+  pm_redacts "kept
+$(pm_fake begin OPENSSH)
+$body2
+truncated" 'kept
+[REDACTED]'
+}
+
+@test "common-lib: redact: an Authorization header keeps its name and scheme" {
+  pm_redacts 'curl -H "Authorization: Bearer abc.def-123" https://api.example.invalid' \
+    'curl -H "Authorization: Bearer [REDACTED] https://api.example.invalid'
+  pm_redacts 'authorization: basic dXNlcjpleGFtcGxl' 'authorization: basic [REDACTED]'
+  pm_redacts 'AUTHORIZATION:Token abc' 'AUTHORIZATION:Token [REDACTED]'
+}
+
+@test "common-lib: redact: the identifier form AWS_SECRET_ACCESS_KEY=… keeps the name" {
+  pm_redacts "export AWS_SECRET_ACCESS_KEY=$(pm_fake aws-secret)" 'export AWS_SECRET_ACCESS_KEY=[REDACTED]'
+  pm_redacts "aws_secret_access_key = $(pm_fake aws-secret) # local" \
+    'aws_secret_access_key = [REDACTED] # local'
+}
+
+@test "common-lib: redact: the identifier form DB_PASSWORD=… and the other keywords keep the name" {
+  pm_redacts 'DB_PASSWORD=hunter2hunter2' 'DB_PASSWORD=[REDACTED]'
+  pm_redacts 'db_password: example-only next' 'db_password: [REDACTED] next'
+  pm_redacts 'PASSWD=x API_KEY=y APIKEY:z CLIENT_SECRET = w GITHUB_TOKEN=v' \
+    'PASSWD=[REDACTED] API_KEY=[REDACTED] APIKEY:[REDACTED] CLIENT_SECRET = [REDACTED] GITHUB_TOKEN=[REDACTED]'
+  # A keyword without an assignment stays.
+  pm_redacts 'rotate the token and the password' 'rotate the token and the password'
+}
+
+@test "common-lib: redact: URL credentials become [REDACTED] between :// and @" {
+  pm_redacts 'DATABASE_URL=postgres://app:example-only@db:5432/billing' \
+    'DATABASE_URL=postgres://[REDACTED]@db:5432/billing'
+  pm_redacts 'git clone https://x-access:abc@github.com/acme/billing.git' \
+    'git clone https://[REDACTED]@github.com/acme/billing.git'
+  # A user without a password is no credential.
+  pm_redacts 'ssh://git@github.com/acme/billing.git' 'ssh://git@github.com/acme/billing.git'
+}
+
+@test "common-lib: redact: a mixed-class base64/hex run of 40 or more characters becomes [REDACTED]" {
+  local run42 hex
+  run42="$(pm_run 14)"
+  hex="0aF10aF10aF10aF10aF10aF10aF10aF10aF10aF1"
+  pm_redacts "blob $run42 end" 'blob [REDACTED] end'
+  pm_redacts "padded ${run42}9Q==" 'padded [REDACTED]'
+  pm_redacts "mixed-case hex $hex" 'mixed-case hex [REDACTED]'
+  # 39 characters stay.
+  pm_redacts "short $(pm_run 13)" "short $(pm_run 13)"
+}
+
+@test "common-lib: redact: commit shas, digests, identifiers and paths are not mixed-class runs" {
+  local sha256 text
+  sha256="$(printf '%s' 0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF)"
+  text="| review | PASS | 0123456789abcdef0123456789abcdef01234567 | 3 | 2026-11-12T10:00:00Z |
+digest sha256:$sha256
+InvoiceExportQueryHandlerIntegrationTestSuite
+crates/billing/invoice/infrastructure/src/persistence/v2/repository.rs
+invoice_export_query_handler_integration_test_2026_11_12_case"
+  pm_redacts "$text" "$text"
+}
+
+@test "common-lib: redact: the patterns apply in order and a second pass changes nothing" {
+  local once="$BATS_TEST_TMPDIR/once" twice="$BATS_TEST_TMPDIR/twice"
+  # The token rule runs before the identifier rule, the JWT rule before the
+  # header rule and the PEM rule before the run rule.
+  pm_redacts "TOKEN=$(pm_fake ghp)" 'TOKEN=[REDACTED]'
+  pm_redacts "Authorization: Bearer $(pm_fake jwt)" 'Authorization: Bearer [REDACTED]'
+  pm_redacts "$(pm_fake begin EC)
+$(pm_run 20)
+$(pm_run 20)
+$(pm_fake end EC)" '[REDACTED]'
+  # shellcheck disable=SC2119 # redact reads stdin; it takes no argument here
+  printf 'k %s\nDB_PASSWORD=x\nhttps://u:p@h\n%s\n' "$(pm_fake akia)" "$(pm_run 14)" | redact >"$once"
+  # shellcheck disable=SC2119 # as above
+  redact <"$once" >"$twice"
+  cmp "$once" "$twice"
+  [ "$(grep -c 'REDACTED' "$once")" -eq 4 ]
+}
+
+@test "common-lib: redact: text without a secret is copied byte for byte" {
+  local raw="$BATS_TEST_TMPDIR/raw" out="$BATS_TEST_TMPDIR/out"
+  printf 'plain\ttext\r\ncommit 0123456789abcdef0123456789abcdef01234567\n\377\376 bytes <<< kept >>>, no newline' >"$raw"
+  "$LIB" redact <"$raw" >"$out"
+  cmp "$raw" "$out"
+  : >"$raw"
+  "$LIB" redact <"$raw" >"$out"
+  [ ! -s "$out" ]
+}
+
+# --- redact --in/--out (ADR-27) ------------------------------------------------------------
+
+@test "common-lib: redact: --in and --out below target/rust-sdlc/tmp/ write the redacted body atomically" {
+  pm_workdir
+  printf 'Closes #12\nDB_PASSWORD=hunter2hunter2\n' >target/rust-sdlc/tmp/body.raw.md
+  run --separate-stderr "$LIB" redact --in target/rust-sdlc/tmp/body.raw.md --out target/rust-sdlc/tmp/body.md
+  [ "$status" -eq 0 ]
+  [ "$output" = 'WROTE: target/rust-sdlc/tmp/body.md' ]
+  printf 'Closes #12\nDB_PASSWORD=[REDACTED]\n' | cmp - target/rust-sdlc/tmp/body.md
+  [ "$(find target/rust-sdlc/tmp -mindepth 1 | sed 's|.*/||' | sort | tr '\n' ' ')" = 'body.md body.raw.md ' ]
+  # An existing --out keeps its mode and is replaced, not appended to.
+  chmod 640 target/rust-sdlc/tmp/body.md
+  printf 'second\n' >target/rust-sdlc/tmp/body.raw.md
+  run --separate-stderr "$LIB" redact --out target/rust-sdlc/tmp/body.md --in target/rust-sdlc/tmp/body.raw.md
+  [ "$status" -eq 0 ]
+  printf 'second\n' | cmp - target/rust-sdlc/tmp/body.md
+  [ "$(perms target/rust-sdlc/tmp/body.md)" = '-rw-r-----' ]
+  # --out alone reads stdin and creates a missing tmp directory; --in alone
+  # prints to stdout; --in and --out may name the same file.
+  rm -rf target
+  run --separate-stderr bash -c 'printf "%s\n" "$2" | "$1" redact --out "$3"' _ "$LIB" \
+    "key $(pm_fake akia)" "$PM_DIR/target/rust-sdlc/tmp/state.md"
+  [ "$status" -eq 0 ]
+  [ "$output" = "WROTE: $PM_DIR/target/rust-sdlc/tmp/state.md" ]
+  printf 'key AKIA[REDACTED]\n' | cmp - target/rust-sdlc/tmp/state.md
+  printf 'GH_TOKEN=x\n' >target/rust-sdlc/tmp/same.md
+  run --separate-stderr "$LIB" redact --in target/rust-sdlc/tmp/same.md
+  [ "$output" = 'GH_TOKEN=[REDACTED]' ]
+  run --separate-stderr "$LIB" redact --in target/rust-sdlc/tmp/same.md --out target/rust-sdlc/tmp/same.md
+  [ "$status" -eq 0 ]
+  printf 'GH_TOKEN=[REDACTED]\n' | cmp - target/rust-sdlc/tmp/same.md
+}
+
+@test "common-lib: redact: --in outside target/rust-sdlc/tmp/ exits 2 with nothing written" {
+  local arg
+  pm_workdir
+  printf 'DB_PASSWORD=x\n' >raw.md
+  printf 'DB_PASSWORD=x\n' >target/rust-sdlc/raw.md
+  printf 'DB_PASSWORD=x\n' >"$BATS_TEST_TMPDIR/outside.md"
+  ln -s "$BATS_TEST_TMPDIR/outside.md" target/rust-sdlc/tmp/link.md
+  for arg in raw.md target/rust-sdlc/raw.md "$BATS_TEST_TMPDIR/outside.md" \
+    target/rust-sdlc/tmp/../raw.md target/rust-sdlc/tmp/link.md; do
+    run --separate-stderr "$LIB" redact --in "$arg" --out target/rust-sdlc/tmp/body.md
+    if [ "$status" -ne 2 ] || [ -n "$output" ] || [ -e target/rust-sdlc/tmp/body.md ]; then
+      printf '%s: status %s, output %s\n' "$arg" "$status" "$output"
+      return 1
+    fi
+  done
+  [[ "$stderr" == *'--in must be below target/rust-sdlc/tmp/'* ]]
+  # Inside, but not a readable regular file.
+  run --separate-stderr "$LIB" redact --in target/rust-sdlc/tmp/missing.md
+  [ "$status" -eq 2 ]
+  run --separate-stderr "$LIB" redact --in target/rust-sdlc/tmp
+  [ "$status" -eq 2 ]
+}
+
+@test "common-lib: redact: --out outside target/rust-sdlc/tmp/ exits 2 with nothing written" {
+  local arg
+  pm_workdir
+  printf 'DB_PASSWORD=x\n' >target/rust-sdlc/tmp/body.raw.md
+  ln -s "$BATS_TEST_TMPDIR" target/rust-sdlc/tmp/escape
+  ln -s "$BATS_TEST_TMPDIR/victim.md" target/rust-sdlc/tmp/victim.md
+  for arg in body.md target/rust-sdlc/body.md "$BATS_TEST_TMPDIR/body.md" \
+    target/rust-sdlc/tmp/../body.md target/rust-sdlc/tmp/escape/body.md target/rust-sdlc/tmp/victim.md \
+    target/rust-sdlc/tmp; do
+    run --separate-stderr "$LIB" redact --in target/rust-sdlc/tmp/body.raw.md --out "$arg"
+    if [ "$status" -ne 2 ] || [ -n "$output" ]; then
+      printf '%s: status %s, output %s\n' "$arg" "$status" "$output"
+      return 1
+    fi
+  done
+  [[ "$stderr" == *'--out must be below target/rust-sdlc/tmp/'* ]]
+  [ ! -e body.md ]
+  [ ! -e target/rust-sdlc/body.md ]
+  [ ! -e "$BATS_TEST_TMPDIR/body.md" ]
+  [ ! -e "$BATS_TEST_TMPDIR/victim.md" ]
+  # A linked tmp directory resolves outside as well.
+  rm -rf target/rust-sdlc/tmp
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere" target/rust-sdlc/tmp
+  run --separate-stderr bash -c 'printf "x\n" | "$1" redact --out target/rust-sdlc/tmp/body.md' _ "$LIB"
+  [ "$status" -eq 2 ]
+  [ -z "$(ls -A "$BATS_TEST_TMPDIR/elsewhere")" ]
+}
+
+@test "common-lib: redact: a link inside target/rust-sdlc/tmp/ is refused and a failed redaction keeps --out" {
+  local real_py
+  pm_workdir
+  printf 'old\n' >target/rust-sdlc/tmp/real.md
+  ln -s real.md target/rust-sdlc/tmp/alias.md
+  printf 'DB_PASSWORD=x\n' >target/rust-sdlc/tmp/body.raw.md
+  run --separate-stderr "$LIB" redact --in target/rust-sdlc/tmp/body.raw.md --out target/rust-sdlc/tmp/alias.md
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *'symbolic link'* ]]
+  printf 'old\n' | cmp - target/rust-sdlc/tmp/real.md
+  # The redaction fails midway: the old --out stays and no temporary file is left.
+  real_py="$(command -v python3)"
+  make_stub "$BATS_TEST_TMPDIR/pm-py" python3 "case \"\$*\" in *REDACTED*) cat >/dev/null; printf partial; exit 1 ;; esac
+exec '$real_py' \"\$@\""
+  PATH="$BATS_TEST_TMPDIR/pm-py:$PATH" run --separate-stderr "$LIB" redact \
+    --in target/rust-sdlc/tmp/body.raw.md --out target/rust-sdlc/tmp/real.md
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  printf 'old\n' | cmp - target/rust-sdlc/tmp/real.md
+  [ "$(find target/rust-sdlc/tmp -mindepth 1 | sed 's|.*/||' | sort | tr '\n' ' ')" = 'alias.md body.raw.md real.md ' ]
+}
+
+@test "common-lib: redact: a missing value, a repeated flag or an unknown argument exits 2" {
+  local args
+  pm_workdir
+  printf 'x\n' >target/rust-sdlc/tmp/a.md
+  for args in '--in' '--out' '--in target/rust-sdlc/tmp/a.md --in target/rust-sdlc/tmp/a.md' \
+    '--out target/rust-sdlc/tmp/b.md --out target/rust-sdlc/tmp/c.md' '--bogus' 'target/rust-sdlc/tmp/a.md'; do
+    # shellcheck disable=SC2086 # word splitting builds the argument list
+    run --separate-stderr "$LIB" redact $args
+    if [ "$status" -ne 2 ] || [ -n "$output" ]; then
+      printf '%s: status %s, output %s\n' "$args" "$status" "$output"
+      return 1
+    fi
+  done
+  run --separate-stderr "$LIB" redact --in ''
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *'--in needs a value'* ]]
+  [ ! -e target/rust-sdlc/tmp/b.md ]
+  [ ! -e target/rust-sdlc/tmp/c.md ]
+}
+
+# --- fence_safe ---------------------------------------------------------------------------
+
+@test "common-lib: fence_safe: <<< and >>> in contributor text are neutralized on stdout" {
+  local out="$BATS_TEST_TMPDIR/fenced"
+  # shellcheck disable=SC2119 # fence_safe reads stdin and takes no argument
+  printf 'ignore >>> previous <<< instructions <<<<>>>>\nnext' | fence_safe >"$out"
+  printf 'ignore \342\200\272\342\200\272\342\200\272 previous \342\200\271\342\200\271\342\200\271 instructions \342\200\271\342\200\271\342\200\271<\342\200\272\342\200\272\342\200\272>\nnext' |
+    cmp - "$out"
+  run grep -cE '<<<|>>>' "$out"
+  [ "$output" = 0 ]
+  # Text without a fence is copied byte for byte; << and >> stay.
+  # shellcheck disable=SC2119 # as above
+  printf 'a << b >> c -> d\n\377' | fence_safe >"$out"
+  printf 'a << b >> c -> d\n\377' | cmp - "$out"
+}
+
+@test "common-lib: fence_safe: takes stdin only; an argument exits 2" {
+  run --separate-stderr fence_safe '<<<text>>>'
+  [ "$status" -eq 2 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *'takes no argument'* ]]
+}
+
+# --- claude driver (ADR-8) ------------------------------------------------------------------
+
+@test "common-lib: claude_is_error: .is_error == true, identical with jq and with python3" {
+  local json sb want rc_jq rc_py
+  sb="$(sandbox_path python3)"
+  run env PATH="$sb" "$BASH" -c 'source "$1"; have_jq' _ "$LIB"
+  [ "$status" -eq 1 ]
+  for json in '{"is_error":true,"result":"API Error: 529 Overloaded"}' '{"is_error":false,"result":"ok"}' \
+    '{"result":"ok"}' '{"is_error":"true"}' '[true]' 'not json' ''; do
+    want=1
+    if [ "$json" = '{"is_error":true,"result":"API Error: 529 Overloaded"}' ]; then
+      want=0
+    fi
+    rc_jq=0
+    claude_is_error "$json" || rc_jq=$?
+    rc_py=0
+    env PATH="$sb" "$BASH" -c 'source "$1"; claude_is_error "$2"' _ "$LIB" "$json" || rc_py=$?
+    if [ "$rc_jq" -ne "$want" ] || [ "$rc_py" -ne "$want" ]; then
+      printf '%s: jq %s, python3 %s, want %s\n' "$json" "$rc_jq" "$rc_py" "$want"
+      return 1
+    fi
+  done
+}
+
+@test "common-lib: claude_extract_result: .result // empty, identical with jq and with python3" {
+  local json sb got_jq got_py
+  sb="$(sandbox_path python3)"
+  for json in '{"is_error":false,"result":"Looks fine.\nAI_REVIEW_VERDICT: PASS"}' '{"result":"ok"}' \
+    '{"result":""}' '{"result":null}' '{"result":false}' '{"is_error":false}' '["result"]' 'not json' ''; do
+    got_jq="$(claude_extract_result "$json"; printf x)"
+    got_py="$(env PATH="$sb" "$BASH" -c 'source "$1"; claude_extract_result "$2"' _ "$LIB" "$json"; printf x)"
+    if [ "$got_jq" != "$got_py" ]; then
+      printf '%s: jq [%s], python3 [%s]\n' "$json" "$got_jq" "$got_py"
+      return 1
+    fi
+  done
+  [ "$(claude_extract_result '{"result":"Looks fine.\nAI_REVIEW_VERDICT: PASS"}')" = $'Looks fine.\nAI_REVIEW_VERDICT: PASS' ]
+  [ -z "$(claude_extract_result '{"is_error":false}')" ]
+}
+
+@test "common-lib: claude_run_once: argv is -p <PROMPT> --output-format json --permission-mode acceptEdits --max-turns 30 and .result is printed" {
+  local prompt out="$BATS_TEST_TMPDIR/out" err="$BATS_TEST_TMPDIR/err"
+  prompt=$'Review the diff.\nEnd with AI_REVIEW_VERDICT: PASS|FAIL'
+  pm_spy
+  unset GH_CONFIG_DIR
+  export STUB_CLAUDE_OUTPUT='{"type":"result","is_error":false,"result":"No findings.\nAI_REVIEW_VERDICT: PASS"}'
+  # The caller's stdin never reaches the session.
+  printf 'caller stdin data' | claude_run_once "$prompt" >"$out" 2>"$err"
+  printf 'No findings.\nAI_REVIEW_VERDICT: PASS\n' | cmp - "$out"
+  [ ! -s "$err" ]
+  printf '%s\0' -p "$prompt" --output-format json --permission-mode acceptEdits --max-turns 30 |
+    cmp - "$PM_SPY_DIR/argv.1"
+  [ "$(cat "$PM_SPY_LOG")" = 'call=1 gh_config= state=none stdin=0' ]
+}
+
+@test "common-lib: claude_run_once: a non-zero claude exit is retried exactly once, then returns 1" {
+  export STUB_CLAUDE_EXIT=1 STUB_CLAUDE_OUTPUT='{"is_error":false,"result":"ok"}'
+  run --separate-stderr claude_run_once 'review'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ "$(pm_sessions)" -eq 2 ]
+  [[ "$stderr" == *'attempt 1/2: claude exited with status 1'* ]]
+  [[ "$stderr" == *'attempt 2/2: claude exited with status 1'* ]]
+  [[ "$stderr" == *'claude failed after one retry'* ]]
+}
+
+@test "common-lib: claude_run_once: is_error true is a transport failure, retried exactly once" {
+  export STUB_CLAUDE_OUTPUT='{"is_error":true,"result":"API Error: 529 Overloaded"}'
+  run --separate-stderr claude_run_once 'review'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ "$(pm_sessions)" -eq 2 ]
+  [[ "$stderr" == *'is_error: true'* ]]
+}
+
+@test "common-lib: claude_run_once: a reply without .result is a transport failure, retried exactly once" {
+  local reply
+  for reply in '{"is_error":false,"subtype":"error_max_turns"}' 'Error: not JSON' '{"result":""}' ''; do
+    : >"$STUB_CLAUDE_LOG"
+    STUB_CLAUDE_OUTPUT="$reply" run --separate-stderr claude_run_once 'review'
+    if [ "$status" -ne 1 ] || [ -n "$output" ] || [ "$(pm_sessions)" -ne 2 ]; then
+      printf '%s: status %s, output %s, sessions %s\n' "$reply" "$status" "$output" "$(pm_sessions)"
+      return 1
+    fi
+  done
+  [[ "$stderr" == *'has no .result'* ]]
+}
+
+@test "common-lib: claude_run_once: the retry succeeds after one transport failure" {
+  local replies="$BATS_TEST_TMPDIR/replies"
+  mkdir -p "$replies"
+  printf '%s\n' '{"is_error":true,"result":"API Error: 529 Overloaded"}' >"$replies/1.json"
+  printf '%s\n' '{"is_error":false,"result":"AI_REVIEW_VERDICT: PASS"}' >"$replies/2.json"
+  STUB_CLAUDE_OUTPUTS_DIR="$replies" run --separate-stderr claude_run_once 'review'
+  [ "$status" -eq 0 ]
+  [ "$output" = 'AI_REVIEW_VERDICT: PASS' ]
+  [ "$(pm_sessions)" -eq 2 ]
+  # A non-zero exit first, then a reply.
+  : >"$STUB_CLAUDE_LOG"
+  pm_spy
+  PM_SPY_FAIL_FIRST=1 STUB_CLAUDE_OUTPUT='{"result":"FR_NFR_NEW_FINDINGS: 0"}' run --separate-stderr claude_run_once 'gate'
+  [ "$status" -eq 0 ]
+  [ "$output" = 'FR_NFR_NEW_FINDINGS: 0' ]
+  [ "$(grep -c '^call=' "$PM_SPY_LOG")" -eq 2 ]
+}
+
+@test "common-lib: claude_run_once: a well-formed negative verdict is never retried" {
+  local reply
+  for reply in '{"is_error":false,"result":"Q9: unwrap on a repository result\nAI_REVIEW_VERDICT: FAIL"}' \
+    '{"is_error":false,"result":"FRN-1 FR-3 has no test\nFR_NFR_NEW_FINDINGS: 1"}'; do
+    : >"$STUB_CLAUDE_LOG"
+    STUB_CLAUDE_OUTPUT="$reply" run --separate-stderr claude_run_once 'review'
+    [ "$status" -eq 0 ]
+    [ "$(pm_sessions)" -eq 1 ]
+    [ "${#lines[@]}" -eq 2 ]
+  done
+  [ "${lines[1]}" = 'FR_NFR_NEW_FINDINGS: 1' ]
+}
+
+@test "common-lib: claude_run_once: a missing, empty or second PROMPT exits 2 without a session" {
+  run --separate-stderr claude_run_once
+  [ "$status" -eq 2 ]
+  run --separate-stderr claude_run_once ''
+  [ "$status" -eq 2 ]
+  run --separate-stderr claude_run_isolated 'a' 'b'
+  [ "$status" -eq 2 ]
+  [[ "$stderr" == *'claude_run_isolated: needs one non-empty PROMPT'* ]]
+  [ ! -s "$STUB_CLAUDE_LOG" ]
+}
+
+# --- claude_run_isolated (ADR-8, CC-30) ------------------------------------------------------
+
+@test "common-lib: claude_run_isolated: argv and environment equal ADR-8 and every variable is on the stub's env log" {
+  local prompt='Trace the change to its requirements.' out="$BATS_TEST_TMPDIR/out" gh want="$BATS_TEST_TMPDIR/want"
+  pm_private_tmp
+  pm_spy
+  export GH_TOKEN=caller-token GITHUB_TOKEN=caller-token GH_ENTERPRISE_TOKEN=caller-token
+  export GITHUB_ENTERPRISE_TOKEN=caller-token SSH_AUTH_SOCK="$BATS_TEST_TMPDIR/agent.sock"
+  export GIT_ASKPASS=/bin/false SSH_ASKPASS=/bin/false GH_CONFIG_DIR="$BATS_TEST_TMPDIR/caller-gh"
+  export GIT_CONFIG_GLOBAL="$BATS_TEST_TMPDIR/caller.gitconfig" GIT_CONFIG_COUNT=1
+  export GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=store GIT_TERMINAL_PROMPT=1
+  export STUB_CLAUDE_OUTPUT='{"is_error":false,"result":"FR_NFR_NEW_FINDINGS: 0"}'
+  claude_run_isolated "$prompt" >"$out"
+  [ "$(cat "$out")" = 'FR_NFR_NEW_FINDINGS: 0' ]
+  printf '%s\0' -p "$prompt" --output-format json --permission-mode acceptEdits --max-turns 30 \
+    --restricted --tools 'Read,Grep,Glob' --strict-mcp-config \
+    --disallowedTools 'Bash(gh:*)' 'Bash(git push:*)' 'Bash(git credential:*)' | cmp - "$PM_SPY_DIR/argv.1"
+  gh="$(sed -n 's/^GH_CONFIG_DIR=//p' "$STUB_CLAUDE_LOG")"
+  [[ "$gh" == "$PM_TMP"/tmp.* ]]
+  {
+    printf 'claude -p %s --output-format json --permission-mode acceptEdits --max-turns 30' "$prompt"
+    printf ' --restricted --tools Read,Grep,Glob --strict-mcp-config --disallowedTools Bash(gh:*) Bash(git push:*) Bash(git credential:*)\n'
+    printf '%s unset\n' GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN SSH_AUTH_SOCK GIT_ASKPASS SSH_ASKPASS
+    printf '%s\n' "GH_CONFIG_DIR=$gh" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+      GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
+  } >"$want"
+  diff "$want" "$STUB_CLAUDE_LOG"
+  # The caller's environment is untouched.
+  [ "$GH_TOKEN" = caller-token ]
+  [ "$GH_CONFIG_DIR" = "$BATS_TEST_TMPDIR/caller-gh" ]
+  [ "$GIT_CONFIG_VALUE_0" = store ]
+}
+
+@test "common-lib: claude_run_isolated: GH_CONFIG_DIR is a fresh empty mktemp -d that no longer exists after a success" {
+  pm_private_tmp
+  pm_spy
+  export STUB_CLAUDE_OUTPUT='{"is_error":false,"result":"AI_REVIEW_VERDICT: PASS"}'
+  run --separate-stderr claude_run_isolated 'review'
+  [ "$status" -eq 0 ]
+  [ "$output" = 'AI_REVIEW_VERDICT: PASS' ]
+  [ "$(cut -d' ' -f3 "$PM_SPY_LOG")" = 'state=empty' ]
+  [[ "$(pm_gh_dirs)" == "$PM_TMP"/tmp.* ]]
+  [ ! -e "$(pm_gh_dirs)" ]
+  [ -z "$(ls -A "$PM_TMP")" ]
+  # The caller's own EXIT trap still runs: the session's traps live in a subshell.
+  run lib_shell 'trap "echo caller-exit-trap" EXIT; claude_run_isolated "$1"' review
+  [ "$status" -eq 0 ]
+  [ "${lines[0]}" = 'AI_REVIEW_VERDICT: PASS' ]
+  [ "${lines[1]}" = 'caller-exit-trap' ]
+  [ -z "$(ls -A "$PM_TMP")" ]
+}
+
+@test "common-lib: claude_run_isolated: each attempt's GH_CONFIG_DIR no longer exists after a failure" {
+  local d
+  pm_private_tmp
+  pm_spy
+  STUB_CLAUDE_EXIT=1 run --separate-stderr claude_run_isolated 'review'
+  [ "$status" -eq 1 ]
+  [ "$(grep -c '^call=' "$PM_SPY_LOG")" -eq 2 ]
+  [ "$(pm_gh_dirs | sort -u | wc -l)" -eq 2 ]
+  for d in $(pm_gh_dirs); do
+    [[ "$d" == "$PM_TMP"/tmp.* ]]
+    [ ! -e "$d" ]
+  done
+  [ "$(grep -c 'state=empty' "$PM_SPY_LOG")" -eq 2 ]
+  [ -z "$(ls -A "$PM_TMP")" ]
+  [[ "$stderr" == *'claude_run_isolated: claude failed after one retry'* ]]
+}
+
+@test "common-lib: claude_run_isolated: GH_CONFIG_DIR no longer exists after a signal" {
+  local d
+  pm_private_tmp
+  pm_spy
+  export STUB_CLAUDE_OUTPUT='{"is_error":false,"result":"AI_REVIEW_VERDICT: PASS"}'
+  # The spy sends SIGTERM to the session's shell while claude runs: the trap
+  # removes the directory and the shell dies of the signal (status 143).
+  PM_SPY_SIGNAL=TERM run --separate-stderr claude_run_isolated 'review'
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [ "$(grep -c '^call=' "$PM_SPY_LOG")" -eq 2 ]
+  for d in $(pm_gh_dirs); do
+    [[ "$d" == "$PM_TMP"/tmp.* ]]
+    [ ! -e "$d" ]
+  done
+  [ -z "$(ls -A "$PM_TMP")" ]
+  [[ "$stderr" == *'claude exited with status 143'* ]]
+}
+
+@test "common-lib: claude_run_isolated: the isolation variable set is byte-identical with the react plugin (CC-30)" {
+  local react="$PLUGIN_ROOT/../react-frontend-sdlc/scripts/lib/common.sh"
+  if [ ! -f "$react" ]; then
+    skip "the react-frontend-sdlc plugin is not installed next to this plugin"
+  fi
+  pm_env_block "$react" >"$BATS_TEST_TMPDIR/react.env"
+  pm_env_block "$LIB" >"$BATS_TEST_TMPDIR/rust.env"
+  grep -qF 'GIT_CONFIG_VALUE_0=' "$BATS_TEST_TMPDIR/react.env"
+  grep -qF -- "-u SSH_ASKPASS" "$BATS_TEST_TMPDIR/react.env"
+  diff "$BATS_TEST_TMPDIR/react.env" "$BATS_TEST_TMPDIR/rust.env"
+}
+
+# --- ledger_write (ADR-16) -------------------------------------------------------------------
+
+@test "common-lib: ledger_write: a valid findings array is written atomically with the ADR-16 shape" {
+  local ledger=target/rust-sdlc/review-ledgers/code-review.json
+  pm_workdir
+  unset SDLC_LEDGER_DIR
+  pm_ledger "$(pm_findings)" code-review 0003 "$(pm_sha)"
+  [ "$status" -eq 0 ]
+  [ "$output" = "WROTE: $ledger" ]
+  [ -z "$stderr" ]
+  python3 -I - "$ledger" "$(pm_findings)" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    doc = json.load(handle)
+assert list(doc) == ["schema_version", "lens", "iteration", "head_sha", "findings"], list(doc)
+assert doc["schema_version"] == 1 and doc["lens"] == "code-review" and doc["iteration"] == 3
+assert doc["head_sha"] == "0123456789abcdef0123456789abcdef01234567"
+assert doc["findings"] == json.loads(sys.argv[2])
+assert [list(f) for f in doc["findings"]] == [["id", "severity", "file", "line", "rule", "summary", "status"]] * 2
+PY
+  # A rewrite replaces the file atomically: the mode stays, no temporary file is left.
+  chmod 640 "$ledger"
+  pm_ledger '[]' code-review 4 "$(pm_sha)"
+  [ "$status" -eq 0 ]
+  [ "$(perms "$ledger")" = '-rw-r-----' ]
+  [ "$(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d["iteration"], d["findings"])' "$ledger")" = '4 []' ]
+  [ "$(ls -A target/rust-sdlc/review-ledgers)" = code-review.json ]
+}
+
+@test "common-lib: ledger_write: the directory is --dir, else SDLC_LEDGER_DIR, else target/rust-sdlc/review-ledgers" {
+  local security
+  pm_workdir
+  security="$(pm_findings | pm_set 0 id '"SEC-1"' | pm_set 1 id '"SEC-2"' | pm_set 0 rule '"injection"')"
+  SDLC_LEDGER_DIR=ledgers-env pm_ledger "$security" security 1 "$(pm_sha)"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'WROTE: ledgers-env/security.json' ]
+  SDLC_LEDGER_DIR=ledgers-env pm_ledger "$security" security 1 "$(pm_sha)" --dir "$BATS_TEST_TMPDIR/abs/ledgers"
+  [ "$status" -eq 0 ]
+  [ "$output" = "WROTE: $BATS_TEST_TMPDIR/abs/ledgers/security.json" ]
+  [ -f "$BATS_TEST_TMPDIR/abs/ledgers/security.json" ]
+  SDLC_LEDGER_DIR='' pm_ledger "$(pm_findings | pm_set 0 id '"FRN-1"' | pm_set 1 id '"FRN-2"')" fr-nfr 2 "$(pm_sha)"
+  [ "$status" -eq 0 ]
+  [ "$output" = 'WROTE: target/rust-sdlc/review-ledgers/fr-nfr.json' ]
+  # A linked ledger file is refused.
+  ln -s "$BATS_TEST_TMPDIR/victim.json" target/rust-sdlc/review-ledgers/code-review.json
+  pm_ledger "$(pm_findings)" code-review 1 "$(pm_sha)"
+  [ "$status" -eq 1 ]
+  [ ! -e "$BATS_TEST_TMPDIR/victim.json" ]
+}
+
+@test "common-lib: ledger_write: a null file and line are accepted for a requirement-level finding" {
+  local ledger=target/rust-sdlc/review-ledgers/fr-nfr.json
+  pm_workdir
+  pm_ledger '[{"id":"FRN-1","severity":"Medium","file":null,"line":null,"rule":"FR-3","summary":"FR-3 has no acceptance test","status":"open"},{"id":"FRN-2","severity":"Low","file":"docs/api.md","line":null,"rule":"NFR-BASE-TEST","summary":"file-level finding","status":"dropped"}]' \
+    fr-nfr 1 "$(pm_sha)"
+  [ "$status" -eq 0 ]
+  [ "$(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print([(f["file"], f["line"]) for f in d["findings"]])' "$ledger")" = "[(None, None), ('docs/api.md', None)]" ]
+}
+
+@test "common-lib: ledger_write: --started-at and --ended-at are written as the last keys" {
+  local ledger=target/rust-sdlc/review-ledgers/code-review.json
+  pm_workdir
+  pm_ledger "$(pm_findings)" code-review 2 "$(pm_sha)" --ended-at 2026-11-12T10:30:00Z --started-at 2026-11-12T10:00:00Z
+  [ "$status" -eq 0 ]
+  [ "$(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(list(d)[4:], d["started_at"], d["ended_at"])' "$ledger")" = "['findings', 'started_at', 'ended_at'] 2026-11-12T10:00:00Z 2026-11-12T10:30:00Z" ]
+  pm_ledger '[]' code-review 3 "$(pm_sha)" --started-at 2026-11-12T11:00:00Z
+  [ "$status" -eq 0 ]
+  [ "$(python3 -I -c 'import json,sys; print(list(json.load(open(sys.argv[1]))))' "$ledger")" = "['schema_version', 'lens', 'iteration', 'head_sha', 'findings', 'started_at']" ]
+}
+
+@test "common-lib: ledger_write: an extra key exits 1 with nothing written" {
+  pm_workdir
+  pm_refused "$(pm_findings | pm_set 1 cwe '"CWE-79"')" code-review 1 "$(pm_sha)"
+  [[ "$stderr" == *'findings[1]: extra key "cwe"'* ]]
+}
+
+@test "common-lib: ledger_write: a bad id exits 1 with nothing written" {
+  local id
+  pm_workdir
+  for id in '"cq-1"' '"CQ1"' '"CQ-"' '"CQ-1a"' '7' 'null' '"SEC-1"'; do
+    pm_refused "$(pm_findings | pm_set 0 id "$id")" code-review 1 "$(pm_sha)"
+  done
+  [[ "$stderr" == *'lacks the CQ- prefix of the code-review lens'* ]]
+  # Ids are unique within the ledger.
+  pm_refused "$(pm_findings | pm_set 1 id '"CQ-1"')" code-review 1 "$(pm_sha)"
+  [[ "$stderr" == *'CQ-1 is not unique'* ]]
+}
+
+@test "common-lib: ledger_write: a bad severity exits 1 with nothing written" {
+  local severity
+  pm_workdir
+  for severity in '"high"' '"Severe"' '""' 'null' '3'; do
+    pm_refused "$(pm_findings | pm_set 0 severity "$severity")" code-review 1 "$(pm_sha)"
+  done
+  [[ "$stderr" == *'is not one of Critical High Medium Low Info'* ]]
+}
+
+@test "common-lib: ledger_write: line 0 exits 1 with nothing written" {
+  local line
+  pm_workdir
+  pm_refused "$(pm_findings | pm_set 0 line 0)" code-review 1 "$(pm_sha)"
+  [[ "$stderr" == *'findings[0].line: 0 is not an integer >= 1 or null'* ]]
+  for line in -1 1.5 '"12"' true; do
+    pm_refused "$(pm_findings | pm_set 0 line "$line")" code-review 1 "$(pm_sha)"
+  done
+  # A line needs a file.
+  pm_refused "$(pm_findings | pm_set 1 line 3)" code-review 1 "$(pm_sha)"
+}
+
+@test "common-lib: ledger_write: other ADR-16 violations exit 1 with nothing written" {
+  local long
+  pm_workdir
+  long="$(printf 'x%.0s' $(seq 301))"
+  pm_refused "$(pm_findings | pm_set 0 status '"closed"')" code-review 1 "$(pm_sha)"
+  pm_refused "$(pm_findings | pm_set 0 summary '""')" code-review 1 "$(pm_sha)"
+  pm_refused "$(pm_findings | pm_set 0 summary "\"$long\"")" code-review 1 "$(pm_sha)"
+  pm_refused "$(pm_findings | pm_set 0 summary '"two\nlines"')" code-review 1 "$(pm_sha)"
+  pm_refused "$(pm_findings | pm_set 0 rule '""')" code-review 1 "$(pm_sha)"
+  pm_refused "$(pm_findings | pm_set 0 file '"/etc/passwd"')" code-review 1 "$(pm_sha)"
+  pm_refused "$(pm_findings | pm_set 0 file '"../outside.rs"')" code-review 1 "$(pm_sha)"
+  pm_refused '[{"id":"CQ-1","severity":"High","file":null,"line":null,"rule":"Q9","summary":"s"}]' code-review 1 "$(pm_sha)"
+  [[ "$stderr" == *'missing key status'* ]]
+  pm_refused '[{"id":"CQ-1","id":"CQ-2","severity":"High","file":null,"line":null,"rule":"Q9","summary":"s","status":"open"}]' code-review 1 "$(pm_sha)"
+  pm_refused '{"findings": []}' code-review 1 "$(pm_sha)"
+  pm_refused '["CQ-1"]' code-review 1 "$(pm_sha)"
+  pm_refused '[{"id":"CQ-1","severity":"High","file":null,"line":NaN,"rule":"Q9","summary":"s","status":"open"}]' code-review 1 "$(pm_sha)"
+  pm_refused 'not json' code-review 1 "$(pm_sha)"
+  pm_refused '' code-review 1 "$(pm_sha)"
+  # An existing ledger is left as it was.
+  mkdir -p target/rust-sdlc/review-ledgers-keep
+  printf 'previous\n' >target/rust-sdlc/review-ledgers-keep/code-review.json
+  pm_ledger "$(pm_findings | pm_set 0 status '"closed"')" code-review 1 "$(pm_sha)" --dir target/rust-sdlc/review-ledgers-keep
+  [ "$status" -eq 1 ]
+  printf 'previous\n' | cmp - target/rust-sdlc/review-ledgers-keep/code-review.json
+}
+
+@test "common-lib: ledger_write: the lens agent's fenced json block is accepted as it is" {
+  pm_workdir
+  pm_ledger "$(printf '```json\n%s\n```\n' "$(pm_findings)")" code-review 1 "$(pm_sha)"
+  [ "$status" -eq 0 ]
+  [ "$(python3 -I -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["findings"]))' target/rust-sdlc/review-ledgers/code-review.json)" = 2 ]
+  rm -rf target/rust-sdlc/review-ledgers
+  pm_refused "$(printf '```json\n%s\n' "$(pm_findings)")" code-review 1 "$(pm_sha)"
+  pm_refused "$(printf '```rust\n%s\n```\n' "$(pm_findings)")" code-review 1 "$(pm_sha)"
+}
+
+@test "common-lib: ledger_write: malformed arguments exit 2 with nothing written" {
+  local args
+  pm_workdir
+  for args in '' 'code-review' 'code-review 1' "quality 1 $(pm_sha)" "code-review -1 $(pm_sha)" \
+    "code-review one $(pm_sha)" 'code-review 1 0123456' "code-review 1 $(pm_sha | tr a-f A-F)" \
+    "code-review 1 $(pm_sha) --dir" "code-review 1 $(pm_sha) --bogus x" \
+    "code-review 1 $(pm_sha) --started-at 2026-11-12" "code-review 1 $(pm_sha) --ended-at 2026-11-12T10:00:00+01:00" \
+    "code-review 1 $(pm_sha) --started-at 2026-02-30T00:00:00Z" \
+    "code-review 1 $(pm_sha) --dir a --dir b"; do
+    # shellcheck disable=SC2086 # word splitting builds the argument list
+    pm_ledger "$(pm_findings)" $args
+    if [ "$status" -ne 2 ] || [ -n "$output" ]; then
+      printf '%s: status %s, output %s\n' "$args" "$status" "$output"
+      return 1
+    fi
+  done
+  [ ! -e target/rust-sdlc/review-ledgers ]
+  [ ! -e a ]
+}

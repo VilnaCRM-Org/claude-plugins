@@ -1,0 +1,17 @@
+{
+  "schema_version": 2,
+  "lens": "security",
+  "iteration": 1,
+  "head_sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  "findings": [
+    {
+      "id": "SEC-1",
+      "severity": "Medium",
+      "file": "crates/billing/invoice/infrastructure/src/invoice_routes.rs",
+      "line": 45,
+      "rule": "bola-idor",
+      "summary": "Invoice lookup does not check that the caller owns the invoice",
+      "status": "open"
+    }
+  ]
+}

@@ -1949,6 +1949,543 @@ validate_context_name() {
   return 0
 }
 
+# section: publishing and model sessions
+
+# The single redaction implementation behind every body the plugin publishes
+# (NFR-10, ADR-27), prompt-fence neutralization for contributor text, the two
+# claude drivers of the review loop and the FR/NFR gate (ADR-8) and the
+# validated review-ledger writer (ADR-16). redact and ledger_write are
+# dispatcher names (ADR-15); writes go only below target/rust-sdlc/ or the
+# ledger directory, through safe_write_target and atomic_write. Private helpers
+# carry the _pm_ prefix.
+
+# --- redaction (NFR-10, ADR-27) --------------------------------------------------------
+
+# _pm_redact_stream — stdin to stdout through the redaction list, python3 `re`,
+# applied in this order, each match replaced by [REDACTED] with the lead-in
+# kept as shown:
+#   (AKIA|ASIA)[0-9A-Z]{16}                          → AKIA[REDACTED]
+#   JWT eyJ…{10,}.…{10,}.…{10,}                       → [REDACTED]
+#   (gh[pousr]_)[A-Za-z0-9]{20,}                      → ghp_[REDACTED]
+#   github_pat_[A-Za-z0-9_]{22,}                      → github_pat_[REDACTED]
+#   -----BEGIN … PRIVATE KEY----- … -----END … PRIVATE KEY----- (multi-line;
+#   a block without its END line is redacted to the end of the text) → [REDACTED]
+#   (?i)authorization:\s*(bearer|basic|token)\s+\S+   → Authorization: Bearer [REDACTED]
+#   (?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY)[A-Z0-9_]*\s*[=:]\s*\S+
+#                                                     → DB_PASSWORD=[REDACTED]
+#   URL credentials ://[^/\s:@]+:[^/\s@]+@            → ://[REDACTED]@
+#   a base64/hex run of 40+ characters ([A-Za-z0-9+], `=` padding) with mixed
+#   classes, a letter and a digit           → [REDACTED]
+# A run that is hexadecimal in one letter case (a commit sha, a sha256 digest)
+# is not a mixed-class run: the state comment publishes 40-hex head_sha values
+# that resume_point must read back. The bytes are kept as read (invalid UTF-8
+# passes through unchanged), and text without a secret is copied byte for byte.
+_pm_redact_stream() {
+  _sdlc_py -c '
+import re
+import sys
+
+MARK = "[REDACTED]"
+RULES = (
+    (re.compile(r"(AKIA|ASIA)[0-9A-Z]{16}"), r"\1" + MARK),
+    (re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"), MARK),
+    (re.compile(r"(gh[pousr]_)[A-Za-z0-9]{20,}"), r"\1" + MARK),
+    (re.compile(r"(github_pat_)[A-Za-z0-9_]{22,}"), r"\1" + MARK),
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
+                r"(?:.*?-----END [A-Z ]*PRIVATE KEY-----|.*\Z)", re.S), MARK),
+    (re.compile(r"(?i)(authorization:\s*(?:bearer|basic|token)\s+)\S+"), r"\1" + MARK),
+    (re.compile(r"(?i)(\b[A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY)"
+                r"[A-Z0-9_]*\s*[=:]\s*)\S+"), r"\1" + MARK),
+    (re.compile(r"://[^/\s:@]+:[^/\s@]+@"), "://" + MARK + "@"),
+)
+RUN = re.compile(r"(?<![A-Za-z0-9+])[A-Za-z0-9+]{40,}={0,2}(?![A-Za-z0-9+])")
+LETTER = re.compile(r"[A-Za-z]")
+DIGIT = re.compile(r"[0-9]")
+DIGEST = re.compile(r"[0-9a-f]+|[0-9A-F]+")
+
+
+def run_mark(match):
+    core = match.group(0).rstrip("=")
+    if LETTER.search(core) and DIGIT.search(core) and not DIGEST.fullmatch(core):
+        return MARK
+    return match.group(0)
+
+
+text = sys.stdin.buffer.read().decode("utf-8", "surrogateescape")
+for pattern, replacement in RULES:
+    text = pattern.sub(replacement, text)
+text = RUN.sub(run_mark, text)
+sys.stdout.buffer.write(text.encode("utf-8", "surrogateescape"))
+'
+}
+
+# redact [--in FILE] [--out FILE] — stdin to stdout through the redaction list
+# (_pm_redact_stream), or FILE to FILE. --in must be a readable regular file
+# and --out a path, both resolving below target/rust-sdlc/tmp/ of the working
+# directory (the repository root), else exit 2 with nothing written. --out is
+# refused (exit 1) when safe_write_target refuses it; its directory is created
+# when missing, the redacted text is complete before it replaces --out
+# atomically (atomic_write) and `WROTE: <out>` is printed. Without --out the
+# redacted text goes to stdout. A failed redaction exits 1 and leaves --out as
+# it was.
+redact() {
+  local usage='(usage: redact [--in FILE] [--out FILE])'
+  local in="" out="" have_in=0 have_out=0 dir tmp rc=0
+  while (($#)); do
+    case "$1" in
+      --in | --out)
+        if (($# < 2)) || [[ -z "$2" ]]; then
+          log_error "redact: $1 needs a value $usage"
+          return 2
+        fi
+        if [[ "$1" == --in ]]; then
+          if ((have_in)); then
+            log_error "redact: --in given twice $usage"
+            return 2
+          fi
+          have_in=1
+          in="$2"
+        else
+          if ((have_out)); then
+            log_error "redact: --out given twice $usage"
+            return 2
+          fi
+          have_out=1
+          out="$2"
+        fi
+        shift 2
+        ;;
+      *)
+        log_error "redact: unknown argument: $(_ch_clean "$1") $usage"
+        return 2
+        ;;
+    esac
+  done
+  if ((have_in)); then
+    if ! _ch_resolved_under "$in" target/rust-sdlc/tmp; then
+      log_error "redact: --in must be below target/rust-sdlc/tmp/: $(_ch_clean "$in")"
+      return 2
+    fi
+    if [[ ! -f "$in" || ! -r "$in" ]]; then
+      log_error "redact: --in is not a readable regular file: $(_ch_clean "$in")"
+      return 2
+    fi
+  fi
+  if ((!have_out)); then
+    if ((have_in)); then
+      _pm_redact_stream <"$in"
+    else
+      _pm_redact_stream
+    fi
+    return
+  fi
+  if ! _ch_resolved_under "$out" target/rust-sdlc/tmp; then
+    log_error "redact: --out must be below target/rust-sdlc/tmp/: $(_ch_clean "$out")"
+    return 2
+  fi
+  safe_write_target "$out" "$PWD" || return 1
+  dir="$(dirname -- "$out")"
+  mkdir -p -- "$dir" || return 1
+  tmp="$(mktemp "$dir/.redact.XXXXXX")" || return 1
+  if ((have_in)); then
+    _pm_redact_stream <"$in" >"$tmp" || rc=$?
+  else
+    _pm_redact_stream >"$tmp" || rc=$?
+  fi
+  if ((rc == 0)); then
+    atomic_write "$out" <"$tmp" || rc=$?
+  fi
+  rm -f -- "$tmp"
+  if ((rc != 0)); then
+    log_error "redact: could not write $(_ch_clean "$out")"
+    return 1
+  fi
+  printf 'WROTE: %s\n' "$out"
+}
+
+# fence_safe — stdin to stdout with every `<<<` turned into `‹‹‹` and every
+# `>>>` into `›››` (left to right, non-overlapping), so contributor text placed
+# between the <<< and >>> fences of a prompt cannot close its data block
+# early. Every other byte is copied unchanged. Arguments exit 2.
+fence_safe() {
+  if (($#)); then
+    log_error "fence_safe: reads stdin and takes no argument (usage: fence_safe <TEXT)"
+    return 2
+  fi
+  _sdlc_py -c '
+import sys
+
+data = sys.stdin.buffer.read()
+data = data.replace(b"<<<", "‹‹‹".encode("utf-8"))
+data = data.replace(b">>>", "›››".encode("utf-8"))
+sys.stdout.buffer.write(data)
+'
+}
+
+# --- claude driver and the isolated gate session (ADR-8) ----------------------------------
+# `claude -p --output-format json` prints one object with a `.result` string
+# and an `.is_error` bool. A non-zero exit, `is_error: true` or a missing
+# `.result` is a transport failure and earns exactly one retry; a well-formed
+# reply is returned as it is, so a negative verdict is never retried.
+
+# claude_is_error JSON — 0 when JSON reports `.is_error == true` (jq, else
+# python3), else 1; malformed JSON or a non-object is not an error report.
+claude_is_error() {
+  local json="${1-}"
+  if have_jq; then
+    if printf '%s' "$json" | jq -e '.is_error == true' >/dev/null 2>&1; then
+      return 0
+    fi
+    return 1
+  else
+    printf '%s' "$json" | _sdlc_py -c '
+import json
+import sys
+
+try:
+    doc = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+sys.exit(0 if isinstance(doc, dict) and doc.get("is_error") is True else 1)
+' 2>/dev/null
+  fi
+}
+
+# claude_extract_result JSON — `.result // empty` (jq -r, else python3 with the
+# same output): a string raw with a newline; null, false, a missing key,
+# malformed JSON or a non-object print nothing. Always returns 0.
+claude_extract_result() {
+  local json="${1-}"
+  if have_jq; then
+    printf '%s' "$json" | jq -r '.result // empty' 2>/dev/null || true
+  else
+    printf '%s' "$json" | _sdlc_py -c '
+import json
+import sys
+
+try:
+    doc = json.load(sys.stdin)
+except ValueError:
+    sys.exit(0)
+value = doc.get("result") if isinstance(doc, dict) else None
+if isinstance(value, str):
+    print(value)
+elif value is not None and value is not False:
+    print(json.dumps(value, indent=2, ensure_ascii=False))
+' 2>/dev/null || true
+  fi
+}
+
+# _pm_gh_config_rm — removes the isolated session's temporary GH_CONFIG_DIR
+# (the subshell variable gh_config), if any.
+_pm_gh_config_rm() {
+  if [[ -n "${gh_config:-}" ]]; then
+    rm -rf -- "$gh_config"
+  fi
+  gh_config=""
+}
+
+# _pm_session_signal SIGNAL — the isolated session's HUP/INT/TERM trap: remove
+# the temporary GH_CONFIG_DIR, then die of SIGNAL itself, so a caller that got
+# the same signal (Ctrl-C reaches the whole process group) stops as well.
+_pm_session_signal() {
+  _pm_gh_config_rm
+  trap - EXIT "$1"
+  kill -s "$1" "$BASHPID"
+  case "$1" in
+    HUP) exit 129 ;;
+    INT) exit 130 ;;
+    *) exit 143 ;;
+  esac
+}
+
+# _pm_claude_attempt MODE PROMPT — one claude session; stdout is claude's raw
+# JSON and the status claude's. MODE `isolated` is react's isolated run with
+# the exact environment of ADR-8, inside a subshell whose traps remove the
+# fresh `mktemp -d` GH_CONFIG_DIR on every exit path (return, error, signal);
+# the caller's traps and environment are untouched. The session never reads
+# the caller's stdin.
+_pm_claude_attempt() {
+  local mode="$1" prompt="$2"
+  local -a cmd=(claude -p "$prompt" --output-format json --permission-mode acceptEdits --max-turns 30)
+  if [[ "$mode" != isolated ]]; then
+    "${cmd[@]}" </dev/null
+    return
+  fi
+  (
+    gh_config=""
+    trap _pm_gh_config_rm EXIT
+    trap '_pm_session_signal HUP' HUP
+    trap '_pm_session_signal INT' INT
+    trap '_pm_session_signal TERM' TERM
+    gh_config="$(mktemp -d)" || exit 1
+    cmd=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN
+      -u SSH_AUTH_SOCK -u GIT_ASKPASS -u SSH_ASKPASS
+      GH_CONFIG_DIR="$gh_config" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+      GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
+      "${cmd[@]}"
+      --restricted --tools 'Read,Grep,Glob' --strict-mcp-config
+      --disallowedTools 'Bash(gh:*)' 'Bash(git push:*)' 'Bash(git credential:*)')
+    "${cmd[@]}" </dev/null
+  )
+}
+
+# _pm_claude_session MODE PROMPT — up to two attempts of _pm_claude_attempt;
+# prints `.result` of the first well-formed reply (exit 0), or logs each
+# transport failure and returns 1 after the retry. A missing or empty PROMPT,
+# or more than one argument, exits 2 without a session.
+_pm_claude_session() {
+  local mode="$1" fn="claude_run_$1" raw result attempt rc
+  shift
+  if (($# != 1)) || [[ -z "$1" ]]; then
+    log_error "$fn: needs one non-empty PROMPT (usage: $fn PROMPT)"
+    return 2
+  fi
+  for attempt in 1 2; do
+    rc=0
+    raw="$(_pm_claude_attempt "$mode" "$1")" || rc=$?
+    if ((rc != 0)); then
+      log_warn "$fn: attempt $attempt/2: claude exited with status $rc (transport failure)"
+    elif claude_is_error "$raw"; then
+      log_warn "$fn: attempt $attempt/2: claude reported is_error: true (transport failure)"
+    else
+      result="$(claude_extract_result "$raw")"
+      if [[ -n "$result" ]]; then
+        printf '%s\n' "$result"
+        return 0
+      fi
+      log_warn "$fn: attempt $attempt/2: the claude reply has no .result (transport failure)"
+    fi
+  done
+  log_error "$fn: claude failed after one retry"
+  return 1
+}
+
+# claude_run_once PROMPT — `claude -p PROMPT --output-format json
+# --permission-mode acceptEdits --max-turns 30`; prints `.result`; one retry
+# on a transport failure, then return 1 (ADR-8).
+claude_run_once() {
+  _pm_claude_session once "$@"
+}
+
+# claude_run_isolated PROMPT — claude_run_once for a session that reads
+# contributor-controlled text (PR and issue bodies, diffs): no credential
+# variable, an empty temporary GH_CONFIG_DIR, git without system, global or
+# credential-helper configuration, and `--restricted --tools 'Read,Grep,Glob'
+# --strict-mcp-config` with gh, git push and git credential denied. The
+# caller keeps its own credentials and publishes the outcome itself.
+claude_run_isolated() {
+  _pm_claude_session isolated "$@"
+}
+
+# --- review ledgers (ADR-16) ------------------------------------------------------------
+
+# _pm_ledger_doc LENS ITERATION HEAD_SHA STARTED ENDED — reads the findings
+# array on stdin (bare JSON, or one fenced ```json block), validates it
+# against the ADR-16 field table and prints the ledger document. Every
+# violation is logged; invalid findings exit 1, an impossible calendar time in
+# STARTED or ENDED exits 2.
+_pm_ledger_doc() {
+  # shellcheck disable=SC2016 # a python program; `$` ends a regex in its messages
+  _sdlc_py -c '
+import json
+import re
+import sys
+from datetime import datetime
+
+lens, iteration, head_sha, started, ended = sys.argv[1:6]
+PREFIX = {"security": "SEC-", "fr-nfr": "FRN-", "code-review": "CQ-"}[lens]
+KEYS = ("id", "severity", "file", "line", "rule", "summary", "status")
+SEVERITIES = ("Critical", "High", "Medium", "Low", "Info")
+STATUSES = ("open", "fixed", "dropped")
+ID = re.compile(r"[A-Z]+-[0-9]+")
+CTRL = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+
+
+def log(message):
+    sys.stderr.write("[rust-sdlc][ERROR] ledger_write: %s\n" % CTRL.sub("?", message))
+
+
+for flag, value in (("--started-at", started), ("--ended-at", ended)):
+    if value:
+        try:
+            datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            log("%s is not a UTC time: %s" % (flag, value))
+            sys.exit(2)
+
+
+def unique_keys(pairs):
+    seen = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError("duplicate key %s" % json.dumps(key))
+        seen[key] = value
+    return seen
+
+
+def no_constant(name):
+    raise ValueError("%s is not JSON" % name)
+
+
+text = sys.stdin.read().strip()
+if text.startswith("```"):
+    lines = text.splitlines()
+    if len(lines) < 2 or lines[0].strip() not in ("```", "```json") or lines[-1].strip() != "```":
+        log("stdin: a fenced block must open with ```json and close with ```")
+        sys.exit(1)
+    text = "\n".join(lines[1:-1])
+try:
+    findings = json.loads(text, object_pairs_hook=unique_keys, parse_constant=no_constant)
+except ValueError as exc:
+    log("stdin is not a JSON findings array: %s" % (str(exc).splitlines() or ["invalid JSON"])[0])
+    sys.exit(1)
+
+errors = []
+if not isinstance(findings, list):
+    errors.append("stdin: the findings must be a JSON array")
+    findings = []
+ids = set()
+for index, finding in enumerate(findings):
+    at = "findings[%d]" % index
+    if not isinstance(finding, dict):
+        errors.append("%s: not an object" % at)
+        continue
+    for key in sorted(set(finding) - set(KEYS)):
+        errors.append("%s: extra key %s" % (at, json.dumps(key)))
+    for key in KEYS:
+        if key not in finding:
+            errors.append("%s: missing key %s" % (at, key))
+    if set(KEYS) - set(finding):
+        continue
+    fid, severity, path, line, rule, summary, status = (finding[key] for key in KEYS)
+    if not isinstance(fid, str) or not ID.fullmatch(fid):
+        errors.append("%s.id: %s does not match ^[A-Z]+-[0-9]+$" % (at, json.dumps(fid)))
+    elif not fid.startswith(PREFIX):
+        errors.append("%s.id: %s lacks the %s prefix of the %s lens" % (at, fid, PREFIX, lens))
+    elif fid in ids:
+        errors.append("%s.id: %s is not unique" % (at, fid))
+    else:
+        ids.add(fid)
+    if severity not in SEVERITIES:
+        errors.append("%s.severity: %s is not one of %s" % (at, json.dumps(severity), " ".join(SEVERITIES)))
+    if path is not None and not (
+            isinstance(path, str) and path and not CTRL.search(path) and not path.startswith("/")
+            and ".." not in path.replace("\\", "/").split("/")):
+        errors.append("%s.file: %s is not a repository-relative path or null" % (at, json.dumps(path)))
+    if line is not None and not (isinstance(line, int) and not isinstance(line, bool) and line >= 1):
+        errors.append("%s.line: %s is not an integer >= 1 or null" % (at, json.dumps(line)))
+    elif line is not None and path is None:
+        errors.append("%s.line: must be null when file is null" % at)
+    if not isinstance(rule, str) or not rule.strip() or CTRL.search(rule):
+        errors.append("%s.rule: %s is not a non-empty single-line string" % (at, json.dumps(rule)))
+    if not isinstance(summary, str) or not 1 <= len(summary) <= 300 or CTRL.search(summary):
+        errors.append("%s.summary: not a single-line string of 1 to 300 characters" % at)
+    if status not in STATUSES:
+        errors.append("%s.status: %s is not one of %s" % (at, json.dumps(status), " ".join(STATUSES)))
+if errors:
+    for message in errors:
+        log(message)
+    sys.exit(1)
+
+doc = {
+    "schema_version": 1,
+    "lens": lens,
+    "iteration": int(iteration),
+    "head_sha": head_sha,
+    "findings": [{key: finding[key] for key in KEYS} for finding in findings],
+}
+if started:
+    doc["started_at"] = started
+if ended:
+    doc["ended_at"] = ended
+print(json.dumps(doc, indent=2, ensure_ascii=False))
+' "$@"
+}
+
+# ledger_write LENS ITERATION HEAD_SHA [--dir D] [--started-at ISO]
+# [--ended-at ISO] — reads LENS's findings array (the lens agent's final fenced
+# json block) on stdin and validates it against the ADR-16 field table: each
+# finding has exactly id (^[A-Z]+-[0-9]+$ with the lens prefix SEC- security,
+# FRN- fr-nfr, CQ- code-review; unique), severity (Critical High Medium Low
+# Info), file (repository-relative path or null), line (integer >= 1, or null;
+# null when file is null), rule (non-empty, single line), summary (1 to 300
+# characters, single line) and status (open fixed dropped). A valid array is
+# written atomically as {"schema_version": 1, "lens", "iteration", "head_sha",
+# "findings"[, "started_at", "ended_at"]} to
+# ${D:-${SDLC_LEDGER_DIR:-target/rust-sdlc/review-ledgers}}/<LENS>.json and
+# `WROTE: <path>` is printed. Exit 1 on invalid findings or a refused path,
+# nothing written; exit 2 on a malformed argument (LENS outside security
+# fr-nfr code-review, ITERATION not a digit string, HEAD_SHA not 40 lower-case
+# hex, a time not YYYY-MM-DDTHH:MM:SSZ, an unknown or repeated flag).
+ledger_write() {
+  local usage='(usage: ledger_write LENS ITERATION HEAD_SHA [--dir D] [--started-at ISO] [--ended-at ISO])'
+  local re_iso='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+  local lens="${1-}" iteration="${2-}" sha="${3-}" dir="" started="" ended="" seen=" "
+  local doc path root
+  if (($# < 3)); then
+    log_error "ledger_write: needs LENS, ITERATION and HEAD_SHA $usage"
+    return 2
+  fi
+  shift 3
+  while (($#)); do
+    case "$1" in
+      --dir | --started-at | --ended-at)
+        if (($# < 2)) || [[ -z "$2" ]]; then
+          log_error "ledger_write: $1 needs a value $usage"
+          return 2
+        fi
+        if [[ "$seen" == *" $1 "* ]]; then
+          log_error "ledger_write: $1 given twice $usage"
+          return 2
+        fi
+        seen+="$1 "
+        case "$1" in
+          --dir) dir="$2" ;;
+          --started-at) started="$2" ;;
+          *) ended="$2" ;;
+        esac
+        shift 2
+        ;;
+      *)
+        log_error "ledger_write: unknown argument: $(_ch_clean "$1") $usage"
+        return 2
+        ;;
+    esac
+  done
+  case "$lens" in
+    security | fr-nfr | code-review) ;;
+    *)
+      log_error "ledger_write: LENS must be security, fr-nfr or code-review: $(_ch_clean "$lens")"
+      return 2
+      ;;
+  esac
+  if ! is_uint "$iteration"; then
+    log_error "ledger_write: ITERATION must be a non-negative integer: $(_ch_clean "$iteration")"
+    return 2
+  fi
+  if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+    log_error "ledger_write: HEAD_SHA must be 40 lower-case hex digits: $(_ch_clean "$sha")"
+    return 2
+  fi
+  if [[ -n "$started" && ! "$started" =~ $re_iso ]] || [[ -n "$ended" && ! "$ended" =~ $re_iso ]]; then
+    log_error "ledger_write: --started-at and --ended-at take YYYY-MM-DDTHH:MM:SSZ"
+    return 2
+  fi
+  doc="$(_pm_ledger_doc "$lens" "$(strip_zeros "$iteration")" "$sha" "$started" "$ended")" || return
+  dir="${dir:-${SDLC_LEDGER_DIR:-target/rust-sdlc/review-ledgers}}"
+  path="${dir%/}/$lens.json"
+  if [[ "$dir" == /* ]]; then
+    mkdir -p -- "$dir" || return 1
+    root="$dir"
+  else
+    root="$PWD"
+  fi
+  safe_write_target "$path" "$root" || return 1
+  printf '%s\n' "$doc" | atomic_write "$path" || return 1
+  printf 'WROTE: %s\n' "$path"
+}
+
 # section: dispatch (keep last)
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   _sdlc_dispatch "$@"

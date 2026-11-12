@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "lens": "code-review",
+  "iteration": 1,
+  "head_sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  "findings": [
+    {
+      "id": "CQ-1",
+      "severity": "Medium",
+      "file": "crates/billing/invoice/domain/src/invoice.rs",
+      "line": 27,
+      "rule": "Q3",
+      "summary": "Function apply_discount exceeds the cognitive complexity limit",
+      "status": "open"
+    }
+  ]
+}
