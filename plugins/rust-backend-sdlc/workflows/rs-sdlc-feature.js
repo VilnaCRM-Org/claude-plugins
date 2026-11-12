@@ -610,12 +610,17 @@ function nextBatch(pending) {
   return batch
 }
 
+// A path an implementer reply may report: relative, inside the repository and
+// outside the build and Ralph state directories.
+const UNTRACKED_PREFIXES = ['/', 'target/', '.ralph/']
+const trackablePath = (p) => p !== '' && !UNTRACKED_PREFIXES.some((prefix) => p.startsWith(prefix)) && !p.split('/').includes('..')
+
 function track(id, reply, round) {
   if (!reply) return
   const files = storyFiles.get(id) || new Set()
   for (const f of isList(reply.files) ? reply.files : []) {
     const p = f.trim()
-    if (p && !p.startsWith('/') && !p.split('/').includes('..') && !p.startsWith('target/') && !p.startsWith('.ralph/')) files.add(p)
+    if (trackablePath(p)) files.add(p)
   }
   storyFiles.set(id, files)
   lastReply.set(id, { round, status: reply.status, recommendation: typeof reply.recommendation === 'string' ? clip(reply.recommendation, 300) : null })
@@ -752,7 +757,9 @@ function nestedVerdict(nest, reply, it, escalatedNote = 'ESCALATED') {
   const inner = (key) => innerLine(reply.escalation, key)
   if (reply.result === 'ESCALATED') {
     record(nest.ran, escalatedNote)
-    return escalate(nest.stage, nest.ph, (nest.innerIt && inner('iteration')) || it, `${nest.escalated}${inner('blocking_finding') || 'see the nested escalation block'}`, inner('recommended_action') || nest.act.escalated)
+    const iteration = (nest.innerIt && inner('iteration')) || it
+    const blocking = inner('blocking_finding') || 'see the nested escalation block'
+    return escalate(nest.stage, nest.ph, iteration, `${nest.escalated}${blocking}`, inner('recommended_action') || nest.act.escalated)
   }
   if (reply.result !== 'SUCCESS' && reply.result !== 'SUCCESS-WITH-REPORT') {
     record(nest.ran, `unknown result ${clip(reply.result, 40)}`)
@@ -891,7 +898,14 @@ async function qaPass(pass) {
 // hand-back the feature answers itself (ADR-18): one nesting level, counters
 // carried, never reset.
 const finishByHand = () => `run /rs-sdlc-finish-pr --pr ${run.pr} by hand`
-const handBackMalformed = (finish, c, head) => !HEAD_RE.test(head) || !c || (finish.pr != null && finish.pr !== run.pr) || !isList(finish.journal) || !isList(finish.degrade_notes)
+const HAND_BACK_DEFECTS = [
+  (finish, c, head) => !HEAD_RE.test(head),
+  (finish, c) => !c,
+  (finish) => finish.pr != null && finish.pr !== run.pr,
+  (finish) => !isList(finish.journal),
+  (finish) => !isList(finish.degrade_notes),
+]
+const handBackMalformed = (finish, c, head) => HAND_BACK_DEFECTS.some((defect) => defect(finish, c, head))
 
 function handBackRefused(entry, finish, c, head) {
   const subject = `rs-sdlc-pr-until-green (entry ${entry})`
@@ -1082,7 +1096,13 @@ if (ctx.part_a !== true || ctx.part_b !== true) {
 }
 const STORY_ID = /^[1-9]\d*\.[1-9]\d*$/
 const rawStories = Array.isArray(staged.stories) ? staged.stories : []
-const badStory = rawStories.find((s) => !s || typeof s !== 'object' || !STORY_ID.test(String(s.id)) || typeof s.title !== 'string' || !s.title.trim() || typeof s.done !== 'boolean')
+const STORY_SHAPE = [
+  (s) => Boolean(s) && typeof s === 'object',
+  (s) => STORY_ID.test(String(s.id)),
+  (s) => typeof s.title === 'string' && s.title.trim() !== '',
+  (s) => typeof s.done === 'boolean',
+]
+const badStory = rawStories.find((s) => !STORY_SHAPE.every((holds) => holds(s)))
 if (badStory !== undefined) return stageFail(`malformed fix-plan story in the staging report: ${clip(JSON.stringify(badStory), 200)}`, 'check .ralph/@fix_plan.md by hand (lines "- [ ] Story <id>: <title>"), then re-run')
 if (!rawStories.length) return stageFail('.ralph/@fix_plan.md holds no story', `/rs-sdlc-plan #${N} (epics.md needs ### Story N.M: sections), then re-run`)
 const ids = rawStories.map((s) => String(s.id))
