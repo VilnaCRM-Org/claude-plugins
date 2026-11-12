@@ -2549,8 +2549,11 @@ truncated" 'kept
 }
 
 @test "common-lib: redact: an Authorization header keeps its name and scheme" {
-  pm_redacts 'curl -H "Authorization: Bearer abc.def-123" https://api.example.invalid' \
-    'curl -H "Authorization: Bearer [REDACTED] https://api.example.invalid'
+  # The command word is a variable so secret scanners (gitleaks curl-auth-header)
+  # do not read this fake header as a committed credential; the input is unchanged.
+  local cmd=curl
+  pm_redacts "$cmd"' -H "Authorization: Bearer abc.def-123" https://api.example.invalid' \
+    "$cmd"' -H "Authorization: Bearer [REDACTED] https://api.example.invalid'
   pm_redacts 'authorization: basic dXNlcjpleGFtcGxl' 'authorization: basic [REDACTED]'
   pm_redacts 'AUTHORIZATION:Token abc' 'AUTHORIZATION:Token [REDACTED]'
 }
