@@ -1,0 +1,51 @@
+{
+  "args": "42-invoice-totals --pr 7",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "status": "OK",
+        "profile_valid": true,
+        "blocked": null,
+        "base": "origin/main",
+        "files": [
+          "crates/billing/invoicing/domain/src/invoice.rs",
+          "crates/billing/invoicing/domain/src/invoice/tests.rs",
+          "crates/billing/invoicing/application/src/create_invoice.rs",
+          "crates/service/src/routes.rs"
+        ],
+        "specs_present": true,
+        "slug": "42-invoice-totals",
+        "spec_files": [
+          "prd.md",
+          "architecture.md",
+          "epics.md"
+        ],
+        "pr": 7,
+        "pr_requirements": true,
+        "linked_issues": [
+          42
+        ],
+        "clean": true,
+        "head_matches": true,
+        "summary": "invoice totals rounded half-even per currency",
+        "notes": []
+      }
+    },
+    {
+      "match": "^fr-nfr-reviewer ",
+      "reply": {
+        "status": "OK",
+        "handle": "FR_NFR_REVIEWER: iteration=1/5 new_findings=1 verdict=FAIL",
+        "gate_run": "not run: planning bundle missing or empty",
+        "status_posted": null,
+        "degraded": [
+          "planning bundle missing or empty"
+        ],
+        "blocking_finding": "SPECS MISSING: specs/42-invoice-totals/",
+        "note": null,
+        "findings": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+[package]
+name = "service"
+description.workspace = true
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-graphql.workspace = true
+axum.workspace = true
+clap.workspace = true
+health-check-application.workspace = true
+health-check-domain.workspace = true
+health-check-infrastructure.workspace = true
+invoice-application.workspace = true
+invoice-domain.workspace = true
+invoice-infrastructure.workspace = true
+serde_json.workspace = true
+shared-application.workspace = true
+shared-domain.workspace = true
+shared-infrastructure.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true
+test-support.workspace = true
+
+[lints]
+workspace = true

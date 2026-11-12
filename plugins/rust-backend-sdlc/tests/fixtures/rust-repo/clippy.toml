@@ -1,0 +1,50 @@
+# Complexity budget (PHPInsights min-complexity + PHPMD codesize equivalent).
+cognitive-complexity-threshold = 8
+too-many-lines-threshold = 50
+too-many-arguments-threshold = 5
+excessive-nesting-threshold = 5
+type-complexity-threshold = 200
+max-struct-bools = 2
+max-fn-params-bools = 1
+max-trait-bounds = 3
+enum-variant-name-threshold = 3
+single-char-binding-names-threshold = 2
+pass-by-value-size-limit = 256
+
+# Tests may unwrap, expect, panic, index and print. "Tests" means `#[test]` functions and code inside
+# `#[cfg(test)]` modules, which is why every module of a test target is declared `#[cfg(test)] mod ..;`.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-dbg-in-tests = true
+allow-print-in-tests = true
+allow-useless-vec-in-tests = true
+
+# Public API hygiene.
+avoid-breaking-exported-api = false
+missing-docs-in-crate-items = true
+check-private-items = false
+absolute-paths-max-segments = 3
+
+# Banned APIs (workspace-wide, production and test code). Each allowed use carries an item-level
+# `#[expect(clippy::disallowed_methods, reason = "..")]`; the complete list of those items is rule 20.
+disallowed-methods = [
+    { path = "std::env::var", reason = "read configuration once in the composition root" },
+    { path = "std::env::var_os", reason = "read configuration once in the composition root" },
+    { path = "std::env::vars", reason = "read configuration once in the composition root" },
+    { path = "std::env::vars_os", reason = "read configuration once in the composition root" },
+    { path = "std::env::set_var", reason = "process-global mutation" },
+    { path = "std::env::remove_var", reason = "process-global mutation" },
+    { path = "std::process::exit", reason = "return an error from main instead" },
+    { path = "std::time::SystemTime::now", reason = "read time through the Clock port" },
+    { path = "std::time::Instant::now", reason = "use tokio time, which tests can pause" },
+    { path = "uuid::Uuid::now_v7", reason = "use the UuidGenerator port" },
+    { path = "uuid::Uuid::new_v4", reason = "use the UuidGenerator port" },
+    { path = "std::net::TcpListener::bind", reason = "sockets belong to the serve and healthcheck commands and to integration tests" },
+    { path = "std::net::TcpStream::connect", reason = "sockets belong to the serve and healthcheck commands and to integration tests" },
+    { path = "std::net::TcpStream::connect_timeout", reason = "sockets belong to the serve and healthcheck commands and to integration tests" },
+    { path = "std::net::UdpSocket::bind", reason = "sockets belong to the serve and healthcheck commands and to integration tests" },
+    { path = "tokio::net::TcpListener::bind", reason = "sockets belong to the serve and healthcheck commands and to integration tests" },
+    { path = "tokio::net::TcpStream::connect", reason = "sockets belong to the serve and healthcheck commands and to integration tests" },
+]

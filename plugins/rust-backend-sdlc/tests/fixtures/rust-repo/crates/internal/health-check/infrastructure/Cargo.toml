@@ -1,0 +1,23 @@
+[package]
+name = "health-check-infrastructure"
+description = "Health-check context, infrastructure layer: the PostgreSQL probe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+health-check-domain.workspace = true
+shared-domain.workspace = true
+sqlx.workspace = true
+
+[dev-dependencies]
+shared-infrastructure.workspace = true
+test-support.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

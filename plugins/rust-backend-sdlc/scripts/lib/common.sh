@@ -1,0 +1,3664 @@
+#!/usr/bin/env bash
+# common.sh — shared library of the rust-backend-sdlc scripts (FR-33).
+#
+# Usage: common.sh <dispatcher-name> [ARG...]
+#        source "$SCRIPT_DIR/lib/common.sh"   (from a plugin script)
+#
+# Sourced, the file runs the bash floor check and defines functions; nothing
+# else executes. Executed with one of the 17 ADR-15 dispatcher names, it runs
+# that function with the remaining arguments and exits with its status;
+# executed with no argument or any other first argument, it prints
+# `common.sh is a library; source it instead of executing` and exits 64.
+#
+# Sections, one owner each (single-writer); a later section is inserted
+# directly above the `dispatch (keep last)` trailer: core, command helpers,
+# publishing and model sessions, stage state and resume, Ralph helpers.
+#
+# Exit: 0 success; 1 failure or refusal; 2 usage error; 64 executed without a
+# dispatcher name.
+
+# Bash floor (NFR-16). These are the first executable lines and use only
+# bash 3.2 syntax, so an old bash stops here, before any function exists.
+# RUST_SDLC_BASH_VERSION simulates a `major.minor` version in tests.
+case "${RUST_SDLC_BASH_VERSION:-${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}}" in
+  [0-3] | [0-3].* | 4 | 4.[0-3] | 4.[0-3].*)
+    printf '[rust-sdlc][ERROR] bash %s is too old: install Bash 4.4 or newer\n' \
+      "${RUST_SDLC_BASH_VERSION:-${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}}" >&2
+    exit 1
+    ;;
+esac
+
+# section: core
+
+# --- logging, exits and argument handling ---------------------------------
+
+# log_info / log_warn / log_error MSG... — one `[rust-sdlc][LEVEL] <msg>` line
+# on stderr; stdout carries only handles and data.
+log_info() {
+  printf '[rust-sdlc][INFO] %s\n' "$*" >&2
+}
+
+log_warn() {
+  printf '[rust-sdlc][WARN] %s\n' "$*" >&2
+}
+
+log_error() {
+  printf '[rust-sdlc][ERROR] %s\n' "$*" >&2
+}
+
+# die MSG... — log_error, then exit 1.
+die() {
+  log_error "$*"
+  exit 1
+}
+
+# _sdlc_usage_line SCRIPT — the text after `# Usage: ` in SCRIPT's header
+# comment block (empty when SCRIPT is not a readable file or has none).
+_sdlc_usage_line() {
+  local script="${1-}" line n=0
+  [[ -f "$script" && -r "$script" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    n=$((n + 1))
+    if ((n == 1)); then
+      continue
+    fi
+    [[ "$line" == '#'* ]] || break
+    if [[ "$line" == '# Usage: '* ]]; then
+      printf '%s\n' "${line#'# Usage: '}"
+      return 0
+    fi
+  done <"$script"
+}
+
+# die_usage MSG... — log_error with ` (usage: <the caller's Usage line>)`
+# appended, then exit 2 (ADR-23).
+die_usage() {
+  local msg="$*" usage
+  usage="$(_sdlc_usage_line "$0")"
+  if [[ -n "$usage" ]]; then
+    msg="$msg (usage: $usage)"
+  fi
+  log_error "$msg"
+  exit 2
+}
+
+# print_usage SCRIPT — SCRIPT's header comment block: line 2 up to the first
+# non-comment line, each line without its leading `#` and one space.
+print_usage() {
+  local script="${1-}" line n=0
+  [[ -f "$script" && -r "$script" ]] || die "print_usage: cannot read $script"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    n=$((n + 1))
+    if ((n == 1)); then
+      continue
+    fi
+    [[ "$line" == '#'* ]] || break
+    line="${line#'#'}"
+    printf '%s\n' "${line#' '}"
+  done <"$script"
+}
+
+# need_value FLAG VALUE — die_usage "<flag> needs a value" when VALUE is empty
+# or starts with `--`.
+need_value() {
+  local flag="${1-}" value="${2-}"
+  if [[ -z "$value" || "$value" == --* ]]; then
+    die_usage "$flag needs a value"
+  fi
+}
+
+# lower S — S lower-cased through tr (no trailing newline).
+lower() {
+  printf '%s' "${1-}" | tr '[:upper:]' '[:lower:]'
+}
+
+# --- wrap-safe digit-string arithmetic --------------------------------------
+# Integers from users and repositories are compared as digit strings, never
+# with (( )): bash arithmetic wraps at 2^63, so a crafted 20-digit value would
+# read as negative or zero and pass a bound.
+
+# is_uint S — S matches ^[0-9]+$.
+is_uint() {
+  [[ "${1-}" =~ ^[0-9]+$ ]]
+}
+
+# strip_zeros N — N without leading zeros ('007' → '7', '000' → '0').
+strip_zeros() {
+  local v="${1-}"
+  v="${v#"${v%%[!0]*}"}"
+  printf '%s' "${v:-0}"
+}
+
+# num_gt A B — true when A > B (both uints; any other input → status 2).
+num_gt() {
+  local a b
+  if ! is_uint "${1-}" || ! is_uint "${2-}"; then
+    return 2
+  fi
+  a="$(strip_zeros "$1")"
+  b="$(strip_zeros "$2")"
+  if ((${#a} != ${#b})); then
+    ((${#a} > ${#b}))
+  else
+    [[ "$a" > "$b" ]]
+  fi
+}
+
+# num_lt A B — true when A < B (same rules as num_gt).
+num_lt() {
+  num_gt "${2-}" "${1-}"
+}
+
+# num_add A B — A + B by column addition with carry; non-digit input prints
+# '0' and returns 1. Only single-digit sums and string indexes are computed
+# with (( )), never the full value.
+num_add() {
+  local a b out="" carry=0 ia ib da db sum
+  if ! is_uint "${1-}" || ! is_uint "${2-}"; then
+    printf '0'
+    return 1
+  fi
+  a="$(strip_zeros "$1")"
+  b="$(strip_zeros "$2")"
+  ia=$((${#a} - 1))
+  ib=$((${#b} - 1))
+  while ((ia >= 0 || ib >= 0 || carry > 0)); do
+    da=0
+    db=0
+    if ((ia >= 0)); then
+      da="${a:ia:1}"
+    fi
+    if ((ib >= 0)); then
+      db="${b:ib:1}"
+    fi
+    sum=$((da + db + carry))
+    out="$((sum % 10))$out"
+    carry=$((sum / 10))
+    ia=$((ia - 1))
+    ib=$((ib - 1))
+  done
+  printf '%s' "$(strip_zeros "$out")"
+}
+
+# --- clock -----------------------------------------------------------------
+
+# _sdlc_py ARG... — python3 that never puts the working directory (a target
+# repository) on sys.path, so a planted module cannot shadow the stdlib.
+_sdlc_py() {
+  PYTHONSAFEPATH=1 python3 "$@"
+}
+
+# now_epoch — ${SDLC_NOW_EPOCH:-$(date +%s)}; a non-uint SDLC_NOW_EPOCH dies.
+now_epoch() {
+  if [[ -n "${SDLC_NOW_EPOCH:-}" ]]; then
+    is_uint "$SDLC_NOW_EPOCH" || die "SDLC_NOW_EPOCH is not a non-negative integer: $SDLC_NOW_EPOCH"
+    printf '%s\n' "$SDLC_NOW_EPOCH"
+  else
+    date +%s
+  fi
+}
+
+# _sdlc_utc_format FORMAT — now_epoch formatted in UTC through python3.
+_sdlc_utc_format() {
+  local epoch
+  epoch="$(now_epoch)" || return 1
+  _sdlc_py -c '
+import sys
+from datetime import datetime, timezone
+try:
+    print(datetime.fromtimestamp(int(sys.argv[1]), timezone.utc).strftime(sys.argv[2]))
+except (OverflowError, OSError, ValueError) as exc:
+    sys.stderr.write("[rust-sdlc][ERROR] cannot format epoch %s: %s\n" % (sys.argv[1], exc))
+    sys.exit(1)
+' "$epoch" "$1"
+}
+
+# utc_now — now_epoch as %Y-%m-%dT%H:%M:%SZ (honours SDLC_NOW_EPOCH).
+utc_now() {
+  _sdlc_utc_format '%Y-%m-%dT%H:%M:%SZ'
+}
+
+# utc_stamp — now_epoch as %Y%m%dT%H%M%SZ (honours SDLC_NOW_EPOCH).
+utc_stamp() {
+  _sdlc_utc_format '%Y%m%dT%H%M%SZ'
+}
+
+# --- tool probes -------------------------------------------------------------
+
+# have_cmd NAME — NAME resolves through command -v.
+have_cmd() {
+  command -v "${1-}" >/dev/null 2>&1
+}
+
+# have_jq — jq is on PATH.
+have_jq() {
+  command -v jq >/dev/null 2>&1
+}
+
+# have_pyyaml — `python3 -c 'import yaml'` succeeds.
+have_pyyaml() {
+  _sdlc_py -c 'import yaml' >/dev/null 2>&1
+}
+
+# have_yq — a mikefarah yq (v4) is usable. False when SDLC_FORCE_PYTHON_YAML=1.
+# Presence on PATH is not enough: the kislyuk (jq-wrapper) yq answers the
+# probe with "array", and every query below would misread its output. The
+# verdict is cached in _SDLC_YQ_OK (1 or 0) for the rest of the process.
+have_yq() {
+  if [[ "${SDLC_FORCE_PYTHON_YAML:-0}" == 1 ]]; then
+    return 1
+  fi
+  case "${_SDLC_YQ_OK:-}" in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+  if command -v yq >/dev/null 2>&1 &&
+    [[ "$(printf 'a: [1]\n' | yq '.a | type' 2>/dev/null)" == '!!seq' ]]; then
+    _SDLC_YQ_OK=1
+    return 0
+  fi
+  _SDLC_YQ_OK=0
+  return 1
+}
+
+# require_yaml_toolchain — die unless mikefarah yq or python3 + PyYAML works.
+require_yaml_toolchain() {
+  if ! have_yq && ! have_pyyaml; then
+    die "no YAML toolchain: install mikefarah yq v4, or python3 with PyYAML"
+  fi
+}
+
+# _sdlc_err_first PREFIX CMD... — run CMD with stdout passed through; when it
+# fails, log PREFIX plus the first line CMD wrote to stderr and return its
+# status. A successful CMD's stderr is dropped.
+_sdlc_err_first() {
+  local prefix="$1" err rc=0
+  shift
+  { err="$("$@" 2>&1 1>&3 3>&-)" || rc=$?; } 3>&1
+  if ((rc != 0)) && [[ -n "$err" ]]; then
+    log_error "$prefix${err%%$'\n'*}"
+  fi
+  return "$rc"
+}
+
+# --- YAML access (mikefarah yq, else python3 + PyYAML; byte-identical) --------
+# Keys are dotted paths of identifier segments ([A-Za-z_][A-Za-z0-9_-]*). Both
+# backends print: null or absent → nothing; booleans lower-cased (true/false);
+# every other scalar as written (007, 0x1F, +5, 1.50 stay as they are); a
+# list one scalar item per line (a null item as `null`, nested items
+# skipped); a map nothing (use yaml_type or yaml_to_json). The PyYAML loader
+# types plain scalars the way go-yaml v3 (mikefarah yq) does: true/True/TRUE
+# and false/False/FALSE are the only booleans, integers are Go base-0
+# literals (underscores dropped, int64 or uint64 range), floats follow the
+# YAML 1.2 core pattern, and yes/no, sexagesimal values and timestamps stay
+# strings. yaml_to_json writes numbers the way Go's encoding/json does.
+
+# _sdlc_yaml_args FUNCTION FILE KEY — die on a missing FILE or a bad KEY.
+_sdlc_yaml_args() {
+  [[ -f "$2" ]] || die "$1: no such file: $2"
+  [[ "$3" =~ ^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z_][A-Za-z0-9_-]*)*$ ]] ||
+    die "$1: invalid key: $3"
+}
+
+# _sdlc_yq_path KEY — the yq path of KEY (`.a.b`, `["a-b"]` for a segment
+# that is not a plain identifier).
+_sdlc_yq_path() {
+  local seg out="" segs=()
+  IFS=. read -r -a segs <<<"$1"
+  for seg in "${segs[@]}"; do
+    if [[ "$seg" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      out+=".$seg"
+    elif [[ -z "$out" ]]; then
+      out=".[\"$seg\"]"
+    else
+      out+="[\"$seg\"]"
+    fi
+  done
+  printf '%s' "$out"
+}
+
+# _sdlc_yq EXPR FILE — mikefarah yq; on failure logs the first error line.
+_sdlc_yq() {
+  _sdlc_err_first "yaml: $2: " yq "$1" "$2"
+}
+
+# _sdlc_yq_items FILE PATH — the scalar items of the list at PATH, one per
+# line: a boolean lower-cased, a null item as `null`, nested items skipped.
+# yq prints a scalar as written (`True`, `~`), so a list holding a boolean or
+# a null is printed item by item (yq's stdin is /dev/null there, so it never
+# reads the tag list); only basic yq operators are used.
+_sdlc_yq_items() {
+  local file="$1" path="$2" tags tag value i=0
+  tags="$(_sdlc_yq "${path}[] | type" "$file")" || return 1
+  if [[ "$tags" != *'!!bool'* && "$tags" != *'!!null'* ]]; then
+    _sdlc_yq "${path}[] | select((type != \"!!map\") and (type != \"!!seq\"))" "$file"
+    return
+  fi
+  while IFS= read -r tag; do
+    case "$tag" in
+      '!!map' | '!!seq') ;;
+      '!!null') printf 'null\n' ;;
+      '!!bool')
+        value="$(_sdlc_yq "${path}[$i]" "$file" </dev/null)" || return 1
+        printf '%s\n' "$(lower "$value")"
+        ;;
+      *) _sdlc_yq "${path}[$i]" "$file" </dev/null || return 1 ;;
+    esac
+    i=$((i + 1))
+  done <<<"$tags"
+}
+
+# _sdlc_yaml_py MODE FILE [KEY] — the PyYAML backend. MODE ∈ parses get list
+# is_list has type json. Exit 3 when PyYAML is missing; on a parse error (or,
+# for json, a value Go's encoding/json refuses, such as .inf) it prints the
+# first error line on stderr (except for parses) and exits 1. Scalars keep
+# their source text, so no valid plain scalar (08, 0x1F, 1_000) can raise.
+_sdlc_yaml_py() {
+  _sdlc_py - "$@" <<'PY'
+import decimal
+import json
+import math
+import re
+import sys
+
+mode, path = sys.argv[1], sys.argv[2]
+key = sys.argv[3] if len(sys.argv) > 3 else ""
+try:
+    import yaml
+except ImportError:
+    sys.exit(3)
+
+TAG = "tag:yaml.org,2002:"
+NULLS = ("", "~", "null", "Null", "NULL")
+BOOLS = ("true", "True", "TRUE", "false", "False", "FALSE")
+TRUTHY = ("true", "yes", "on", "y")
+INF_NAN = (".inf", ".Inf", ".INF", "+.inf", "+.Inf", "+.INF",
+           "-.inf", "-.Inf", "-.INF", ".nan", ".NaN", ".NAN")
+GO_INT = re.compile(
+    r"([-+]?)(0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|0[0-7]*|[1-9][0-9]*)\Z")
+FLOAT = re.compile(r"[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?\Z")
+BASES = {"0x": 16, "0o": 8, "0b": 2}
+
+
+# A scalar as written in the file; kind is the type yaml_type reports.
+class Text(str):
+    kind = "str"
+
+
+class YBool(Text):
+    kind = "bool"
+
+
+class YInt(Text):
+    kind = "int"
+
+
+class YFloat(Text):
+    kind = "float"
+
+
+# go_int TEXT — strconv.ParseInt(TEXT, 0, 64), else ParseUint(TEXT, 0, 64);
+# None when neither accepts TEXT (08 is not a base-0 integer).
+def go_int(text):
+    match = GO_INT.match(text)
+    if not match:
+        return None
+    sign, digits = match.groups()
+    base = BASES.get(digits[:2].lower())
+    if base:
+        value = int(digits[2:], base)
+    else:
+        value = int(digits, 8 if digits.startswith("0") else 10)
+    if sign == "-":
+        value = -value
+    if -(2 ** 63) <= value < 2 ** 63 or (not sign and value < 2 ** 64):
+        return value
+    return None
+
+
+def is_float(text):
+    return bool(FLOAT.match(text)) and math.isfinite(float(text))
+
+
+# plain_tag TEXT — the tag go-yaml v3 resolves for the plain scalar TEXT.
+def plain_tag(text):
+    if text in NULLS:
+        return TAG + "null"
+    if text in BOOLS:
+        return TAG + "bool"
+    if text in INF_NAN:
+        return TAG + "float"
+    if text == "<<":
+        return TAG + "merge"
+    if text[0] == ".":
+        return TAG + ("float" if is_float(text) else "str")
+    if text[0] in "+-0123456789":
+        digits = text.replace("_", "")
+        if go_int(digits) is not None:
+            return TAG + "int"
+        if is_float(digits):
+            return TAG + "float"
+    return TAG + "str"
+
+
+class Loader(yaml.SafeLoader):
+    def resolve(self, kind, value, implicit):
+        if kind is yaml.ScalarNode and implicit[0]:
+            return plain_tag(value)
+        return super().resolve(kind, value, implicit)
+
+
+def keep(cls):
+    return lambda loader, node: cls(loader.construct_scalar(node))
+
+
+def undefined(loader, node):
+    if isinstance(node, yaml.ScalarNode):
+        return Text(loader.construct_scalar(node))
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node, deep=True)
+    return loader.construct_mapping(node, deep=True)
+
+
+for name, cls in (("bool", YBool), ("int", YInt), ("float", YFloat),
+                  ("timestamp", Text), ("binary", Text)):
+    Loader.add_constructor(TAG + name, keep(cls))
+Loader.add_constructor(None, undefined)
+MISSING = object()
+
+
+def walk(doc, parts):
+    cur = doc
+    for part in parts:
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        else:
+            return MISSING
+    return cur
+
+
+def text(value):
+    if value is None:
+        return "null"
+    if isinstance(value, YBool):
+        return value.lower()
+    return str(value)
+
+
+def items(value):
+    for item in value:
+        if not isinstance(item, (dict, list)):
+            print(text(item))
+
+
+# to_int / go_float — the numbers yq writes in JSON: an int parsed base 16
+# after 0x, base 8 after 0o, else base 10; a float in Go encoding/json form
+# (80.0 → 80, 1e-07 → 1e-7).
+def to_int(value):
+    try:
+        if value.startswith(("0x", "0X")):
+            return int(value[2:], 16)
+        if value.startswith("0o"):
+            return int(value[2:], 8)
+        return int(value, 10)
+    except ValueError:
+        number = go_int(value.replace("_", ""))
+        if number is None:
+            raise ValueError("cannot unmarshal %r into an int" % str(value))
+        return number
+
+
+def go_float(number):
+    if not math.isfinite(number):
+        raise ValueError("json: unsupported value: %r" % number)
+    size = abs(number)
+    if size and (size < 1e-6 or size >= 1e21):
+        return re.sub(r"e-0([0-9])\Z", r"e-\1", repr(number))
+    out = format(decimal.Decimal(repr(number)), "f")
+    return out.rstrip("0").rstrip(".") if "." in out else out
+
+
+def string(value):
+    out = json.dumps(value, ensure_ascii=False)
+    return out.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+
+def to_json(value, depth=0):
+    pad, end = "  " * (depth + 1), "\n" + "  " * depth
+    if isinstance(value, dict):
+        rows = [pad + string("null" if k is None else str(k)) + ": "
+                + to_json(v, depth + 1) for k, v in value.items()]
+        return "{\n" + ",\n".join(rows) + end + "}" if rows else "{}"
+    if isinstance(value, list):
+        rows = [pad + to_json(v, depth + 1) for v in value]
+        return "[\n" + ",\n".join(rows) + end + "]" if rows else "[]"
+    if value is None:
+        return "null"
+    if isinstance(value, YBool):
+        return "true" if value.lower() in TRUTHY else "false"
+    if isinstance(value, YInt):
+        return str(to_int(value))
+    if isinstance(value, YFloat):
+        return go_float(float(value))
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return go_float(value)
+    return string(str(value))
+
+
+try:
+    with open(path, encoding="utf-8") as handle:
+        doc = yaml.load(handle, Loader=Loader)
+    if mode == "json":
+        out = to_json(doc) + "\n"
+except Exception as exc:  # any parse, read or conversion error ends the call cleanly
+    if mode != "parses":
+        lines = str(exc).strip().splitlines() or [type(exc).__name__]
+        sys.stderr.write(lines[0] + "\n")
+    sys.exit(1)
+
+parts = key.split(".") if key else []
+if mode == "parses":
+    sys.exit(0)
+if mode == "json":
+    sys.stdout.write(out)
+    sys.exit(0)
+if mode == "has":
+    parent = walk(doc, parts[:-1])
+    sys.exit(0 if isinstance(parent, dict) and parts[-1] in parent else 1)
+value = walk(doc, parts)
+if mode == "type":
+    if value is MISSING:
+        name = "absent"
+    elif value is None:
+        name = "null"
+    elif isinstance(value, Text):
+        name = value.kind
+    elif isinstance(value, list):
+        name = "list"
+    elif isinstance(value, dict):
+        name = "map"
+    else:
+        name = "str"
+    print(name)
+elif mode == "is_list":
+    sys.exit(0 if isinstance(value, list) else 1)
+elif mode == "list":
+    if isinstance(value, list):
+        items(value)
+elif mode == "get":
+    if isinstance(value, list):
+        items(value)
+    elif value is not MISSING and value is not None and not isinstance(value, dict):
+        print(text(value))
+PY
+}
+
+# _sdlc_yaml_python MODE FILE [KEY] — _sdlc_yaml_py with the error contract:
+# a missing python3 or PyYAML dies with the toolchain message, a parse error
+# is logged with the parser's first error line.
+_sdlc_yaml_python() {
+  local rc=0
+  if ! command -v python3 >/dev/null 2>&1; then
+    die "no YAML toolchain: install mikefarah yq v4, or python3 with PyYAML"
+  fi
+  _sdlc_err_first "yaml: $2: " _sdlc_yaml_py "$@" || rc=$?
+  if ((rc == 3)); then
+    die "no YAML toolchain: install mikefarah yq v4, or python3 with PyYAML"
+  fi
+  return "$rc"
+}
+
+# yaml_parses FILE — 0 when FILE parses, 1 when it does not (no diagnostics);
+# dies when FILE is missing.
+yaml_parses() {
+  local file="${1-}" rc=0
+  [[ -f "$file" ]] || die "yaml_parses: no such file: $file"
+  if have_yq; then
+    yq '.' "$file" >/dev/null 2>&1
+  else
+    command -v python3 >/dev/null 2>&1 || rc=3
+    if ((rc == 0)); then
+      _sdlc_yaml_py parses "$file" >/dev/null 2>&1 || rc=$?
+    fi
+    if ((rc == 3)); then
+      die "no YAML toolchain: install mikefarah yq v4, or python3 with PyYAML"
+    fi
+    return "$rc"
+  fi
+}
+
+# yaml_get FILE KEY — the value at the dotted KEY (see the section rules).
+yaml_get() {
+  local file="${1-}" key="${2-}" path tag value
+  _sdlc_yaml_args yaml_get "$file" "$key"
+  if ! have_yq; then
+    _sdlc_yaml_python get "$file" "$key"
+    return
+  fi
+  path="$(_sdlc_yq_path "$key")"
+  tag="$(_sdlc_yq "$path | type" "$file")" || return 1
+  case "$tag" in
+    '!!null' | '!!map') return 0 ;;
+    '!!seq') _sdlc_yq_items "$file" "$path" ;;
+    '!!bool')
+      # yq prints a boolean as written (True, FALSE); the contract is true/false.
+      value="$(_sdlc_yq "$path" "$file")" || return 1
+      printf '%s\n' "$(lower "$value")"
+      ;;
+    *) _sdlc_yq "$path | select(. != null)" "$file" ;;
+  esac
+}
+
+# yaml_get_list FILE KEY — the scalar items of the list at KEY, one per line;
+# nothing when KEY is absent or not a list.
+yaml_get_list() {
+  local file="${1-}" key="${2-}" path tag
+  _sdlc_yaml_args yaml_get_list "$file" "$key"
+  if ! have_yq; then
+    _sdlc_yaml_python list "$file" "$key"
+    return
+  fi
+  path="$(_sdlc_yq_path "$key")"
+  tag="$(_sdlc_yq "$path | type" "$file")" || return 1
+  if [[ "$tag" == '!!seq' ]]; then
+    _sdlc_yq_items "$file" "$path"
+  fi
+}
+
+# yaml_is_list FILE KEY — 0 when the value at KEY is a sequence.
+yaml_is_list() {
+  local file="${1-}" key="${2-}"
+  _sdlc_yaml_args yaml_is_list "$file" "$key"
+  if have_yq; then
+    [[ "$(yq "$(_sdlc_yq_path "$key") | type" "$file" 2>/dev/null)" == '!!seq' ]]
+  else
+    _sdlc_yaml_python is_list "$file" "$key" 2>/dev/null
+  fi
+}
+
+# yaml_has FILE KEY — 0 when KEY exists, even when its value is null.
+yaml_has() {
+  local file="${1-}" key="${2-}" parent=. leaf
+  _sdlc_yaml_args yaml_has "$file" "$key"
+  if ! have_yq; then
+    _sdlc_yaml_python has "$file" "$key" 2>/dev/null
+    return
+  fi
+  leaf="${key##*.}"
+  if [[ "$key" == *.* ]]; then
+    parent="$(_sdlc_yq_path "${key%.*}")"
+  fi
+  [[ "$(yq "$parent | has(\"$leaf\")" "$file" 2>/dev/null)" == true ]]
+}
+
+# yaml_type FILE KEY — one of null bool int float str list map absent.
+yaml_type() {
+  local file="${1-}" key="${2-}" tag
+  _sdlc_yaml_args yaml_type "$file" "$key"
+  if ! have_yq; then
+    _sdlc_yaml_python type "$file" "$key"
+    return
+  fi
+  if ! yaml_has "$file" "$key"; then
+    printf 'absent\n'
+    return 0
+  fi
+  tag="$(_sdlc_yq "$(_sdlc_yq_path "$key") | type" "$file")" || return 1
+  case "$tag" in
+    '!!null') printf 'null\n' ;;
+    '!!bool') printf 'bool\n' ;;
+    '!!int') printf 'int\n' ;;
+    '!!float') printf 'float\n' ;;
+    '!!seq') printf 'list\n' ;;
+    '!!map') printf 'map\n' ;;
+    *) printf 'str\n' ;;
+  esac
+}
+
+# _sdlc_json_go — re-emit the JSON document on stdin with the PyYAML
+# backend's writer (2-space indent, the same string escaping, numbers in Go
+# encoding/json form), so both backends print the same bytes. mikefarah yq
+# keeps a float's YAML spelling (8.0, 1.50, 1e3) and turns an int beyond
+# int64 into a float (3e+19); this prints 8, 1.5, 1000 and
+# 30000000000000000000. Unparsable input or a non-finite number exits 1 with
+# one error line on stderr.
+_sdlc_json_go() {
+  local prog
+  prog="$(
+    cat <<'JSONGO'
+import decimal
+import json
+import math
+import re
+import sys
+
+
+def go_float(number):
+    if not math.isfinite(number):
+        raise ValueError("json: unsupported value: %r" % number)
+    size = abs(number)
+    if size and (size < 1e-6 or size >= 1e21):
+        return re.sub(r"e-0([0-9])\Z", r"e-\1", repr(number))
+    out = format(decimal.Decimal(repr(number)), "f")
+    return out.rstrip("0").rstrip(".") if "." in out else out
+
+
+def string(value):
+    out = json.dumps(value, ensure_ascii=False)
+    return out.replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+
+
+def to_json(value, depth=0):
+    pad, end = "  " * (depth + 1), "\n" + "  " * depth
+    if isinstance(value, dict):
+        rows = [pad + string(k) + ": " + to_json(v, depth + 1)
+                for k, v in value.items()]
+        return "{\n" + ",\n".join(rows) + end + "}" if rows else "{}"
+    if isinstance(value, list):
+        rows = [pad + to_json(v, depth + 1) for v in value]
+        return "[\n" + ",\n".join(rows) + end + "]" if rows else "[]"
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return go_float(value)
+    return string(value)
+
+
+try:
+    doc = json.loads(sys.stdin.read())
+    sys.stdout.write(to_json(doc) + "\n")
+except Exception as exc:  # any parse or conversion error ends the call cleanly
+    lines = str(exc).strip().splitlines() or [type(exc).__name__]
+    sys.stderr.write(lines[0] + "\n")
+    sys.exit(1)
+JSONGO
+  )"
+  _sdlc_py -c "$prog"
+}
+
+# yaml_to_json FILE — the whole document as JSON (2-space indent) on stdout;
+# exit 1 with the parser's first error line (logged) when FILE does not parse.
+# On the yq path the output goes through _sdlc_json_go when python3 exists,
+# so both backends print the same bytes.
+yaml_to_json() {
+  local file="${1-}" rc=0 json
+  [[ -f "$file" ]] || die "yaml_to_json: no such file: $file"
+  if have_yq; then
+    json="$(_sdlc_err_first "yaml: $file: " yq -o=json '.' "$file")" || rc=$?
+    if ((rc == 0)); then
+      if command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' "$json" | _sdlc_err_first "yaml: $file: " _sdlc_json_go || rc=$?
+      else
+        printf '%s\n' "$json"
+      fi
+    fi
+  else
+    _sdlc_yaml_python json "$file" || rc=$?
+  fi
+  if ((rc != 0)); then
+    return 1
+  fi
+}
+
+# yaml_squote VALUE — VALUE as a single-quoted YAML scalar: ASCII control
+# characters stripped, every `'` doubled.
+yaml_squote() {
+  local value
+  value="$(printf '%s' "${1-}" | LC_ALL=C tr -d '\000-\037\177')"
+  printf "'%s'\n" "${value//\'/\'\'}"
+}
+
+# --- JSON access (jq, else python3; identical output) --------------------------
+# json_get FILE|- KEY — the value at the dotted KEY (object members only):
+# null or absent → nothing; a string raw; any other value compact JSON; an
+# array one element per line (each formatted the same way).
+json_get() {
+  local src="${1-}" key="${2-}" rc=0
+  # shellcheck disable=SC2016 # $k and $p are jq variables
+  local prog='reduce ($k | split("."))[] as $p (.; if type == "object" then .[$p] else null end) | select(. != null) | if type == "array" then .[] else . end'
+  [[ "$src" == - || -f "$src" ]] || die "json_get: no such file: $src"
+  [[ -n "$key" ]] || die "json_get: empty key"
+  if have_jq; then
+    if [[ "$src" == - ]]; then
+      _sdlc_err_first "json_get: " jq -rc --arg k "$key" "$prog" || rc=$?
+    else
+      _sdlc_err_first "json_get: $src: " jq -rc --arg k "$key" "$prog" "$src" || rc=$?
+    fi
+  else
+    _sdlc_err_first "json_get: $src: " _sdlc_py -c '
+import json
+import sys
+
+src, key = sys.argv[1], sys.argv[2]
+try:
+    if src == "-":
+        doc = json.load(sys.stdin)
+    else:
+        with open(src, encoding="utf-8") as handle:
+            doc = json.load(handle)
+except Exception as exc:  # malformed JSON or unreadable file
+    sys.stderr.write((str(exc).splitlines() or ["invalid JSON"])[0] + "\n")
+    sys.exit(1)
+cur = doc
+for part in key.split("."):
+    cur = cur.get(part) if isinstance(cur, dict) else None
+
+
+def emit(value):
+    if isinstance(value, str):
+        print(value)
+    else:
+        print(json.dumps(value, ensure_ascii=False, separators=(",", ":")))
+
+
+if isinstance(cur, list):
+    for item in cur:
+        emit(item)
+elif cur is not None:
+    emit(cur)
+' "$src" "$key" || rc=$?
+  fi
+  if ((rc != 0)); then
+    return 1
+  fi
+}
+
+# --- TOML access (python3 3.11+ tomllib) ------------------------------------------
+
+# _sdlc_toml MODE FILE KEY — MODE ∈ get list has. Values: strings raw,
+# booleans true/false, dates ISO 8601, tables and nested arrays compact JSON;
+# an array one item per line.
+_sdlc_toml() {
+  local mode="$1" file="$2" key="$3" rc=0
+  [[ -f "$file" ]] || die "toml_$mode: no such file: $file"
+  [[ "$key" =~ ^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$ ]] || die "toml_$mode: invalid key: $key"
+  command -v python3 >/dev/null 2>&1 || die "python3 3.11+ with tomllib is required"
+  _sdlc_err_first "toml: $file: " _sdlc_py -c '
+import datetime
+import json
+import sys
+
+try:
+    import tomllib
+except ImportError:
+    sys.exit(3)
+
+mode, path, key = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    with open(path, "rb") as handle:
+        doc = tomllib.load(handle)
+except Exception as exc:  # malformed TOML or unreadable file
+    sys.stderr.write((str(exc).splitlines() or ["invalid TOML"])[0] + "\n")
+    sys.exit(1)
+
+cur = doc
+found = True
+for part in key.split("."):
+    if isinstance(cur, dict) and part in cur:
+        cur = cur[part]
+    else:
+        found = False
+        break
+
+
+def fmt(value):
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return value.isoformat()
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str)
+    return str(value)
+
+
+if mode == "has":
+    sys.exit(0 if found else 1)
+if not found:
+    sys.exit(0)
+if isinstance(cur, list):
+    for item in cur:
+        print(fmt(item))
+elif mode == "get":
+    print(fmt(cur))
+' "$mode" "$file" "$key" || rc=$?
+  if ((rc == 3)); then
+    die "python3 3.11+ with tomllib is required"
+  fi
+  return "$rc"
+}
+
+# toml_get FILE KEY — the value at the dotted KEY (arrays one item per line).
+toml_get() {
+  _sdlc_toml get "${1-}" "${2-}"
+}
+
+# toml_get_list FILE KEY — the items of the array at KEY; nothing otherwise.
+toml_get_list() {
+  _sdlc_toml list "${1-}" "${2-}"
+}
+
+# toml_has FILE KEY — 0 when KEY exists.
+toml_has() {
+  _sdlc_toml has "${1-}" "${2-}"
+}
+
+# --- project profile ---------------------------------------------------------------
+
+# profile_path [DIR] — ${DIR:-$PWD}/.claude/rust-sdlc.yml.
+profile_path() {
+  printf '%s/.claude/rust-sdlc.yml\n' "${1:-$PWD}"
+}
+
+# profile_get FILE KEY [DEFAULT] — the value at KEY; DEFAULT only when KEY is
+# absent or null (`false` and '' are values).
+profile_get() {
+  local file="${1-}" key="${2-}" default="${3-}" value
+  value="$(yaml_get "$file" "$key")" || return 1
+  if [[ -z "$value" ]]; then
+    case "$(yaml_type "$file" "$key")" in
+      null | absent) value="$default" ;;
+      *) ;;
+    esac
+  fi
+  printf '%s\n' "$value"
+}
+
+# profile_require FILE KEY — the value at KEY, or die naming the key when it
+# is absent or null.
+profile_require() {
+  local file="${1-}" key="${2-}" value
+  value="$(yaml_get "$file" "$key")" || return 1
+  if [[ -z "$value" ]]; then
+    case "$(yaml_type "$file" "$key")" in
+      null | absent) die "profile: required key '$key' missing or null in $file" ;;
+      *) ;;
+    esac
+  fi
+  printf '%s\n' "$value"
+}
+
+# --- plugin and repository identity -------------------------------------------------
+
+# resolve_plugin_root — CLAUDE_PLUGIN_ROOT when set (it must be a directory),
+# else the directory two levels above this library.
+resolve_plugin_root() {
+  local lib_dir
+  if [[ -n "${CLAUDE_PLUGIN_ROOT:-}" ]]; then
+    [[ -d "$CLAUDE_PLUGIN_ROOT" ]] ||
+      die "CLAUDE_PLUGIN_ROOT is not a directory: $CLAUDE_PLUGIN_ROOT"
+    printf '%s\n' "$CLAUDE_PLUGIN_ROOT"
+    return 0
+  fi
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || return 1
+  (cd "$lib_dir/../.." && pwd)
+}
+
+# resolve_repo_slug [DIR] — owner/name of DIR's github.com origin (https,
+# git@github.com: or ssh:// form, `.git` stripped, checked with is_slug), else
+# `gh repo view --json nameWithOwner --jq .nameWithOwner` run in DIR; else
+# return 1 with no output.
+resolve_repo_slug() {
+  local dir="${1:-.}" origin slug=""
+  origin="$(git -C "$dir" remote get-url origin 2>/dev/null)" || origin=""
+  case "$origin" in
+    https://github.com/*) slug="${origin#https://github.com/}" ;;
+    git@github.com:*) slug="${origin#git@github.com:}" ;;
+    ssh://git@github.com/*) slug="${origin#ssh://git@github.com/}" ;;
+    *) ;;
+  esac
+  slug="${slug%/}"
+  slug="${slug%.git}"
+  if ! is_slug "$slug"; then
+    slug="$(cd "$dir" 2>/dev/null && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null)" || return 1
+    is_slug "$slug" || return 1
+  fi
+  printf '%s\n' "$slug"
+}
+
+# default_branch [DIR] — the target of refs/remotes/origin/HEAD, else `main`,
+# else `master` (each as a local or an origin/ ref), else `main`.
+default_branch() {
+  local dir="${1:-.}" ref name
+  ref="$(git -C "$dir" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null)" || ref=""
+  if [[ "$ref" == refs/remotes/origin/?* ]]; then
+    printf '%s\n' "${ref#refs/remotes/origin/}"
+    return 0
+  fi
+  for name in main master; do
+    if git -C "$dir" show-ref --verify --quiet "refs/heads/$name" 2>/dev/null ||
+      git -C "$dir" show-ref --verify --quiet "refs/remotes/origin/$name" 2>/dev/null; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+  done
+  printf 'main\n'
+}
+
+# --- validators ----------------------------------------------------------------------
+
+# is_kebab S [MAX] — ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ and at most MAX (50)
+# characters.
+is_kebab() {
+  local s="${1-}" max="${2:-50}"
+  is_uint "$max" || return 2
+  [[ "$s" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]] || return 1
+  ! num_gt "${#s}" "$max"
+}
+
+# is_slug S — owner/name: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$.
+is_slug() {
+  [[ "${1-}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+}
+
+# is_semver S — MAJOR.MINOR.PATCH without leading zeros or suffixes.
+is_semver() {
+  [[ "${1-}" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+}
+
+# is_commit_subject S — one line `<type>(#N): <subject>` (FR-2), tighter than
+# the template's hook: N ≥ 1 and a non-blank subject.
+is_commit_subject() {
+  local s="${1-}"
+  [[ "$s" != *$'\n'* && "$s" != *$'\r'* ]] || return 1
+  [[ "$s" =~ ^(feat|fix|refactor|build|chore|ci|docs|style|perf|test)\(#[1-9][0-9]*\):\ [^[:space:]].*$ ]]
+}
+
+# --- safe writes -----------------------------------------------------------------------
+
+# safe_write_target PATH ROOT — 0 when PATH may be written: it is not a
+# symlink and not a non-regular file, no directory between ROOT and PATH is a
+# symlink (or a non-directory), PATH has no `..` component and its real
+# location is inside the real path of ROOT. A relative PATH is taken from the
+# physical working directory, which may be any directory inside ROOT. Missing
+# parents are allowed (atomic_write creates them). A refusal logs the reason
+# and returns 1.
+safe_write_target() {
+  local path="${1-}" root="${2-}" shown="${1-}" root_real here d existing="" real
+  if [[ -z "$path" || ! -d "$root" ]]; then
+    log_error "safe_write_target: needs PATH and an existing ROOT directory"
+    return 1
+  fi
+  root_real="$(cd "$root" && pwd -P)" || return 1
+  if [[ "$root" != / ]]; then
+    root="${root%/}"
+  fi
+  case "/$path/" in
+    */../*)
+      log_error "refusing to write $shown: the path contains '..'"
+      return 1
+      ;;
+  esac
+  # Absolute from here on, so the parent walk below ends at ROOT or at /.
+  if [[ "$path" != /* ]]; then
+    here="$(pwd -P)" || return 1
+    path="${here%/}/$path"
+  fi
+  if [[ -L "$path" ]]; then
+    log_error "refusing to write $shown: it is a symbolic link"
+    return 1
+  fi
+  if [[ -e "$path" && ! -f "$path" ]]; then
+    log_error "refusing to write $shown: it is not a regular file"
+    return 1
+  fi
+  d="$(dirname -- "$path")"
+  while [[ "$d" != "$root" ]] && ! [[ -d "$d" && ! -L "$d" && "$d" -ef "$root" ]]; do
+    if [[ -L "$d" ]]; then
+      log_error "refusing to write $shown: the parent $d is a symbolic link"
+      return 1
+    fi
+    if [[ -e "$d" && ! -d "$d" ]]; then
+      log_error "refusing to write $shown: the parent $d is not a directory"
+      return 1
+    fi
+    if [[ -z "$existing" && -d "$d" ]]; then
+      existing="$d"
+    fi
+    if [[ "$d" == / ]]; then
+      log_error "refusing to write $shown: it is outside $root"
+      return 1
+    fi
+    d="$(dirname -- "$d")"
+  done
+  real="$(cd "${existing:-$d}" && pwd -P)" || return 1
+  if [[ "$root_real" != / && "$real" != "$root_real" && "$real" != "$root_real"/* ]]; then
+    log_error "refusing to write $shown: it is outside $root"
+    return 1
+  fi
+}
+
+# atomic_write PATH — stdin into PATH through a same-directory mktemp file
+# and `mv -f`; an existing file keeps its mode, a new one gets 0666 & ~umask.
+# The parent directory is created when missing (check it first with
+# safe_write_target).
+atomic_write() {
+  local path="${1-}" dir base tmp mode
+  [[ -n "$path" ]] || die "atomic_write: needs PATH"
+  dir="$(dirname -- "$path")"
+  base="$(basename -- "$path")"
+  mkdir -p -- "$dir" || return 1
+  tmp="$(mktemp "$dir/.$base.XXXXXX")" || return 1
+  if ! cat >"$tmp"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  if [[ -e "$path" ]]; then
+    if ! _sdlc_py -c 'import os, stat, sys
+os.chmod(sys.argv[2], stat.S_IMODE(os.stat(sys.argv[1]).st_mode))' "$path" "$tmp"; then
+      rm -f -- "$tmp"
+      return 1
+    fi
+  else
+    mode="$(printf '%04o' "$((8#666 & ~8#$(umask)))")"
+    if ! chmod "$mode" "$tmp"; then
+      rm -f -- "$tmp"
+      return 1
+    fi
+  fi
+  if ! mv -f -- "$tmp" "$path"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
+
+# --- template documents and the claude CLI ------------------------------------------------
+
+# human_gated_labels [DIR] — library only. Parses the "Labels to create"
+# table of DIR/docs/repository-settings.md and
+# DIR/docs/repository-settings-service.md (both sentence forms: "without it
+# the job `<j>` fails" and "without it the jobs `<a>` and `<b>` fail"), maps
+# each job id to its check name through the `| Job | Check name |` tables of
+# both documents and prints `<label>\t<check name>` per pair, in document
+# order. A job id with no table row is reported with log_warn. Absent
+# documents print nothing.
+human_gated_labels() {
+  local dir="${1:-.}"
+  [[ -d "$dir" ]] || die "human_gated_labels: no such directory: $dir"
+  _sdlc_py - "$dir" <<'PY'
+import os
+import re
+import sys
+
+CTRL = re.compile(r"[\x00-\x1f\x7f]")
+SENTENCE = re.compile(r"without it the jobs? (.+?) fails?\b")
+
+
+def clean(text):
+    return CTRL.sub("", text).strip().strip("`").strip()
+
+
+jobs = {}
+labels = []
+for name in ("repository-settings.md", "repository-settings-service.md"):
+    try:
+        with open(os.path.join(sys.argv[1], "docs", name), encoding="utf-8") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
+        continue
+    section = ""
+    header = None
+    for line in lines:
+        if line.startswith("## "):
+            section = line[3:].strip().lower()
+            header = None
+            continue
+        row = line.strip()
+        if not row.startswith("|"):
+            header = None
+            continue
+        cells = [cell.strip() for cell in row.strip("|").split("|")]
+        if header is None:
+            header = [cell.lower() for cell in cells]
+            continue
+        if all(set(cell) <= set("-: ") for cell in cells):
+            continue
+        if header[:2] == ["job", "check name"] and len(cells) >= 2:
+            checks = jobs.setdefault(clean(cells[0]), [])
+            if clean(cells[1]) not in checks:
+                checks.append(clean(cells[1]))
+        elif section == "labels to create" and header[:1] == ["label"] and len(cells) >= 2:
+            match = SENTENCE.search(" ".join(cells[1:]))
+            if match:
+                labels.append((clean(cells[0]), re.findall(r"`([^`]+)`", match.group(1))))
+
+seen = set()
+for label, ids in labels:
+    for job in ids:
+        job = clean(job)
+        if job not in jobs:
+            sys.stderr.write(
+                "[rust-sdlc][WARN] human_gated_labels: job '%s' of label '%s' has no row "
+                "in the job tables\n" % (job, label))
+            continue
+        for check in jobs[job]:
+            if (label, check) not in seen:
+                seen.add((label, check))
+                print("%s\t%s" % (label, check))
+PY
+}
+
+# claude_supports_restricted — `claude --help` lists `--restricted`.
+claude_supports_restricted() {
+  local help
+  help="$(claude --help 2>/dev/null)" || help=""
+  grep -qE -- '(^|[^[:alnum:]-])--restricted([^[:alnum:]-]|$)' <<<"$help"
+}
+
+# --- library CLI (ADR-15) -------------------------------------------------------------------
+
+# _sdlc_dispatch NAME [ARG...] — executed mode only: run NAME when it is one
+# of the 17 ADR-15 names and defined, under `set -euo pipefail`, and exit
+# with its status; otherwise print the library refusal and exit 64.
+_sdlc_dispatch() {
+  local name="${1-}"
+  case "$name" in
+    validate_context_name | resume_point | derive_issue_number | is_commit_subject | \
+      redact | state_cache_update | state_comment_body | ledger_write | hooks_active | \
+      commit_msg_file | wait_log | http_probe | protected_changes | \
+      ralph_fix_plan_prepare | ralph_fix_plan_restore | ralph_agent_md_patch | \
+      ralph_breaker_state) ;;
+    *) name="" ;;
+  esac
+  if [[ -z "$name" ]] || ! declare -F "$name" >/dev/null; then
+    printf 'common.sh is a library; source it instead of executing\n' >&2
+    exit 64
+  fi
+  shift
+  set -euo pipefail
+  "$name" "$@"
+  exit "$?"
+}
+
+# section: command helpers
+
+# Dispatcher functions that commands and agents call through the plugin-root
+# allow entry (ADR-15): issue derivation and commit message files (FR-2,
+# ADR-27), hook status (Git rules), log polling (ADR-13), loopback HTTP probes,
+# protected-change detection (ADR-25) and context-name validation (FR-14).
+# Each validates its arguments (exit 2 on a malformed one, ADR-23), writes only
+# under target/rust-sdlc/ and never writes git configuration.
+
+# --- private helpers -----------------------------------------------------------------
+
+# _ch_clean TEXT — TEXT without ASCII control characters (no newline added).
+_ch_clean() {
+  printf '%s' "${1-}" | LC_ALL=C tr -d '\000-\037\177'
+}
+
+# _ch_printable TEXT — 0 when TEXT holds printable ASCII only (0x20 to 0x7e),
+# counted in bytes, so a CR, a newline or a non-ASCII byte never passes.
+_ch_printable() {
+  local rest
+  rest="$(printf '%s' "${1-}" | LC_ALL=C tr -d ' -~' | LC_ALL=C wc -c)" || return 1
+  [[ "${rest//[[:space:]]/}" == 0 ]]
+}
+
+# _ch_bytes TEXT — the byte length of TEXT.
+_ch_bytes() {
+  local n
+  n="$(printf '%s' "${1-}" | LC_ALL=C wc -c)" || return 1
+  printf '%s\n' "${n//[[:space:]]/}"
+}
+
+# _ch_resolved_under PATH DIR... — 0 when the real path of PATH lies below
+# <real working directory>/DIR for one DIR. The DIRs are joined to the working
+# directory without following links, so a link inside them (or a linked
+# `target`) never leads outside; PATH need not exist.
+_ch_resolved_under() {
+  _sdlc_py -c '
+import os
+import sys
+
+real = os.path.realpath(sys.argv[1])
+cwd = os.path.realpath(os.getcwd())
+for name in sys.argv[2:]:
+    if real.startswith(os.path.join(cwd, name).rstrip(os.sep) + os.sep):
+        sys.exit(0)
+sys.exit(1)
+' "$@"
+}
+
+# _ch_issue N — print N without leading zeros; 1 (no output) when N is 0.
+_ch_issue() {
+  local n
+  n="$(strip_zeros "${1-}")"
+  [[ "$n" != 0 ]] || return 1
+  printf '%s\n' "$n"
+}
+
+# --- issue number and commit message file (FR-2, ADR-27) -------------------------------
+
+# derive_issue_number [--handle N] [--title T] [--branch B] [--body TEXT] —
+# the issue number of the first source that yields one, in this order: the
+# handle (^[1-9][0-9]*$), the PR title (^[a-z]+\(#([0-9]+)\):), the branch
+# (^[a-z]+/([0-9]+)-) and the PR body ((^|[^A-Za-z])Closes #([0-9]+)). An
+# empty or non-matching source yields nothing; a captured number is printed
+# without leading zeros and a captured 0 yields nothing. A PR number is never
+# an input (Git rules). Returns 1 with no output when no source yields a
+# number, 2 on a usage error.
+derive_issue_number() {
+  local handle="" title="" branch="" body=""
+  local re_title='^[a-z]+\(#([0-9]+)\):' re_branch='^[a-z]+/([0-9]+)-'
+  local re_body='(^|[^A-Za-z])Closes #([0-9]+)'
+  while (($#)); do
+    case "$1" in
+      --handle | --title | --branch | --body)
+        if (($# < 2)); then
+          log_error "derive_issue_number: $1 needs a value"
+          return 2
+        fi
+        case "$1" in
+          --handle) handle="$2" ;;
+          --title) title="$2" ;;
+          --branch) branch="$2" ;;
+          *) body="$2" ;;
+        esac
+        shift 2
+        ;;
+      *)
+        log_error "derive_issue_number: unknown argument: $(_ch_clean "$1") (usage: derive_issue_number [--handle N] [--title T] [--branch B] [--body TEXT])"
+        return 2
+        ;;
+    esac
+  done
+  if [[ "$handle" =~ ^[1-9][0-9]*$ ]]; then
+    printf '%s\n' "$handle"
+    return 0
+  fi
+  if [[ "$title" =~ $re_title ]] && _ch_issue "${BASH_REMATCH[1]}"; then
+    return 0
+  fi
+  if [[ "$branch" =~ $re_branch ]] && _ch_issue "${BASH_REMATCH[1]}"; then
+    return 0
+  fi
+  if [[ "$body" =~ $re_body ]] && _ch_issue "${BASH_REMATCH[2]}"; then
+    return 0
+  fi
+  return 1
+}
+
+# commit_msg_file SUBJECT — validates SUBJECT with is_commit_subject (else exit
+# 1, nothing written), writes SUBJECT plus a newline atomically to
+# target/rust-sdlc/tmp/commit-<utc_stamp>.txt below the working directory (the
+# repository root) and prints that relative path for `git commit -F <path>`.
+# More than one argument exits 2.
+commit_msg_file() {
+  local subject="${1-}" path stamp
+  if (($# > 1)); then
+    log_error "commit_msg_file: expected one SUBJECT argument, got $# (usage: commit_msg_file SUBJECT)"
+    return 2
+  fi
+  if ! is_commit_subject "$subject"; then
+    log_error "commit_msg_file: not a commit subject of the form <type>(#<N>): <subject>: $(_ch_clean "$subject")"
+    return 1
+  fi
+  stamp="$(utc_stamp)" || return 1
+  path="target/rust-sdlc/tmp/commit-$stamp.txt"
+  safe_write_target "$path" "$PWD" || return 1
+  printf '%s\n' "$subject" | atomic_write "$path" || return 1
+  printf '%s\n' "$path"
+}
+
+# --- hook status (Git rules) -----------------------------------------------------------
+
+# hooks_active [DIR] — reads `git config --local --get core.hooksPath` in DIR
+# (default .) and prints one line: `HOOKS: active` (exit 0) when the value is
+# exactly `.githooks` and .githooks/commit-msg, .githooks/pre-commit and
+# .githooks/pre-push of the work tree root are executable files; otherwise
+# `HOOKS: unset` (no local value; a global-only value is unset), `HOOKS:
+# foreign <value>` or `HOOKS: missing <file>`, each exit 1. Reads only; DIR
+# that is not a directory or not in a git work tree exits 2.
+hooks_active() {
+  local dir="${1:-.}" top value="" rc=0 hook shown
+  if (($# > 1)); then
+    log_error "hooks_active: too many arguments (usage: hooks_active [DIR])"
+    return 2
+  fi
+  if [[ ! -d "$dir" ]]; then
+    log_error "hooks_active: no such directory: $(_ch_clean "$dir")"
+    return 2
+  fi
+  if ! top="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || [[ -z "$top" ]]; then
+    log_error "hooks_active: not inside a git work tree: $(_ch_clean "$dir")"
+    return 2
+  fi
+  value="$(git -C "$dir" config --local --get core.hooksPath 2>/dev/null)" || rc=$?
+  if ((rc != 0)); then
+    printf 'HOOKS: unset\n'
+    return 1
+  fi
+  if [[ "$value" != .githooks ]]; then
+    shown="$(_ch_clean "$value")"
+    printf 'HOOKS: foreign %s\n' "${shown:-"''"}"
+    return 1
+  fi
+  for hook in commit-msg pre-commit pre-push; do
+    if [[ ! -f "$top/.githooks/$hook" || ! -x "$top/.githooks/$hook" ]]; then
+      printf 'HOOKS: missing .githooks/%s\n' "$hook"
+      return 1
+    fi
+  done
+  printf 'HOOKS: active\n'
+}
+
+# --- background log polling (ADR-13) ---------------------------------------------------
+
+# _ch_log_finished LOG — 0 when the last line of LOG ends with
+# RUST_SDLC_EXIT=<n> (control characters ignored).
+_ch_log_finished() {
+  local last
+  [[ -f "$1" ]] || return 1
+  last="$(tail -n 1 -- "$1" 2>/dev/null | LC_ALL=C tr -d '\000-\011\013-\037\177')" || return 1
+  [[ "$last" =~ RUST_SDLC_EXIT=[0-9]+$ ]]
+}
+
+# _ch_log_report LOG ELAPSED — the last 40 lines of LOG without control
+# characters, then the status line: RUST_SDLC_EXIT=<n> (return 0; the log's own
+# last line, split off when the command's output lacked a final newline) or
+# `WAITING: <log> (<elapsed>s)` (return 1).
+_ch_log_report() {
+  local log="$1" elapsed="$2" text="" last body code
+  if [[ -f "$log" ]]; then
+    text="$(tail -n 40 -- "$log" 2>/dev/null | LC_ALL=C tr -d '\000-\011\013-\037\177')" || text=""
+  fi
+  last="${text##*$'\n'}"
+  if [[ "$last" =~ RUST_SDLC_EXIT=([0-9]+)$ ]]; then
+    code="${BASH_REMATCH[1]}"
+    body="${text%"RUST_SDLC_EXIT=$code"}"
+    body="${body%$'\n'}"
+    if [[ -n "$body" ]]; then
+      printf '%s\n' "$body"
+    fi
+    printf 'RUST_SDLC_EXIT=%s\n' "$code"
+    return 0
+  fi
+  if [[ -n "$text" ]]; then
+    printf '%s\n' "$text"
+  fi
+  printf 'WAITING: %s (%ss)\n' "$(_ch_clean "$log")" "$elapsed"
+  return 1
+}
+
+# wait_log LOG [MAX_SECONDS] — waits for a background command's log (the
+# ADR-13 wrapper ends it with RUST_SDLC_EXIT=<n>). LOG must resolve below
+# target/rust-sdlc/logs/ or target/rust-sdlc/new-service/ of the working
+# directory and MAX_SECONDS must be 30 to 540 (default 110), else exit 2. The
+# last line is checked at once and then every 30 s (the final wait is
+# shortened to end at MAX); the output is the last 40 lines (control
+# characters stripped) ending with RUST_SDLC_EXIT=<n> (exit 0) or followed by
+# `WAITING: <log> (<elapsed>s)` (exit 1). A LOG not written yet counts as
+# running.
+wait_log() {
+  local log="${1-}" max="${2-110}" elapsed=0 step
+  if (($# < 1 || $# > 2)) || [[ -z "$log" ]]; then
+    log_error "wait_log: needs LOG (usage: wait_log LOG [MAX_SECONDS])"
+    return 2
+  fi
+  if ! is_uint "$max" || num_lt "$max" 30 || num_gt "$max" 540; then
+    log_error "wait_log: MAX_SECONDS must be an integer from 30 to 540: $(_ch_clean "$max")"
+    return 2
+  fi
+  max="$(strip_zeros "$max")"
+  if ! _ch_resolved_under "$log" target/rust-sdlc/logs target/rust-sdlc/new-service; then
+    log_error "wait_log: $(_ch_clean "$log") is not below target/rust-sdlc/logs/ or target/rust-sdlc/new-service/"
+    return 2
+  fi
+  if [[ -e "$log" && ! -f "$log" ]]; then
+    log_error "wait_log: $(_ch_clean "$log") is not a regular file"
+    return 2
+  fi
+  while ! _ch_log_finished "$log" && num_lt "$elapsed" "$max"; do
+    step=30
+    if ((max - elapsed < step)); then
+      step=$((max - elapsed))
+    fi
+    sleep "$step"
+    elapsed=$((elapsed + step))
+  done
+  _ch_log_report "$log" "$elapsed"
+}
+
+# --- loopback HTTP probe ---------------------------------------------------------------
+
+# _ch_http_exchange METHOD FEED CURL_ARGV... — runs CURL_ARGV (stdin passed
+# through when FEED is `stdin`, else /dev/null) and renders its `-i` output
+# from the pipe, so nothing is written to disk: `HTTP_STATUS: <code>`, the
+# header lines of the final (non-1xx) response without control characters, a
+# blank line and at most 65536 bytes of body (control characters other than
+# tab and newline stripped; a truncation is logged). Without a response (a
+# non-zero curl status, or no status line) it logs the transport failure with
+# curl's first stderr line and exits 1. For HEAD a complete header block is
+# the response even when curl then waits for a body that never comes
+# (statuses 18 and 28: `-X HEAD` keeps curl reading).
+_ch_http_exchange() {
+  _sdlc_py -c '
+import re
+import subprocess
+import sys
+
+method, feed, argv = sys.argv[1], sys.argv[2], sys.argv[3:]
+LIMIT = 65536
+CTRL = re.compile(rb"[\x00-\x1f\x7f]")
+
+
+def failure(status, detail):
+    detail = CTRL.sub(b"", detail.strip().split(b"\n")[0]).decode("utf-8", "replace")
+    sys.stderr.write("[rust-sdlc][ERROR] http_probe: transport failure for %s %s (curl exit %s)%s\n"
+                     % (method, argv[-1], status, ": " + detail if detail else ""))
+    sys.exit(1)
+
+
+try:
+    proc = subprocess.run(argv, stdin=sys.stdin if feed == "stdin" else subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+except OSError as exc:
+    failure("-", str(exc).encode())
+data, status = proc.stdout, proc.returncode
+STATUS = re.compile(rb"HTTP/[0-9.]+ ([0-9]{3})(?:[ \t]|\Z)")
+BLANK = re.compile(rb"\r?\n\r?\n")
+pos = 0
+while True:
+    end = BLANK.search(data, pos)
+    head = data[pos:end.start()] if end else data[pos:]
+    lines = [line.rstrip(b"\r") for line in head.split(b"\n")]
+    match = STATUS.match(lines[0])
+    if not match:
+        failure(status, proc.stderr or b"no HTTP status line in the reply")
+    code = int(match.group(1))
+    if end and 100 <= code < 200 and code != 101:
+        pos = end.end()
+        continue
+    break
+if status != 0 and not (method == "HEAD" and status in (18, 28) and end is not None):
+    failure(status, proc.stderr)
+body = data[end.end():] if end else b""
+if len(body) > LIMIT:
+    sys.stderr.write("[rust-sdlc][WARN] http_probe: body truncated to %d of %d bytes\n"
+                     % (LIMIT, len(body)))
+    body = body[:LIMIT]
+body = re.sub(rb"[\x00-\x08\x0b-\x1f\x7f]", b"", body)
+out = sys.stdout.buffer
+out.write(b"HTTP_STATUS: %d\n" % code)
+for line in lines:
+    out.write(CTRL.sub(b"", line) + b"\n")
+out.write(b"\n")
+out.write(body)
+if body and not body.endswith(b"\n"):
+    out.write(b"\n")
+' "$@"
+}
+
+# http_probe METHOD PATH [--header 'K: V']... [--body TEXT | --body-file F] —
+# one HTTP request to the profile's service.base_url (validated here, the
+# only profile key read: ^http://(localhost|127\.0\.0\.1):<port>$, port 1 to
+# 65535) plus PATH, through exactly
+#   curl --noproxy '*' --proto =http --max-time 10 -sS -i -X <METHOD> [-H …]
+#        [--data-binary @-|@F] -- <url>
+# METHOD ∈ GET HEAD POST PUT PATCH DELETE OPTIONS; PATH must match
+# ^/[A-Za-z0-9._~%/?&=:,+-]*$; at most 10 headers, each printable ASCII
+# matching ^[A-Za-z0-9-]+: ?[ -~]*$; --body at most 16 KiB (sent on stdin);
+# F must resolve below target/rust-sdlc/tmp/. Every value lands in one argv
+# slot after its flag and the URL follows `--`, so no argument adds a curl
+# option or a second URL. Prints HTTP_STATUS: <code>, the response headers
+# and at most 64 KiB of body. Exit 0 on any HTTP response, 1 on a transport
+# failure or a missing or invalid service.base_url, 2 on a rejected argument.
+http_probe() {
+  local method="${1-}" path="${2-}" body="" body_file="" body_mode="" headers_n=0
+  local re_path='^/[A-Za-z0-9._~%/?&=:,+-]*$' re_header='^[A-Za-z0-9-]+: ?[ -~]*$'
+  local usage="(usage: http_probe METHOD PATH [--header 'K: V']... [--body TEXT | --body-file F])"
+  local profile base port url
+  local -a headers=() argv=()
+  if (($# < 2)); then
+    log_error "http_probe: needs METHOD and PATH $usage"
+    return 2
+  fi
+  shift 2
+  case "$method" in
+    GET | HEAD | POST | PUT | PATCH | DELETE | OPTIONS) ;;
+    *)
+      log_error "http_probe: method not allowed: $(_ch_clean "$method") (GET HEAD POST PUT PATCH DELETE OPTIONS)"
+      return 2
+      ;;
+  esac
+  if ! _ch_printable "$path" || [[ ! "$path" =~ $re_path ]]; then
+    log_error "http_probe: PATH must match $re_path: $(_ch_clean "$path")"
+    return 2
+  fi
+  while (($#)); do
+    case "$1" in
+      --header | --body | --body-file)
+        if (($# < 2)); then
+          log_error "http_probe: $1 needs a value $usage"
+          return 2
+        fi
+        ;;
+      *)
+        log_error "http_probe: unknown argument: $(_ch_clean "$1") $usage"
+        return 2
+        ;;
+    esac
+    case "$1" in
+      --header)
+        if ! _ch_printable "$2" || [[ ! "$2" =~ $re_header ]]; then
+          log_error "http_probe: header must be printable ASCII matching $re_header: $(_ch_clean "$2")"
+          return 2
+        fi
+        headers_n=$((headers_n + 1))
+        if ((headers_n > 10)); then
+          log_error "http_probe: at most 10 headers"
+          return 2
+        fi
+        headers+=(-H "$2")
+        ;;
+      *)
+        if [[ -n "$body_mode" ]]; then
+          log_error "http_probe: give one --body or one --body-file $usage"
+          return 2
+        fi
+        if [[ "$1" == --body ]]; then
+          body_mode='text'
+          body="$2"
+          if num_gt "$(_ch_bytes "$body")" 16384; then
+            log_error "http_probe: --body is larger than 16 KiB"
+            return 2
+          fi
+        else
+          body_mode='file'
+          body_file="$2"
+          if ! _ch_resolved_under "$body_file" target/rust-sdlc/tmp || [[ ! -f "$body_file" || ! -r "$body_file" ]]; then
+            log_error "http_probe: --body-file must be a readable file below target/rust-sdlc/tmp/: $(_ch_clean "$body_file")"
+            return 2
+          fi
+        fi
+        ;;
+    esac
+    shift 2
+  done
+  profile="$(profile_path)"
+  if [[ ! -f "$profile" ]]; then
+    log_error "http_probe: no profile at .claude/rust-sdlc.yml"
+    return 1
+  fi
+  base="$(yaml_get "$profile" service.base_url)" || return 1
+  port=""
+  if [[ "$base" =~ ^http://(localhost|127\.0\.0\.1):([0-9]+)$ ]]; then
+    port="${BASH_REMATCH[2]}"
+  fi
+  if [[ -z "$port" ]] || num_lt "$port" 1 || num_gt "$port" 65535; then
+    log_error "http_probe: service.base_url must match ^http://(localhost|127\\.0\\.0\\.1):<port>$: $(_ch_clean "$base")"
+    return 1
+  fi
+  url="$base$path"
+  argv=(--noproxy '*' --proto '=http' --max-time 10 -sS -i -X "$method" "${headers[@]}")
+  case "$body_mode" in
+    text) argv+=(--data-binary @-) ;;
+    file) argv+=(--data-binary "@$body_file") ;;
+    *) ;;
+  esac
+  argv+=(-- "$url")
+  if [[ "$body_mode" == text ]]; then
+    _ch_http_exchange "$method" stdin curl "${argv[@]}" < <(printf '%s' "$body")
+  else
+    _ch_http_exchange "$method" none curl "${argv[@]}"
+  fi
+}
+
+# --- branch guard (ADR-25) ---------------------------------------------------------------
+
+# protected_changes BASE_SHA — run inside the repository. Reads the `files`
+# and `directories` lists of protected-config.toml (python3 tomllib; the
+# BASE_SHA version when it exists there, so a branch cannot drop an entry,
+# else the working tree's) and matches them against `git diff --name-only
+# --no-renames BASE_SHA` plus the untracked files: one `PROTECTED: <path>
+# (<commit>|working tree)` line per changed protected path (<commit> = the
+# newest commit since BASE_SHA that touched it, when the change is
+# committed). Then `PROFILE_CHANGED: .claude/rust-sdlc.yml` when the profile
+# exists at BASE_SHA and the working tree differs (a profile absent at
+# BASE_SHA is exempt). `INFO: no protected-config.toml` when the list exists
+# nowhere (profile check only). Exit 0 none, 1 any (or the list cannot be
+# read), 2 usage (no single argument, a leading `-`, not a commit, not in a
+# work tree).
+protected_changes() {
+  local base="${1-}" top sha rc=0
+  if (($# != 1)) || [[ -z "$base" || "$base" == -* ]]; then
+    log_error "protected_changes: needs one BASE_SHA argument (usage: protected_changes BASE_SHA)"
+    return 2
+  fi
+  if ! top="$(git rev-parse --show-toplevel 2>/dev/null)" || [[ -z "$top" ]]; then
+    log_error "protected_changes: not inside a git work tree"
+    return 2
+  fi
+  if ! sha="$(git -C "$top" rev-parse --verify --quiet "$base^{commit}" 2>/dev/null)" || [[ -z "$sha" ]]; then
+    log_error "protected_changes: not a commit: $(_ch_clean "$base")"
+    return 2
+  fi
+  command -v python3 >/dev/null 2>&1 || die "python3 3.11+ with tomllib is required"
+  _sdlc_py - "$top" "$sha" <<'PY' || rc=$?
+import os
+import re
+import subprocess
+import sys
+
+try:
+    import tomllib
+except ImportError:
+    sys.exit(3)
+
+top, sha = sys.argv[1], sys.argv[2]
+LIST = "protected-config.toml"
+PROFILE = ".claude/rust-sdlc.yml"
+CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def git(*args, check=True):
+    proc = subprocess.run(["git", "-C", top, *args], capture_output=True)
+    if check and proc.returncode != 0:
+        first = proc.stderr.decode("utf-8", "replace").strip().splitlines() or ["exit %d" % proc.returncode]
+        sys.stderr.write("[rust-sdlc][ERROR] protected_changes: git %s failed: %s\n" % (args[0], first[0]))
+        sys.exit(4)
+    return proc
+
+
+def names(raw):
+    return {item.decode("utf-8", "surrogateescape") for item in raw.split(b"\0") if item}
+
+
+def base_blob(path):
+    proc = git("cat-file", "blob", "%s:%s" % (sha, path), check=False)
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def work_file(path):
+    try:
+        with open(os.path.join(top, path), "rb") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def shown(path):
+    return CTRL.sub("", path.encode("utf-8", "surrogateescape").decode("utf-8", "replace"))
+
+
+listing = base_blob(LIST)
+if listing is None:
+    listing = work_file(LIST)
+files, prefixes = set(), []
+if listing is None:
+    print("INFO: no protected-config.toml")
+else:
+    try:
+        doc = tomllib.loads(listing.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        sys.stderr.write("[rust-sdlc][ERROR] protected_changes: cannot parse %s: %s\n" % (LIST, exc))
+        sys.exit(4)
+    for entry in doc.get("files", []):
+        if isinstance(entry, str) and entry.strip("/"):
+            files.add(entry.removeprefix("./").rstrip("/"))
+    for entry in doc.get("directories", []):
+        if isinstance(entry, str) and entry.strip("/"):
+            prefixes.append(entry.removeprefix("./").rstrip("/"))
+
+changed = names(git("diff", "--name-only", "--no-renames", "-z", sha, "--").stdout)
+changed |= names(git("ls-files", "--others", "--exclude-standard", "-z").stdout)
+committed = names(git("diff", "--name-only", "--no-renames", "-z", sha, "HEAD", "--").stdout)
+hits = 0
+for path in sorted(changed):
+    if not (path in files or any(path == p or path.startswith(p + "/") for p in prefixes)):
+        continue
+    where = "working tree"
+    if path in committed:
+        where = git("log", "-1", "--format=%h", "--abbrev=7", "%s..HEAD" % sha, "--", path).stdout.decode().strip()
+        where = where or git("rev-parse", "--short=7", "HEAD").stdout.decode().strip()
+    print("PROTECTED: %s (%s)" % (shown(path), where))
+    hits += 1
+before = base_blob(PROFILE)
+if before is not None and work_file(PROFILE) != before:
+    print("PROFILE_CHANGED: %s" % PROFILE)
+    hits += 1
+sys.exit(1 if hits else 0)
+PY
+  case "$rc" in
+    0 | 1) return "$rc" ;;
+    3) die "python3 3.11+ with tomllib is required" ;;
+    *) return 1 ;;
+  esac
+}
+
+# --- bounded-context names (FR-14) ---------------------------------------------------------
+
+# _ch_package_names ROOT MEMBER... — one line per MEMBER: the `package.name`
+# of ROOT/MEMBER/Cargo.toml (python3 tomllib), empty when it is unreadable.
+# Exit 3 without tomllib.
+_ch_package_names() {
+  _sdlc_py -c '
+import os
+import sys
+
+try:
+    import tomllib
+except ImportError:
+    sys.exit(3)
+root = sys.argv[1]
+for member in sys.argv[2:]:
+    name = ""
+    try:
+        with open(os.path.join(root, member, "Cargo.toml"), "rb") as handle:
+            package = tomllib.load(handle).get("package")
+        if isinstance(package, dict) and isinstance(package.get("name"), str):
+            name = package["name"]
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        pass
+    print(" ".join(name.split()))
+' "$@"
+}
+
+# validate_context_name GROUP CONTEXT [ROOT] — the four FR-14 rules over the
+# live tree of ROOT (default .), mirroring `cargo xtask new-context`; the
+# profile is never read. In order: name-format (both names match
+# ^[a-z][a-z0-9]*(-[a-z0-9]+)*$), reserved-context (CONTEXT is one of shared
+# service xtask test-support e2e-tests; a reserved word is a legal group),
+# context-exists (crates/<CONTEXT> or any crates/*/<CONTEXT> is a directory)
+# and member-exists (a `[workspace].members` entry ends in
+# <CONTEXT>/{domain,application,infrastructure}, or a member's package.name is
+# <CONTEXT>-{domain,application,infrastructure}). Prints nothing and returns 0
+# for a valid name, else exactly one `REFUSED: <rule> <detail>` line and
+# returns 1. Exit 2 on a usage error or a ROOT without a readable Cargo.toml.
+validate_context_name() {
+  local group="${1-}" context="${2-}" root="${3:-.}" re='^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+  local found="" dir list names rc=0 i member package
+  local -a members=() packages=()
+  if (($# < 2 || $# > 3)); then
+    log_error "validate_context_name: needs GROUP and CONTEXT (usage: validate_context_name GROUP CONTEXT [ROOT])"
+    return 2
+  fi
+  if [[ ! "$group" =~ $re ]]; then
+    printf "REFUSED: name-format group '%s' does not match %s\n" "$(_ch_clean "$group")" "$re"
+    return 1
+  fi
+  if [[ ! "$context" =~ $re ]]; then
+    printf "REFUSED: name-format context '%s' does not match %s\n" "$(_ch_clean "$context")" "$re"
+    return 1
+  fi
+  case "$context" in
+    shared | service | xtask | test-support | e2e-tests)
+      printf "REFUSED: reserved-context '%s' is reserved (shared service xtask test-support e2e-tests)\n" "$context"
+      return 1
+      ;;
+    *) ;;
+  esac
+  if [[ ! -f "$root/Cargo.toml" || ! -r "$root/Cargo.toml" ]]; then
+    log_error "validate_context_name: no readable Cargo.toml in $(_ch_clean "$root")"
+    return 2
+  fi
+  if [[ -d "$root/crates/$context" ]]; then
+    found="crates/$context"
+  else
+    for dir in "$root"/crates/*/"$context"; do
+      if [[ -d "$dir" ]]; then
+        found="crates/${dir#"$root/crates/"}"
+        break
+      fi
+    done
+  fi
+  if [[ -n "$found" ]]; then
+    printf "REFUSED: context-exists '%s' already exists at %s\n" "$context" "$(_ch_clean "$found")"
+    return 1
+  fi
+  list="$(toml_get_list "$root/Cargo.toml" workspace.members)" || return 2
+  if [[ -n "$list" ]]; then
+    mapfile -t members <<<"$list"
+    names="$(_ch_package_names "$root" "${members[@]}")" || rc=$?
+    if ((rc == 3)); then
+      die "python3 3.11+ with tomllib is required"
+    elif ((rc != 0)); then
+      return 2
+    fi
+    mapfile -t packages <<<"$names"
+  fi
+  for i in "${!members[@]}"; do
+    member="${members[$i]%/}"
+    package="${packages[$i]-}"
+    case "$package" in
+      "$context-domain" | "$context-application" | "$context-infrastructure")
+        printf "REFUSED: member-exists '%s' is already a workspace member: %s (package %s)\n" \
+          "$context" "$(_ch_clean "$member")" "$package"
+        return 1
+        ;;
+      *) ;;
+    esac
+    case "/$member" in
+      */"$context"/domain | */"$context"/application | */"$context"/infrastructure)
+        printf "REFUSED: member-exists '%s' is already a workspace member: %s\n" \
+          "$context" "$(_ch_clean "$member")"
+        return 1
+        ;;
+      *) ;;
+    esac
+  done
+  return 0
+}
+
+# section: publishing and model sessions
+
+# The single redaction implementation behind every body the plugin publishes
+# (NFR-10, ADR-27), prompt-fence neutralization for contributor text, the two
+# claude drivers of the review loop and the FR/NFR gate (ADR-8) and the
+# validated review-ledger writer (ADR-16). redact and ledger_write are
+# dispatcher names (ADR-15); writes go only below target/rust-sdlc/ or the
+# ledger directory, through safe_write_target and atomic_write. Private helpers
+# carry the _pm_ prefix.
+
+# --- redaction (NFR-10, ADR-27) --------------------------------------------------------
+
+# _pm_redact_stream — stdin to stdout through the redaction list, python3 `re`,
+# applied in this order, each match replaced by [REDACTED] with the lead-in
+# kept as shown:
+#   (AKIA|ASIA)[0-9A-Z]{16}                          → AKIA[REDACTED]
+#   JWT eyJ…{10,}.…{10,}.…{10,}                       → [REDACTED]
+#   (gh[pousr]_)[A-Za-z0-9]{20,}                      → ghp_[REDACTED]
+#   github_pat_[A-Za-z0-9_]{22,}                      → github_pat_[REDACTED]
+#   -----BEGIN … PRIVATE KEY----- … -----END … PRIVATE KEY----- (multi-line;
+#   a block without its END line is redacted to the end of the text) → [REDACTED]
+#   (?i)authorization:\s*(bearer|basic|token)\s+\S+   → Authorization: Bearer [REDACTED]
+#   (?i)\b[A-Z0-9_]*(PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY)[A-Z0-9_]*\s*[=:]\s*\S+
+#                                                     → DB_PASSWORD=[REDACTED]
+#   URL credentials ://[^/\s:@]+:[^/\s@]+@            → ://[REDACTED]@
+#   a base64/hex run of 40+ characters ([A-Za-z0-9+], `=` padding) with mixed
+#   classes, a letter and a digit           → [REDACTED]
+# A run that is hexadecimal in one letter case (a commit sha, a sha256 digest)
+# is not a mixed-class run: the state comment publishes 40-hex head_sha values
+# that resume_point must read back. The bytes are kept as read (invalid UTF-8
+# passes through unchanged), and text without a secret is copied byte for byte.
+_pm_redact_stream() {
+  _sdlc_py -c '
+import re
+import sys
+
+MARK = "[REDACTED]"
+RULES = (
+    (re.compile(r"(AKIA|ASIA)[0-9A-Z]{16}"), r"\1" + MARK),
+    (re.compile(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"), MARK),
+    (re.compile(r"(gh[pousr]_)[A-Za-z0-9]{20,}"), r"\1" + MARK),
+    (re.compile(r"(github_pat_)[A-Za-z0-9_]{22,}"), r"\1" + MARK),
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"
+                r"(?:.*?-----END [A-Z ]*PRIVATE KEY-----|.*\Z)", re.S), MARK),
+    (re.compile(r"(?i)(authorization:\s*(?:bearer|basic|token)\s+)\S+"), r"\1" + MARK),
+    (re.compile(r"(?i)(\b[A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|APIKEY|API_KEY)"
+                r"[A-Z0-9_]*\s*[=:]\s*)\S+"), r"\1" + MARK),
+    (re.compile(r"://[^/\s:@]+:[^/\s@]+@"), "://" + MARK + "@"),
+)
+RUN = re.compile(r"(?<![A-Za-z0-9+])[A-Za-z0-9+]{40,}={0,2}(?![A-Za-z0-9+])")
+LETTER = re.compile(r"[A-Za-z]")
+DIGIT = re.compile(r"[0-9]")
+DIGEST = re.compile(r"[0-9a-f]+|[0-9A-F]+")
+
+
+def run_mark(match):
+    core = match.group(0).rstrip("=")
+    if LETTER.search(core) and DIGIT.search(core) and not DIGEST.fullmatch(core):
+        return MARK
+    return match.group(0)
+
+
+text = sys.stdin.buffer.read().decode("utf-8", "surrogateescape")
+for pattern, replacement in RULES:
+    text = pattern.sub(replacement, text)
+text = RUN.sub(run_mark, text)
+sys.stdout.buffer.write(text.encode("utf-8", "surrogateescape"))
+'
+}
+
+# redact [--in FILE] [--out FILE] — stdin to stdout through the redaction list
+# (_pm_redact_stream), or FILE to FILE. --in must be a readable regular file
+# and --out a path, both resolving below target/rust-sdlc/tmp/ of the working
+# directory (the repository root), else exit 2 with nothing written. --out is
+# refused (exit 1) when safe_write_target refuses it; its directory is created
+# when missing, the redacted text is complete before it replaces --out
+# atomically (atomic_write) and `WROTE: <out>` is printed. Without --out the
+# redacted text goes to stdout. A failed redaction exits 1 and leaves --out as
+# it was.
+redact() {
+  local usage='(usage: redact [--in FILE] [--out FILE])'
+  local in="" out="" have_in=0 have_out=0 dir tmp rc=0
+  while (($#)); do
+    case "$1" in
+      --in | --out)
+        if (($# < 2)) || [[ -z "$2" ]]; then
+          log_error "redact: $1 needs a value $usage"
+          return 2
+        fi
+        if [[ "$1" == --in ]]; then
+          if ((have_in)); then
+            log_error "redact: --in given twice $usage"
+            return 2
+          fi
+          have_in=1
+          in="$2"
+        else
+          if ((have_out)); then
+            log_error "redact: --out given twice $usage"
+            return 2
+          fi
+          have_out=1
+          out="$2"
+        fi
+        shift 2
+        ;;
+      *)
+        log_error "redact: unknown argument: $(_ch_clean "$1") $usage"
+        return 2
+        ;;
+    esac
+  done
+  if ((have_in)); then
+    if ! _ch_resolved_under "$in" target/rust-sdlc/tmp; then
+      log_error "redact: --in must be below target/rust-sdlc/tmp/: $(_ch_clean "$in")"
+      return 2
+    fi
+    if [[ ! -f "$in" || ! -r "$in" ]]; then
+      log_error "redact: --in is not a readable regular file: $(_ch_clean "$in")"
+      return 2
+    fi
+  fi
+  if ((!have_out)); then
+    if ((have_in)); then
+      _pm_redact_stream <"$in"
+    else
+      _pm_redact_stream
+    fi
+    return
+  fi
+  if ! _ch_resolved_under "$out" target/rust-sdlc/tmp; then
+    log_error "redact: --out must be below target/rust-sdlc/tmp/: $(_ch_clean "$out")"
+    return 2
+  fi
+  safe_write_target "$out" "$PWD" || return 1
+  dir="$(dirname -- "$out")"
+  mkdir -p -- "$dir" || return 1
+  tmp="$(mktemp "$dir/.redact.XXXXXX")" || return 1
+  if ((have_in)); then
+    _pm_redact_stream <"$in" >"$tmp" || rc=$?
+  else
+    _pm_redact_stream >"$tmp" || rc=$?
+  fi
+  if ((rc == 0)); then
+    atomic_write "$out" <"$tmp" || rc=$?
+  fi
+  rm -f -- "$tmp"
+  if ((rc != 0)); then
+    log_error "redact: could not write $(_ch_clean "$out")"
+    return 1
+  fi
+  printf 'WROTE: %s\n' "$out"
+}
+
+# fence_safe — stdin to stdout with every `<<<` turned into `‹‹‹` and every
+# `>>>` into `›››` (left to right, non-overlapping), so contributor text placed
+# between the <<< and >>> fences of a prompt cannot close its data block
+# early. Every other byte is copied unchanged. Arguments exit 2.
+fence_safe() {
+  if (($#)); then
+    log_error "fence_safe: reads stdin and takes no argument (usage: fence_safe <TEXT)"
+    return 2
+  fi
+  _sdlc_py -c '
+import sys
+
+data = sys.stdin.buffer.read()
+data = data.replace(b"<<<", "‹‹‹".encode("utf-8"))
+data = data.replace(b">>>", "›››".encode("utf-8"))
+sys.stdout.buffer.write(data)
+'
+}
+
+# --- claude driver and the isolated gate session (ADR-8) ----------------------------------
+# `claude -p --output-format json` prints one object with a `.result` string
+# and an `.is_error` bool. A non-zero exit, `is_error: true` or a missing
+# `.result` is a transport failure and earns exactly one retry; a well-formed
+# reply is returned as it is, so a negative verdict is never retried.
+
+# claude_is_error JSON — 0 when JSON reports `.is_error == true` (jq, else
+# python3), else 1; malformed JSON or a non-object is not an error report.
+claude_is_error() {
+  local json="${1-}"
+  if have_jq; then
+    if printf '%s' "$json" | jq -e '.is_error == true' >/dev/null 2>&1; then
+      return 0
+    fi
+    return 1
+  else
+    printf '%s' "$json" | _sdlc_py -c '
+import json
+import sys
+
+try:
+    doc = json.load(sys.stdin)
+except ValueError:
+    sys.exit(1)
+sys.exit(0 if isinstance(doc, dict) and doc.get("is_error") is True else 1)
+' 2>/dev/null
+  fi
+}
+
+# claude_extract_result JSON — `.result // empty` (jq -r, else python3 with the
+# same output): a string raw with a newline; null, false, a missing key,
+# malformed JSON or a non-object print nothing. Always returns 0.
+claude_extract_result() {
+  local json="${1-}"
+  if have_jq; then
+    printf '%s' "$json" | jq -r '.result // empty' 2>/dev/null || true
+  else
+    printf '%s' "$json" | _sdlc_py -c '
+import json
+import sys
+
+try:
+    doc = json.load(sys.stdin)
+except ValueError:
+    sys.exit(0)
+value = doc.get("result") if isinstance(doc, dict) else None
+if isinstance(value, str):
+    print(value)
+elif value is not None and value is not False:
+    print(json.dumps(value, indent=2, ensure_ascii=False))
+' 2>/dev/null || true
+  fi
+}
+
+# _pm_gh_config_rm — removes the isolated session's temporary GH_CONFIG_DIR
+# (the subshell variable gh_config), if any.
+_pm_gh_config_rm() {
+  if [[ -n "${gh_config:-}" ]]; then
+    rm -rf -- "$gh_config"
+  fi
+  gh_config=""
+}
+
+# _pm_session_signal SIGNAL — the isolated session's HUP/INT/TERM trap: remove
+# the temporary GH_CONFIG_DIR, then die of SIGNAL itself, so a caller that got
+# the same signal (Ctrl-C reaches the whole process group) stops as well.
+_pm_session_signal() {
+  _pm_gh_config_rm
+  trap - EXIT "$1"
+  kill -s "$1" "$BASHPID"
+  case "$1" in
+    HUP) exit 129 ;;
+    INT) exit 130 ;;
+    *) exit 143 ;;
+  esac
+}
+
+# _pm_claude_attempt MODE PROMPT — one claude session; stdout is claude's raw
+# JSON and the status claude's. MODE `isolated` is react's isolated run with
+# the exact environment of ADR-8, inside a subshell whose traps remove the
+# fresh `mktemp -d` GH_CONFIG_DIR on every exit path (return, error, signal);
+# the caller's traps and environment are untouched. The session never reads
+# the caller's stdin.
+_pm_claude_attempt() {
+  local mode="$1" prompt="$2"
+  local -a cmd=(claude -p "$prompt" --output-format json --permission-mode acceptEdits --max-turns 30)
+  if [[ "$mode" != isolated ]]; then
+    "${cmd[@]}" </dev/null
+    return
+  fi
+  (
+    gh_config=""
+    trap _pm_gh_config_rm EXIT
+    trap '_pm_session_signal HUP' HUP
+    trap '_pm_session_signal INT' INT
+    trap '_pm_session_signal TERM' TERM
+    gh_config="$(mktemp -d)" || exit 1
+    cmd=(env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN
+      -u SSH_AUTH_SOCK -u GIT_ASKPASS -u SSH_ASKPASS
+      GH_CONFIG_DIR="$gh_config" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+      GIT_TERMINAL_PROMPT=0 GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=
+      "${cmd[@]}"
+      --restricted --tools 'Read,Grep,Glob' --strict-mcp-config
+      --disallowedTools 'Bash(gh:*)' 'Bash(git push:*)' 'Bash(git credential:*)')
+    "${cmd[@]}" </dev/null
+  )
+}
+
+# _pm_claude_session MODE PROMPT — up to two attempts of _pm_claude_attempt;
+# prints `.result` of the first well-formed reply (exit 0), or logs each
+# transport failure and returns 1 after the retry. A missing or empty PROMPT,
+# or more than one argument, exits 2 without a session.
+_pm_claude_session() {
+  local mode="$1" fn="claude_run_$1" raw result attempt rc
+  shift
+  if (($# != 1)) || [[ -z "$1" ]]; then
+    log_error "$fn: needs one non-empty PROMPT (usage: $fn PROMPT)"
+    return 2
+  fi
+  for attempt in 1 2; do
+    rc=0
+    raw="$(_pm_claude_attempt "$mode" "$1")" || rc=$?
+    if ((rc != 0)); then
+      log_warn "$fn: attempt $attempt/2: claude exited with status $rc (transport failure)"
+    elif claude_is_error "$raw"; then
+      log_warn "$fn: attempt $attempt/2: claude reported is_error: true (transport failure)"
+    else
+      result="$(claude_extract_result "$raw")"
+      if [[ -n "$result" ]]; then
+        printf '%s\n' "$result"
+        return 0
+      fi
+      log_warn "$fn: attempt $attempt/2: the claude reply has no .result (transport failure)"
+    fi
+  done
+  log_error "$fn: claude failed after one retry"
+  return 1
+}
+
+# claude_run_once PROMPT — `claude -p PROMPT --output-format json
+# --permission-mode acceptEdits --max-turns 30`; prints `.result`; one retry
+# on a transport failure, then return 1 (ADR-8).
+claude_run_once() {
+  _pm_claude_session once "$@"
+}
+
+# claude_run_isolated PROMPT — claude_run_once for a session that reads
+# contributor-controlled text (PR and issue bodies, diffs): no credential
+# variable, an empty temporary GH_CONFIG_DIR, git without system, global or
+# credential-helper configuration, and `--restricted --tools 'Read,Grep,Glob'
+# --strict-mcp-config` with gh, git push and git credential denied. The
+# caller keeps its own credentials and publishes the outcome itself.
+claude_run_isolated() {
+  _pm_claude_session isolated "$@"
+}
+
+# --- review ledgers (ADR-16) ------------------------------------------------------------
+
+# _pm_ledger_doc LENS ITERATION HEAD_SHA STARTED ENDED — reads the findings
+# array on stdin (bare JSON, or one fenced ```json block), validates it
+# against the ADR-16 field table and prints the ledger document. Every
+# violation is logged; invalid findings exit 1, an impossible calendar time in
+# STARTED or ENDED exits 2.
+_pm_ledger_doc() {
+  # shellcheck disable=SC2016 # a python program; `$` ends a regex in its messages
+  _sdlc_py -c '
+import json
+import re
+import sys
+from datetime import datetime
+
+lens, iteration, head_sha, started, ended = sys.argv[1:6]
+PREFIX = {"security": "SEC-", "fr-nfr": "FRN-", "code-review": "CQ-"}[lens]
+KEYS = ("id", "severity", "file", "line", "rule", "summary", "status")
+SEVERITIES = ("Critical", "High", "Medium", "Low", "Info")
+STATUSES = ("open", "fixed", "dropped")
+ID = re.compile(r"[A-Z]+-[0-9]+")
+CTRL = re.compile(r"[\x00-\x08\x0a-\x1f\x7f]")
+
+
+def log(message):
+    sys.stderr.write("[rust-sdlc][ERROR] ledger_write: %s\n" % CTRL.sub("?", message))
+
+
+for flag, value in (("--started-at", started), ("--ended-at", ended)):
+    if value:
+        try:
+            datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+        except ValueError:
+            log("%s is not a UTC time: %s" % (flag, value))
+            sys.exit(2)
+
+
+def unique_keys(pairs):
+    seen = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError("duplicate key %s" % json.dumps(key))
+        seen[key] = value
+    return seen
+
+
+def no_constant(name):
+    raise ValueError("%s is not JSON" % name)
+
+
+text = sys.stdin.read().strip()
+if text.startswith("```"):
+    lines = text.splitlines()
+    if len(lines) < 2 or lines[0].strip() not in ("```", "```json") or lines[-1].strip() != "```":
+        log("stdin: a fenced block must open with ```json and close with ```")
+        sys.exit(1)
+    text = "\n".join(lines[1:-1])
+try:
+    findings = json.loads(text, object_pairs_hook=unique_keys, parse_constant=no_constant)
+except ValueError as exc:
+    log("stdin is not a JSON findings array: %s" % (str(exc).splitlines() or ["invalid JSON"])[0])
+    sys.exit(1)
+
+errors = []
+if not isinstance(findings, list):
+    errors.append("stdin: the findings must be a JSON array")
+    findings = []
+ids = set()
+for index, finding in enumerate(findings):
+    at = "findings[%d]" % index
+    if not isinstance(finding, dict):
+        errors.append("%s: not an object" % at)
+        continue
+    for key in sorted(set(finding) - set(KEYS)):
+        errors.append("%s: extra key %s" % (at, json.dumps(key)))
+    for key in KEYS:
+        if key not in finding:
+            errors.append("%s: missing key %s" % (at, key))
+    if set(KEYS) - set(finding):
+        continue
+    fid, severity, path, line, rule, summary, status = (finding[key] for key in KEYS)
+    if not isinstance(fid, str) or not ID.fullmatch(fid):
+        errors.append("%s.id: %s does not match ^[A-Z]+-[0-9]+$" % (at, json.dumps(fid)))
+    elif not fid.startswith(PREFIX):
+        errors.append("%s.id: %s lacks the %s prefix of the %s lens" % (at, fid, PREFIX, lens))
+    elif fid in ids:
+        errors.append("%s.id: %s is not unique" % (at, fid))
+    else:
+        ids.add(fid)
+    if severity not in SEVERITIES:
+        errors.append("%s.severity: %s is not one of %s" % (at, json.dumps(severity), " ".join(SEVERITIES)))
+    if path is not None and not (
+            isinstance(path, str) and path and not CTRL.search(path) and not path.startswith("/")
+            and ".." not in path.replace("\\", "/").split("/")):
+        errors.append("%s.file: %s is not a repository-relative path or null" % (at, json.dumps(path)))
+    if line is not None and not (isinstance(line, int) and not isinstance(line, bool) and line >= 1):
+        errors.append("%s.line: %s is not an integer >= 1 or null" % (at, json.dumps(line)))
+    elif line is not None and path is None:
+        errors.append("%s.line: must be null when file is null" % at)
+    if not isinstance(rule, str) or not rule.strip() or CTRL.search(rule):
+        errors.append("%s.rule: %s is not a non-empty single-line string" % (at, json.dumps(rule)))
+    if not isinstance(summary, str) or not 1 <= len(summary) <= 300 or CTRL.search(summary):
+        errors.append("%s.summary: not a single-line string of 1 to 300 characters" % at)
+    if status not in STATUSES:
+        errors.append("%s.status: %s is not one of %s" % (at, json.dumps(status), " ".join(STATUSES)))
+if errors:
+    for message in errors:
+        log(message)
+    sys.exit(1)
+
+doc = {
+    "schema_version": 1,
+    "lens": lens,
+    "iteration": int(iteration),
+    "head_sha": head_sha,
+    "findings": [{key: finding[key] for key in KEYS} for finding in findings],
+}
+if started:
+    doc["started_at"] = started
+if ended:
+    doc["ended_at"] = ended
+print(json.dumps(doc, indent=2, ensure_ascii=False))
+' "$@"
+}
+
+# ledger_write LENS ITERATION HEAD_SHA [--dir D] [--started-at ISO]
+# [--ended-at ISO] — reads LENS's findings array (the lens agent's final fenced
+# json block) on stdin and validates it against the ADR-16 field table: each
+# finding has exactly id (^[A-Z]+-[0-9]+$ with the lens prefix SEC- security,
+# FRN- fr-nfr, CQ- code-review; unique), severity (Critical High Medium Low
+# Info), file (repository-relative path or null), line (integer >= 1, or null;
+# null when file is null), rule (non-empty, single line), summary (1 to 300
+# characters, single line) and status (open fixed dropped). A valid array is
+# written atomically as {"schema_version": 1, "lens", "iteration", "head_sha",
+# "findings"[, "started_at", "ended_at"]} to
+# ${D:-${SDLC_LEDGER_DIR:-target/rust-sdlc/review-ledgers}}/<LENS>.json and
+# `WROTE: <path>` is printed. Exit 1 on invalid findings or a refused path,
+# nothing written; exit 2 on a malformed argument (LENS outside security
+# fr-nfr code-review, ITERATION not a digit string, HEAD_SHA not 40 lower-case
+# hex, a time not YYYY-MM-DDTHH:MM:SSZ, an unknown or repeated flag).
+ledger_write() {
+  local usage='(usage: ledger_write LENS ITERATION HEAD_SHA [--dir D] [--started-at ISO] [--ended-at ISO])'
+  local re_iso='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+  local lens="${1-}" iteration="${2-}" sha="${3-}" dir="" started="" ended="" seen=" "
+  local doc path root
+  if (($# < 3)); then
+    log_error "ledger_write: needs LENS, ITERATION and HEAD_SHA $usage"
+    return 2
+  fi
+  shift 3
+  while (($#)); do
+    case "$1" in
+      --dir | --started-at | --ended-at)
+        if (($# < 2)) || [[ -z "$2" ]]; then
+          log_error "ledger_write: $1 needs a value $usage"
+          return 2
+        fi
+        if [[ "$seen" == *" $1 "* ]]; then
+          log_error "ledger_write: $1 given twice $usage"
+          return 2
+        fi
+        seen+="$1 "
+        case "$1" in
+          --dir) dir="$2" ;;
+          --started-at) started="$2" ;;
+          *) ended="$2" ;;
+        esac
+        shift 2
+        ;;
+      *)
+        log_error "ledger_write: unknown argument: $(_ch_clean "$1") $usage"
+        return 2
+        ;;
+    esac
+  done
+  case "$lens" in
+    security | fr-nfr | code-review) ;;
+    *)
+      log_error "ledger_write: LENS must be security, fr-nfr or code-review: $(_ch_clean "$lens")"
+      return 2
+      ;;
+  esac
+  if ! is_uint "$iteration"; then
+    log_error "ledger_write: ITERATION must be a non-negative integer: $(_ch_clean "$iteration")"
+    return 2
+  fi
+  if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+    log_error "ledger_write: HEAD_SHA must be 40 lower-case hex digits: $(_ch_clean "$sha")"
+    return 2
+  fi
+  if [[ -n "$started" && ! "$started" =~ $re_iso ]] || [[ -n "$ended" && ! "$ended" =~ $re_iso ]]; then
+    log_error "ledger_write: --started-at and --ended-at take YYYY-MM-DDTHH:MM:SSZ"
+    return 2
+  fi
+  doc="$(_pm_ledger_doc "$lens" "$(strip_zeros "$iteration")" "$sha" "$started" "$ended")" || return
+  dir="${dir:-${SDLC_LEDGER_DIR:-target/rust-sdlc/review-ledgers}}"
+  path="${dir%/}/$lens.json"
+  if [[ "$dir" == /* ]]; then
+    mkdir -p -- "$dir" || return 1
+    root="$dir"
+  else
+    root="$PWD"
+  fi
+  safe_write_target "$path" "$root" || return 1
+  printf '%s\n' "$doc" | atomic_write "$path" || return 1
+  printf 'WROTE: %s\n' "$path"
+}
+
+# section: stage state and resume
+
+# Durable stage state (ADR-14): the JSON cache
+# target/rust-sdlc/state/<N>-<slug>.json written by state_cache_update, the
+# issue state comment (`<!-- rust-sdlc-state -->` and the table
+# `| stage | result | head_sha | iteration | at |`) rendered by
+# state_comment_body, and resume_point, which applies the PA-7 validity rules
+# to that comment (only one authored by the posting identity, ADR-26) or to
+# the cache and reports where the orchestrator resumes, with every counter.
+# All three are dispatcher names (ADR-15); none calls gh (the orchestrator
+# reads and writes the comment). Private helpers carry the _sr_ prefix.
+
+# _sr_state_py MODE ARG... — the python3 side of the state helpers. The cache
+# document is checked strictly: exactly the keys schema_version (1), issue and
+# slug (equal to the file name's), staged_specs_dir (a single-line path or
+# null) and stages, whose elements hold exactly stage, result, head_sha (40
+# lower-case hex), iteration (an integer >= 0, or for finish-pr the cell
+# A<n>.B<n>.C<n>.W<n>.R<n>) and at (YYYY-MM-DDTHH:MM:SSZ), one element per
+# stage. Modes:
+#   update FILE ISSUE SLUG STAGE RESULT SHA ITERATION AT SET_SPECS SPECS
+#          print the updated cache document (FILE is read when it exists): the
+#          row of STAGE replaced or added, rows in stage order, and with
+#          SET_SPECS=1 the top-level staged_specs_dir set to SPECS
+#   body FILE ISSUE SLUG      print the state comment body of the cache
+#   rows FILE ISSUE SLUG      print `ROW<TAB>stage<TAB>result<TAB>sha<TAB>iteration`
+#                             per cached stage, in stage order
+#   comments LOGIN            read the issue comments JSON on stdin (arrays,
+#                             concatenated pages, an array of pages or NDJSON),
+#                             print `DEGRADED: ignored state comment by <login>`
+#                             per marker comment of another author, then the
+#                             ROW lines of the oldest marker comment by LOGIN
+# Iterations are printed without leading zeros. A malformed cache, comments
+# document or state table exits 1, a malformed argument exits 2; the reason
+# goes to stderr.
+_sr_state_py() {
+  _sdlc_py -c '
+import json
+import os
+import re
+import sys
+
+if hasattr(sys, "set_int_max_str_digits"):
+    sys.set_int_max_str_digits(0)
+
+MARKER = "<!-- rust-sdlc-state -->"
+STAGES = ("issue", "plan", "implement", "review", "qa", "finish-pr")
+RESULTS = ("PASS", "IN_PROGRESS", "ESCALATED")
+COLUMNS = ("stage", "result", "head_sha", "iteration", "at")
+TOP = ("schema_version", "issue", "slug", "staged_specs_dir", "stages")
+SHA = re.compile(r"[0-9a-f]{40}")
+UINT = re.compile(r"[0-9]+")
+CELL = re.compile(r"A([0-9]+)\.B([0-9]+)\.C([0-9]+)\.W([0-9]+)\.R([0-9]+)")
+AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+RULE = re.compile(r":?-{3,}:?")
+CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def fail(message, code=1):
+    sys.stderr.write("[rust-sdlc][ERROR] %s\n" % CTRL.sub("?", message))
+    sys.exit(code)
+
+
+def digits(text):
+    return text.lstrip("0") or "0"
+
+
+def shown(value):
+    return json.dumps(value, ensure_ascii=False)
+
+
+def check_row(where, stage, result, sha, iteration, at, cached, code=1):
+    """The validated row (stage, result, sha, iteration text, at)."""
+    if stage not in STAGES:
+        fail("%s: stage %s is not one of %s" % (where, shown(stage), " ".join(STAGES)), code)
+    if result not in RESULTS:
+        fail("%s: result %s is not one of %s" % (where, shown(result), " ".join(RESULTS)), code)
+    if not isinstance(sha, str) or not SHA.fullmatch(sha):
+        fail("%s: head_sha %s is not 40 lower-case hex digits" % (where, shown(sha)), code)
+    if stage == "finish-pr":
+        match = CELL.fullmatch(iteration) if isinstance(iteration, str) else None
+        if match is None:
+            fail("%s: the finish-pr iteration %s is not the cell A<n>.B<n>.C<n>.W<n>.R<n>"
+                 % (where, shown(iteration)), code)
+        iteration = "A%s.B%s.C%s.W%s.R%s" % tuple(digits(group) for group in match.groups())
+    elif cached:
+        if type(iteration) is not int or iteration < 0:
+            fail("%s: iteration %s is not an integer >= 0" % (where, shown(iteration)), code)
+        iteration = str(iteration)
+    else:
+        if not isinstance(iteration, str) or not UINT.fullmatch(iteration):
+            fail("%s: iteration %s is not an integer >= 0" % (where, shown(iteration)), code)
+        iteration = digits(iteration)
+    if not isinstance(at, str) or not AT.fullmatch(at):
+        fail("%s: at %s is not YYYY-MM-DDTHH:MM:SSZ" % (where, shown(at)), code)
+    return (stage, result, sha, iteration, at)
+
+
+def unique_keys(pairs):
+    seen = {}
+    for key, value in pairs:
+        if key in seen:
+            raise ValueError("duplicate key %s" % json.dumps(key))
+        seen[key] = value
+    return seen
+
+
+def no_constant(name):
+    raise ValueError("%s is not JSON" % name)
+
+
+def first_line(exc):
+    return (str(exc).splitlines() or ["invalid JSON"])[0]
+
+
+def load_cache(path, issue, slug):
+    """The cache document and its rows by stage; exit 1 when malformed."""
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read()
+    except OSError as exc:
+        fail("%s: cannot read the state cache: %s" % (path, exc.strerror or exc))
+    try:
+        doc = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_keys,
+                         parse_constant=no_constant)
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+        fail("%s: not a state cache JSON document: %s" % (path, first_line(exc)))
+    if not isinstance(doc, dict) or sorted(doc) != sorted(TOP):
+        fail("%s: the state cache must hold exactly the keys %s" % (path, " ".join(TOP)))
+    if type(doc["schema_version"]) is not int or doc["schema_version"] != 1:
+        fail("%s: schema_version %s is not 1" % (path, shown(doc["schema_version"])))
+    if type(doc["issue"]) is not int or str(doc["issue"]) != issue:
+        fail("%s: issue %s does not match the file name (%s)" % (path, shown(doc["issue"]), issue))
+    if doc["slug"] != slug:
+        fail("%s: slug %s does not match the file name (%s)" % (path, shown(doc["slug"]), slug))
+    specs = doc["staged_specs_dir"]
+    if specs is not None and (not isinstance(specs, str) or not specs or CTRL.search(specs)):
+        fail("%s: staged_specs_dir %s is not a single-line path or null" % (path, shown(specs)))
+    if not isinstance(doc["stages"], list):
+        fail("%s: stages is not an array" % path)
+    rows = {}
+    for index, element in enumerate(doc["stages"]):
+        where = "%s: stages[%d]" % (path, index)
+        if not isinstance(element, dict) or sorted(element) != sorted(COLUMNS):
+            fail("%s: an element must hold exactly the keys %s" % (where, " ".join(COLUMNS)))
+        row = check_row(where, *(element[key] for key in COLUMNS), cached=True)
+        if row[0] in rows:
+            fail("%s: a second %s element" % (where, row[0]))
+        rows[row[0]] = row
+    return doc, rows
+
+
+def element(row):
+    stage, result, sha, iteration, at = row
+    return {"stage": stage, "result": result, "head_sha": sha,
+            "iteration": iteration if stage == "finish-pr" else int(iteration), "at": at}
+
+
+def emit(text):
+    sys.stdout.buffer.write(text.encode("utf-8"))
+
+
+def print_rows(rows):
+    for stage in STAGES:
+        if stage in rows:
+            emit("ROW\t%s\n" % "\t".join(rows[stage][:4]))
+
+
+def cells(line):
+    if len(line) < 2 or not line.startswith("|") or not line.endswith("|"):
+        return None
+    return [cell.strip() for cell in line[1:-1].split("|")]
+
+
+def parse_table(body):
+    """The rows by stage of a state comment body; exit 1 when malformed."""
+    lines = body.splitlines()
+    if lines[0].rstrip() != MARKER:
+        fail("resume_point: the state comment must start with a line holding only %s" % MARKER)
+    rest = [line.strip() for line in lines[1:]]
+    while rest and not rest[0]:
+        rest.pop(0)
+    while rest and not rest[-1]:
+        rest.pop()
+    if len(rest) < 2 or cells(rest[0]) != list(COLUMNS):
+        fail("resume_point: the state comment holds no | %s | table" % " | ".join(COLUMNS))
+    rule = cells(rest[1])
+    if rule is None or len(rule) != len(COLUMNS) or not all(RULE.fullmatch(cell) for cell in rule):
+        fail("resume_point: the state table has no | --- | separator row")
+    rows = {}
+    for number, line in enumerate(rest[2:], 1):
+        values = cells(line)
+        where = "resume_point: state table row %d" % number
+        if values is None or len(values) != len(COLUMNS):
+            fail("%s is not a row of %d cells" % (where, len(COLUMNS)))
+        row = check_row(where, *values, cached=False)
+        if row[0] in rows:
+            fail("%s: a second %s row" % (where, row[0]))
+        rows[row[0]] = row
+    return rows
+
+
+def comments(login):
+    try:
+        text = sys.stdin.buffer.read().decode("utf-8")
+    except UnicodeDecodeError:
+        fail("resume_point: stdin is not UTF-8")
+    decoder = json.JSONDecoder(parse_constant=no_constant)
+    values = []
+    index = 0
+    while index < len(text):
+        if text[index] in " \t\r\n":
+            index += 1
+            continue
+        try:
+            value, index = decoder.raw_decode(text, index)
+        except (ValueError, RecursionError) as exc:
+            fail("resume_point: stdin is not the issue comments JSON: %s" % first_line(exc))
+        values.append(value)
+    if not values:
+        fail("resume_point: stdin holds no issue comments JSON")
+    found = []
+    for value in values:
+        for page in (value if isinstance(value, list) else [value]):
+            for comment in (page if isinstance(page, list) else [page]):
+                if not isinstance(comment, dict):
+                    fail("resume_point: stdin holds %s where a comment object belongs"
+                         % type(comment).__name__)
+                found.append(comment)
+    trusted = []
+    for position, comment in enumerate(found):
+        body = comment.get("body")
+        if not isinstance(body, str) or not body.startswith(MARKER):
+            continue
+        user = comment.get("user")
+        author = user.get("login") if isinstance(user, dict) else None
+        if author == login:
+            created = comment.get("created_at")
+            trusted.append((created if isinstance(created, str) else "", position, body))
+            continue
+        name = CTRL.sub("", author) if isinstance(author, str) else ""
+        emit("DEGRADED: ignored state comment by %s\n" % (name or "(unknown)"))
+    if trusted:
+        print_rows(parse_table(min(trusted)[2]))
+
+
+mode, args = sys.argv[1], sys.argv[2:]
+if mode == "comments":
+    comments(args[0])
+elif mode in ("rows", "body"):
+    rows = load_cache(*args)[1]
+    if mode == "rows":
+        print_rows(rows)
+    else:
+        lines = [MARKER, "", "| %s |" % " | ".join(COLUMNS), "|%s" % (" --- |" * len(COLUMNS))]
+        lines += ["| %s |" % " | ".join(rows[stage]) for stage in STAGES if stage in rows]
+        emit("\n".join(lines) + "\n")
+elif mode == "update":
+    path, issue, slug, stage, result, sha, iteration, at, set_specs, specs = args
+    new = check_row("state_cache_update", stage, result, sha, iteration, at, cached=False, code=2)
+    if set_specs == "1":
+        try:
+            specs.encode("utf-8")
+        except UnicodeEncodeError:
+            fail("state_cache_update: --staged-specs-dir is not UTF-8", 2)
+        if not specs or CTRL.search(specs):
+            fail("state_cache_update: --staged-specs-dir must be a single-line path", 2)
+    if os.path.lexists(path):
+        doc, rows = load_cache(path, issue, slug)
+    else:
+        doc = {"staged_specs_dir": None}
+        rows = {}
+    rows[new[0]] = new
+    out = {
+        "schema_version": 1,
+        "issue": int(issue),
+        "slug": slug,
+        "staged_specs_dir": specs if set_specs == "1" else doc["staged_specs_dir"],
+        "stages": [element(rows[name]) for name in STAGES if name in rows],
+    }
+    emit(json.dumps(out, indent=2, ensure_ascii=False) + "\n")
+else:
+    fail("_sr_state_py: unknown mode %s" % mode, 2)
+' "$@"
+}
+
+# _sr_cache_name FILE — `<issue> <slug>` from FILE's base name
+# ^([1-9][0-9]*)-([a-z0-9-]+)\.json$; status 1 with no output for any other
+# name (a path ending in `/` included).
+_sr_cache_name() {
+  local file="${1-}" base
+  [[ -n "$file" && "$file" != */ ]] || return 1
+  base="${file##*/}"
+  [[ "$base" =~ ^([1-9][0-9]*)-([a-z0-9-]+)\.json$ ]] || return 1
+  printf '%s %s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+}
+
+# _sr_counts STAGE HEAD RESULT SHA — the PA-7 rule for one recorded stage:
+# issue, plan and implement count when RESULT is PASS and SHA is an ancestor of
+# (or equal to) HEAD (`git merge-base --is-ancestor`); review and qa only when
+# RESULT is PASS and SHA equals HEAD; finish-pr never counts (it is re-derived
+# from a live pr-state.sh snapshot). An unknown SHA does not count.
+_sr_counts() {
+  local stage="$1" head="$2" result="$3" sha="$4"
+  [[ "$result" == PASS && "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  case "$stage" in
+    issue | plan | implement) git merge-base --is-ancestor "$sha" "$head" 2>/dev/null ;;
+    review | qa) [[ "$sha" == "$head" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+# _sr_breaker — the `.state` of Ralph's breaker file in the working directory
+# (ADR-10c), read with python3 json: CLOSED, OPEN or HALF_OPEN; nothing when
+# the file is absent, unreadable or holds another value. Read only.
+_sr_breaker() {
+  local state_file=.ralph/.circuit_breaker_state
+  [[ -f "$state_file" ]] || return 0
+  _sdlc_py -c '
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        state = json.load(handle).get("state")
+except Exception:
+    sys.exit(0)
+if state in ("CLOSED", "OPEN", "HALF_OPEN"):
+    print(state)
+' "$state_file" 2>/dev/null || true
+}
+
+# state_cache_update FILE STAGE RESULT HEAD_SHA ITERATION
+# [--staged-specs-dir DIR] — creates or updates the cache FILE atomically:
+# {"schema_version": 1, "issue": <N>, "slug": "<slug>", "staged_specs_dir":
+# <path|null>, "stages": [{"stage", "result", "head_sha", "iteration", "at"}]}
+# with issue and slug parsed from FILE's base name
+# ^([1-9][0-9]*)-([a-z0-9-]+)\.json$ and at = utc_now. One element per stage:
+# STAGE's element is replaced or added, elements stay in stage order (issue
+# plan implement review qa finish-pr) and the other elements are kept.
+# STAGE ∈ issue plan implement review qa finish-pr; RESULT ∈ PASS IN_PROGRESS
+# ESCALATED; HEAD_SHA 40 lower-case hex; ITERATION a digit string (stored as
+# an integer), for finish-pr the cell ^A[0-9]+\.B[0-9]+\.C[0-9]+\.W[0-9]+\.R[0-9]+$
+# (stored as a string). --staged-specs-dir sets the top-level staged_specs_dir
+# (ADR-10a); without it the cached value is kept (null for a new cache).
+# Prints `WROTE: <FILE>`. A relative FILE must stay inside the working
+# directory (safe_write_target), an absolute one gets its directory created.
+# Exit 2 on a malformed argument (any other file name included), nothing
+# written; exit 1 when the existing cache is malformed or the path is refused,
+# the file unchanged.
+state_cache_update() {
+  local usage='(usage: state_cache_update FILE STAGE RESULT HEAD_SHA ITERATION [--staged-specs-dir DIR])'
+  local cell='^A[0-9]+\.B[0-9]+\.C[0-9]+\.W[0-9]+\.R[0-9]+$'
+  local -a pos=()
+  local specs="" have_specs=0 file stage result sha iteration name root at doc
+  while (($#)); do
+    case "$1" in
+      --staged-specs-dir)
+        if (($# < 2)) || [[ -z "$2" ]]; then
+          log_error "state_cache_update: --staged-specs-dir needs a value $usage"
+          return 2
+        fi
+        if ((have_specs)); then
+          log_error "state_cache_update: --staged-specs-dir given twice $usage"
+          return 2
+        fi
+        have_specs=1
+        specs="$2"
+        shift 2
+        ;;
+      --*)
+        log_error "state_cache_update: unknown argument: $(_ch_clean "$1") $usage"
+        return 2
+        ;;
+      *)
+        pos+=("$1")
+        shift
+        ;;
+    esac
+  done
+  if ((${#pos[@]} != 5)); then
+    log_error "state_cache_update: needs FILE, STAGE, RESULT, HEAD_SHA and ITERATION $usage"
+    return 2
+  fi
+  file="${pos[0]}"
+  stage="${pos[1]}"
+  result="${pos[2]}"
+  sha="${pos[3]}"
+  iteration="${pos[4]}"
+  if ! name="$(_sr_cache_name "$file")"; then
+    log_error "state_cache_update: FILE must be named <N>-<slug>.json: $(_ch_clean "$file")"
+    return 2
+  fi
+  case "$stage" in
+    issue | plan | implement | review | qa | finish-pr) ;;
+    *)
+      log_error "state_cache_update: STAGE must be one of issue plan implement review qa finish-pr: $(_ch_clean "$stage")"
+      return 2
+      ;;
+  esac
+  case "$result" in
+    PASS | IN_PROGRESS | ESCALATED) ;;
+    *)
+      log_error "state_cache_update: RESULT must be one of PASS IN_PROGRESS ESCALATED: $(_ch_clean "$result")"
+      return 2
+      ;;
+  esac
+  if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+    log_error "state_cache_update: HEAD_SHA must be 40 lower-case hex digits: $(_ch_clean "$sha")"
+    return 2
+  fi
+  if [[ "$stage" == finish-pr && ! "$iteration" =~ $cell ]]; then
+    log_error "state_cache_update: the finish-pr ITERATION must be the cell A<n>.B<n>.C<n>.W<n>.R<n>: $(_ch_clean "$iteration")"
+    return 2
+  fi
+  if [[ "$stage" != finish-pr ]] && ! is_uint "$iteration"; then
+    log_error "state_cache_update: ITERATION must be a non-negative integer: $(_ch_clean "$iteration")"
+    return 2
+  fi
+  if ((have_specs)) && [[ "$(_ch_clean "$specs")" != "$specs" ]]; then
+    log_error "state_cache_update: --staged-specs-dir must be a single-line path"
+    return 2
+  fi
+  if [[ "$file" == /* ]]; then
+    root="$(dirname -- "$file")"
+    mkdir -p -- "$root" || return 1
+  else
+    root="$PWD"
+  fi
+  safe_write_target "$file" "$root" || return 1
+  at="$(utc_now)" || return 1
+  doc="$(_sr_state_py update "$file" "${name%% *}" "${name#* }" \
+    "$stage" "$result" "$sha" "$iteration" "$at" "$have_specs" "$specs")" || return
+  printf '%s\n' "$doc" | atomic_write "$file" || return 1
+  printf 'WROTE: %s\n' "$file"
+}
+
+# state_comment_body FILE — prints the issue state comment of the cache FILE:
+# `<!-- rust-sdlc-state -->`, a blank line and the table
+# `| stage | result | head_sha | iteration | at |` with its `| --- |` row and
+# one row per cached stage in stage order (head_sha in full, so resume_point
+# can check it), passed through the redaction list of redact
+# (_pm_redact_stream, NFR-10), which keeps 40-hex shas. Exit 2 when FILE is
+# not named <N>-<slug>.json or the arguments are wrong; exit 1 when FILE is
+# missing or malformed.
+state_comment_body() {
+  local usage='(usage: state_comment_body FILE)' name body
+  if (($# != 1)); then
+    log_error "state_comment_body: needs exactly one FILE $usage"
+    return 2
+  fi
+  if ! name="$(_sr_cache_name "$1")"; then
+    log_error "state_comment_body: FILE must be named <N>-<slug>.json: $(_ch_clean "$1")"
+    return 2
+  fi
+  body="$(_sr_state_py body "$1" "${name%% *}" "${name#* }")" || return 1
+  printf '%s\n' "$body" | _pm_redact_stream
+}
+
+# resume_point --comments LOGIN | --cache FILE — where /rs-sdlc resumes (FR-3,
+# PA-7). --comments reads the issue comments JSON on stdin (the
+# `gh api …/comments --paginate` output: arrays or NDJSON) and takes the oldest
+# comment whose body starts with `<!-- rust-sdlc-state -->` and whose
+# user.login equals LOGIN; every marker comment of another author prints
+# `DEGRADED: ignored state comment by <login>` and is never read (ADR-26).
+# --cache reads the cache FILE. In the working directory's repository, each
+# stage in order counts by _sr_counts and only while every earlier stage
+# counts (stages run in order); each counting stage prints
+# `DONE_STAGE: <stage> <sha7> <iteration>`. Then `RESUME_STAGE: <stage>` (the
+# first stage that does not count; finish-pr is always re-derived live), or
+# `BLOCKED_STAGE: implement breaker=<OPEN|HALF_OPEN>` when the implement row
+# is ESCALATED and .ralph/.circuit_breaker_state is OPEN or HALF_OPEN
+# (ADR-10c), and last `COUNTERS: issue=<n>,plan=<n>,implement=<n>,review=<n>,
+# qa=<n>,finish-pr=A<n>.B<n>.C<n>.W<n>.R<n>` from every recorded row, valid or
+# stale (0 and A0.B0.C0.W0.R0 when unrecorded). No record means
+# `RESUME_STAGE: issue`. Never calls gh. Exit 1 on malformed input (comments
+# JSON, state table or cache, a missing cache) or without a HEAD commit,
+# nothing on stdout; exit 2 on a malformed argument.
+resume_point() {
+  local usage='(usage: resume_point --comments LOGIN | --cache FILE)'
+  local mode="" value="" name records head line tag stage result sha iteration s
+  local resume="" valid=1 breaker=""
+  local -A got_result=() got_sha=() got_iter=()
+  while (($#)); do
+    case "$1" in
+      --comments | --cache)
+        if (($# < 2)) || [[ -z "$2" ]]; then
+          log_error "resume_point: $1 needs a value $usage"
+          return 2
+        fi
+        if [[ -n "$mode" ]]; then
+          log_error "resume_point: takes one of --comments and --cache $usage"
+          return 2
+        fi
+        mode="$1"
+        value="$2"
+        shift 2
+        ;;
+      *)
+        log_error "resume_point: unknown argument: $(_ch_clean "$1") $usage"
+        return 2
+        ;;
+    esac
+  done
+  if [[ -z "$mode" ]]; then
+    log_error "resume_point: needs --comments LOGIN or --cache FILE $usage"
+    return 2
+  fi
+  if [[ "$mode" == --cache ]]; then
+    if ! name="$(_sr_cache_name "$value")"; then
+      log_error "resume_point: the cache must be named <N>-<slug>.json: $(_ch_clean "$value")"
+      return 2
+    fi
+    records="$(_sr_state_py rows "$value" "${name%% *}" "${name#* }")" || return 1
+  else
+    if [[ ! "$value" =~ ^[A-Za-z0-9][A-Za-z0-9-]*(\[bot\])?$ ]]; then
+      log_error "resume_point: LOGIN is not a GitHub login: $(_ch_clean "$value")"
+      return 2
+    fi
+    records="$(_sr_state_py comments "$value")" || return 1
+  fi
+  if ! head="$(git rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null)"; then
+    log_error "resume_point: no HEAD commit in the working directory (run it at the repository root)"
+    return 1
+  fi
+  while IFS= read -r line; do
+    case "$line" in
+      ROW$'\t'*)
+        IFS=$'\t' read -r tag stage result sha iteration <<<"$line"
+        got_result["$stage"]="$result"
+        got_sha["$stage"]="$sha"
+        got_iter["$stage"]="$iteration"
+        ;;
+      'DEGRADED: '*) printf '%s\n' "$line" ;;
+      *) ;;
+    esac
+  done <<<"$records"
+  for s in issue plan implement review qa finish-pr; do
+    if ((valid)) && _sr_counts "$s" "$head" "${got_result[$s]-}" "${got_sha[$s]-}"; then
+      printf 'DONE_STAGE: %s %s %s\n' "$s" "${got_sha[$s]:0:7}" "${got_iter[$s]}"
+    else
+      valid=0
+      resume="${resume:-$s}"
+    fi
+  done
+  if [[ "${got_result[implement]-}" == ESCALATED ]]; then
+    breaker="$(_sr_breaker)"
+  fi
+  case "$breaker" in
+    OPEN | HALF_OPEN) printf 'BLOCKED_STAGE: implement breaker=%s\n' "$breaker" ;;
+    *) printf 'RESUME_STAGE: %s\n' "$resume" ;;
+  esac
+  printf 'COUNTERS: issue=%s,plan=%s,implement=%s,review=%s,qa=%s,finish-pr=%s\n' \
+    "${got_iter[issue]:-0}" "${got_iter[plan]:-0}" "${got_iter[implement]:-0}" \
+    "${got_iter[review]:-0}" "${got_iter[qa]:-0}" "${got_iter[finish-pr]:-A0.B0.C0.W0.R0}"
+}
+
+# section: Ralph helpers
+
+# The bmalph re-entry protocol (ADR-10a), the .ralph/@AGENT.md overrides
+# (ADR-10b) and the breaker pre-check (ADR-10c). They run in the service's
+# working directory (the repository root). ralph_fix_plan_prepare,
+# ralph_fix_plan_restore and ralph_agent_md_patch are the only plugin code
+# that writes into .ralph/ (ADR-10): the archive move of the fix plan, the
+# re-marking of restored stories and the @AGENT.md patch. ralph_breaker_state
+# only reads. bmalph implement is never run with --force and .ralph/.ralphrc
+# is never edited. All four are dispatcher names (ADR-15); private helpers
+# carry the _rh_ prefix.
+
+# _rh_py MODE ARG... — the python3 side of the Ralph helpers. Story headings
+# follow bmalph 2.11.0 (`^###\s+Story\s+([\d.]+):\s+(.+)` in epics.md) and so
+# do fix-plan lines (`- [ ] Story <id>: <title>` / `- [x] Story <id>: <title>`).
+# Modes:
+#   decide SPECS_DIR PLAN CACHE  print `current`, `keep` or `discard` (ADR-10a):
+#                                current when the cache's staged_specs_dir is
+#                                SPECS_DIR (same normalized path or the same
+#                                directory) and every story id of
+#                                SPECS_DIR/epics.md is in PLAN; keep for the
+#                                same bundle with an id missing from PLAN;
+#                                discard when the cache is absent, records no
+#                                bundle or names another one (a malformed
+#                                cache is logged and counts as absent)
+#   restore ARCHIVE PLAN         print the number of re-marked lines, a
+#                                newline and PLAN with `[ ]` turned into `[x]`
+#                                on every story line whose id and title (both,
+#                                trailing blanks ignored) are checked in ARCHIVE
+#   agent FILE N SLUG            read the profile JSON on stdin, check the keys
+#                                the patch consumes, and print `UPDATED` or
+#                                `UNCHANGED`, a newline and the patched FILE
+#   autoreset FILE               print `value <v>` for the last CB_AUTO_RESET=
+#                                line of FILE, `uncertain <raw>` when that
+#                                value needs shell evaluation, nothing without
+#                                such a line
+# A malformed input exits 1 with the reason on stderr.
+_rh_py() {
+  _sdlc_py -c '
+import json
+import os
+import re
+import shlex
+import sys
+
+CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+STORY = re.compile(r"^###\s+Story\s+([\d.]+):\s+(.+)")
+PLAN_LINE = re.compile(r"^\s*-\s*\[([ xX])\]\s*Story\s+([\d.]+):\s*(.+?)\s*$")
+OPEN_LINE = re.compile(r"^([ \t]*-[ \t]*)\[ \]([ \t]*Story[ \t]+([\d.]+):[ \t]*(.+?)[ \t]*)(\r?)$", re.M)
+TICKS = chr(96) * 3
+FENCE = re.compile(r"[ \t]*(%s|~~~)" % TICKS)
+HEADING = re.compile(r"(#{1,6})[ \t]")
+FIRST = re.compile(r"1\.[ \t]")
+FOURTH = re.compile(r"4\.[ \t]")
+ABSENT = "not available (capability absent)"
+OVERRIDES = "## rust-backend-sdlc overrides"
+GIT_HEADING = "### Git Workflow Requirements"
+PUSH_ITEM = "- [ ] All commits pushed to remote repository"
+COVERAGE_ITEM = "**Coverage Validation**"
+MAKE_KEYS = ("bootstrap", "unit_tests", "setup_test_db", "integration_tests",
+             "e2e_tests", "tests_with_coverage", "start")
+FLOORS = ("coverage_lines", "coverage_functions")
+
+
+def fail(message):
+    sys.stderr.write("[rust-sdlc][ERROR] %s\n" % CTRL.sub("?", message))
+    sys.exit(1)
+
+
+def warn(message):
+    sys.stderr.write("[rust-sdlc][WARN] %s\n" % CTRL.sub("?", message))
+
+
+def read_text(path, what):
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read()
+    except OSError as exc:
+        fail("cannot read %s %s: %s" % (what, path, exc.strerror or exc))
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        fail("%s %s is not UTF-8" % (what, path))
+    if "\x00" in text:
+        fail("%s %s holds a NUL byte" % (what, path))
+    return text
+
+
+def emit(text):
+    sys.stdout.buffer.write(text.encode("utf-8"))
+
+
+def staged_bundle(cache):
+    if not os.path.lexists(cache):
+        return None
+    try:
+        with open(cache, "rb") as handle:
+            doc = json.loads(handle.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError, RecursionError) as exc:
+        warn("ralph_fix_plan_prepare: unreadable state cache %s (%s); treated as absent"
+             % (cache, (str(exc).splitlines() or ["invalid JSON"])[0]))
+        return None
+    if not isinstance(doc, dict):
+        warn("ralph_fix_plan_prepare: state cache %s is not a JSON object; treated as absent" % cache)
+        return None
+    specs = doc.get("staged_specs_dir")
+    if specs is not None and not (isinstance(specs, str) and specs):
+        warn("ralph_fix_plan_prepare: staged_specs_dir of %s is not a path; treated as absent" % cache)
+        return None
+    return specs
+
+
+def same_dir(left, right):
+    if os.path.normpath(left) == os.path.normpath(right):
+        return True
+    try:
+        return os.path.isdir(left) and os.path.samefile(left, right)
+    except OSError:
+        return False
+
+
+def decide(specs, plan, cache):
+    epics = os.path.join(specs, "epics.md")
+    ids = []
+    for line in read_text(epics, "epics file").splitlines():
+        match = STORY.match(line)
+        if match:
+            ids.append(match.group(1))
+    if not ids:
+        fail("ralph_fix_plan_prepare: %s has no ### Story N.M: heading" % epics)
+    staged = staged_bundle(cache)
+    if staged is None or not same_dir(staged, specs):
+        emit("discard\n")
+        return
+    planned = set()
+    for line in read_text(plan, "fix plan").splitlines():
+        match = PLAN_LINE.match(line)
+        if match:
+            planned.add(match.group(2))
+    emit("current\n" if all(story in planned for story in ids) else "keep\n")
+
+
+def restore(archive, plan):
+    checked = set()
+    for line in read_text(archive, "archived fix plan").splitlines():
+        match = PLAN_LINE.match(line)
+        if match and match.group(1) in "xX":
+            checked.add((match.group(2), match.group(3)))
+    count = [0]
+
+    def mark(match):
+        if (match.group(3), match.group(4)) not in checked:
+            return match.group(0)
+        count[0] += 1
+        return match.group(1) + "[x]" + match.group(2) + match.group(5)
+
+    text = OPEN_LINE.sub(mark, read_text(plan, "fix plan"))
+    emit("%d\n%s" % (count[0], text))
+
+
+def profile_values(doc):
+    """The consumed keys as (targets, floors); exit 1 naming each violation."""
+    errors = []
+    targets = {}
+    floors = {}
+    if not isinstance(doc, dict):
+        fail("ralph_agent_md_patch: the profile is not a mapping")
+    version = doc.get("schema_version")
+    if type(version) is not int or version != 1:
+        errors.append("schema_version: must be 1 (%s)" % json.dumps(version))
+    make = doc.get("make")
+    if not isinstance(make, dict):
+        errors.append("make: missing or not a mapping")
+        make = {}
+    for key in MAKE_KEYS:
+        want = key.replace("_", "-")
+        if key not in make and isinstance(doc.get("make"), dict):
+            errors.append("make.%s: missing" % key)
+        elif make.get(key) is not None and make.get(key) != want:
+            errors.append("make.%s: must be null or %s (%s)" % (key, want, json.dumps(make[key])))
+        else:
+            targets[key] = make.get(key)
+    quality = doc.get("quality")
+    if not isinstance(quality, dict):
+        errors.append("quality: missing or not a mapping")
+        quality = {}
+    for key in FLOORS:
+        value = quality.get(key)
+        if type(value) is not int or value != 100:
+            errors.append("quality.%s: must be the integer 100 (%s)" % (key, json.dumps(value)))
+        else:
+            floors[key] = value
+    if errors:
+        for error in errors:
+            sys.stderr.write("[rust-sdlc][ERROR] ralph_agent_md_patch: invalid profile .claude/rust-sdlc.yml: %s\n"
+                             % CTRL.sub("?", error))
+        sys.exit(1)
+    return targets, floors
+
+
+def fenced(lines):
+    """Per line: True for a fence line or a line inside a fenced block."""
+    inside = False
+    marks = []
+    for line in lines:
+        if FENCE.match(line):
+            marks.append(True)
+            inside = not inside
+        else:
+            marks.append(inside)
+    return marks
+
+
+def level(lines, marks, index):
+    match = HEADING.match(lines[index])
+    return 0 if marks[index] or match is None else len(match.group(1))
+
+
+def find_heading(lines, text):
+    marks = fenced(lines)
+    for index, line in enumerate(lines):
+        if not marks[index] and line.rstrip() == text:
+            return index, marks
+    return None, marks
+
+
+def section_end(lines, marks, start, deepest):
+    for index in range(start + 1, len(lines)):
+        if 0 < level(lines, marks, index) <= deepest:
+            return index
+    return len(lines)
+
+
+def set_block(lines, heading, commands):
+    """Replace the first fenced block under the heading; False when absent."""
+    start, marks = find_heading(lines, "## " + heading)
+    if start is None:
+        return False
+    end = section_end(lines, marks, start, 2)
+    opening = next((i for i in range(start + 1, end) if FENCE.match(lines[i])), None)
+    if opening is None:
+        return False
+    closing = next((i for i in range(opening + 1, end) if FENCE.match(lines[i])), None)
+    if closing is None:
+        return False
+    lines[opening + 1:closing] = commands or [ABSENT]
+    return True
+
+
+def set_git(lines, rules):
+    """Replace items 1-3 of the Git workflow list; False when absent."""
+    start, marks = find_heading(lines, GIT_HEADING)
+    if start is None:
+        return False
+    end = section_end(lines, marks, start, 3)
+    first = next((i for i in range(start + 1, end) if not marks[i] and FIRST.match(lines[i])), None)
+    if first is None:
+        return False
+    fourth = next((i for i in range(first + 1, end) if not marks[i] and FOURTH.match(lines[i])), end)
+    lines[first:fourth] = rules + [""]
+    return True
+
+
+def set_coverage_examples(lines, commands):
+    """Replace the fenced example block after each Coverage Validation item."""
+    marks = fenced(lines)
+    for index, line in enumerate(lines):
+        if marks[index] or COVERAGE_ITEM not in line:
+            continue
+        opening = index + 1
+        while opening < len(lines) and not lines[opening].strip():
+            opening += 1
+        if opening >= len(lines) or not FENCE.match(lines[opening]):
+            continue
+        closing = next((i for i in range(opening + 1, len(lines)) if FENCE.match(lines[i])), None)
+        if closing is not None:
+            indent = lines[opening][:len(lines[opening]) - len(lines[opening].lstrip())]
+            lines[opening + 1:closing] = [indent + command for command in commands or [ABSENT]]
+            marks = fenced(lines)
+
+
+def git_rules(number, slug):
+    tick = chr(96)
+    subject = tick + "<type>(#%s): story N.M <title>" % number + tick
+    branch = tick + "<type>/%s-%s" % (number, slug) + tick
+    return [
+        "1. **Commit each story as %s** with the hooks active:" % subject,
+        "   - %s<type>%s is one of feat, fix, refactor, build, chore, ci, docs, style, perf, test;"
+        " N.M is the story id; %s is the issue number of specs/%s-%s" % (tick, tick, number, number, slug),
+        "   - One commit per story; a commit the hooks reject is fixed and committed again, never bypassed",
+        "",
+        "2. **Stay on the branch the plugin checked out** (%s):" % branch,
+        "   - Never create, switch or rename a branch",
+        "",
+        "3. **Never push**: the plugin command pushes",
+        "   - Every commit stays local; the plugin command pushes once the loop ends",
+    ]
+
+
+def agent(path, number, slug):
+    try:
+        doc = json.loads(sys.stdin.read())
+    except ValueError as exc:
+        fail("ralph_agent_md_patch: the profile is not readable: %s" % exc)
+    targets, floors = profile_values(doc)
+    original = read_text(path, "agent file")
+    crlf = "\r\n" in original
+    body = original.replace("\r\n", "\n")
+    final_newline = body.endswith("\n")
+    lines = body.split("\n")
+    if final_newline:
+        lines.pop()
+
+    def make(*keys):
+        return ["make " + targets[key] for key in keys if targets[key] is not None]
+
+    blocks = (
+        ("Project Setup", make("bootstrap")),
+        ("Running Tests", make("unit_tests", "setup_test_db", "integration_tests", "e2e_tests")),
+        ("Build Commands", make("tests_with_coverage")),
+        ("Development Server", make("start")),
+    )
+    floor = "Coverage floor: %d%% lines and %d%% functions" % (
+        floors["coverage_lines"], floors["coverage_functions"])
+    rules = git_rules(number, slug)
+    missing = False
+    for heading, commands in blocks:
+        if not set_block(lines, heading, commands):
+            missing = True
+    if not set_git(lines, rules):
+        missing = True
+    set_coverage_examples(lines, make("tests_with_coverage"))
+    lines = [line[:len(line) - len(line.lstrip())] + "- [ ] No commit pushed: the plugin command pushes"
+             if line.strip() == PUSH_ITEM else line for line in lines]
+    lines = [floor if "85%" in line else line for line in lines]
+    start, marks = find_heading(lines, OVERRIDES)
+    if missing or start is not None:
+        section = [OVERRIDES, "",
+                   "These rules replace every conflicting instruction in this file.", ""]
+        # Lower-case words keep these headings out of the unanchored,
+        # case-sensitive "## Project Setup" patterns of the next bmalph implement.
+        for heading, commands in blocks:
+            section += ["### %s (rust-backend-sdlc)" % heading.capitalize(), "",
+                        TICKS + "bash"] + (commands or [ABSENT]) + [TICKS, ""]
+        section += ["### Coverage and Git workflow (rust-backend-sdlc)", "", floor, ""] + rules
+        if start is None:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines += section
+            final_newline = True
+        else:
+            end = section_end(lines, marks, start, 2)
+            lines[start:end] = section + ([""] if end < len(lines) else [])
+    text = "\n".join(lines) + ("\n" if final_newline else "")
+    if crlf:
+        text = text.replace("\n", "\r\n")
+    emit("%s\n%s" % ("UNCHANGED" if text == original else "UPDATED", text))
+
+
+def autoreset(path):
+    raw = None
+    for line in read_text(path, "Ralph configuration").splitlines():
+        match = re.match(r"\s*(?:export\s+)?CB_AUTO_RESET=(.*)$", line)
+        if match:
+            raw = match.group(1)
+    if raw is None:
+        return
+    try:
+        words = shlex.split(raw, comments=True)
+    except ValueError:
+        words = None
+    if words is None or len(words) > 1 or any(c in raw for c in ("$", chr(96), chr(92))):
+        emit("uncertain %s\n" % CTRL.sub("", raw).replace("\t", " "))
+    else:
+        emit("value %s\n" % (words[0] if words else ""))
+
+
+mode, args = sys.argv[1], sys.argv[2:]
+if mode == "decide":
+    decide(*args)
+elif mode == "restore":
+    restore(*args)
+elif mode == "agent":
+    agent(*args)
+elif mode == "autoreset":
+    autoreset(*args)
+else:
+    fail("_rh_py: unknown mode %s" % mode)
+' "$@"
+}
+
+# ralph_fix_plan_prepare SPECS_DIR STATE_FILE — the ADR-10a re-entry check,
+# run before every staging. Prints exactly one line: `FIX_PLAN: absent` (no
+# .ralph/@fix_plan.md: stage and run bmalph implement), `FIX_PLAN: current`
+# (the cache STATE_FILE records SPECS_DIR as staged_specs_dir and every
+# `### Story N.M:` id of SPECS_DIR/epics.md is in the fix plan: a resume, so
+# staging and bmalph implement are skipped), or, after moving the fix plan to
+# target/rust-sdlc/ralph-archive/<utc_stamp>-fix_plan.md,
+# `ARCHIVED: <path> keep-progress` (same bundle, but epics.md holds a story id
+# the plan lacks, e.g. a QA fix story: restore with ralph_fix_plan_restore
+# after bmalph implement) or `ARCHIVED: <path> discard-progress` (cache absent,
+# no bundle recorded, or another bundle: the plan is foreign). The fix plan is
+# moved only in the ARCHIVED cases; bmalph implement then never meets its
+# re-run refusal and is never run with --force. STATE_FILE is the state cache
+# target/rust-sdlc/state/<N>-<slug>.json (read only). Exit 2 on a malformed
+# argument (a STATE_FILE not named <N>-<slug>.json included); exit 1 when
+# SPECS_DIR holds no epics.md with a story heading, the fix plan is a symbolic
+# link or not a regular file, or the archive path exists or is refused; nothing
+# is moved then.
+ralph_fix_plan_prepare() {
+  local usage='(usage: ralph_fix_plan_prepare SPECS_DIR STATE_FILE)'
+  local specs="${1-}" cache="${2-}" plan='.ralph/@fix_plan.md' verdict stamp archive progress
+  if (($# != 2)) || [[ -z "$specs" || -z "$cache" ]]; then
+    log_error "ralph_fix_plan_prepare: needs SPECS_DIR and STATE_FILE $usage"
+    return 2
+  fi
+  if ! _sr_cache_name "$cache" >/dev/null; then
+    log_error "ralph_fix_plan_prepare: STATE_FILE must be named <N>-<slug>.json: $(_ch_clean "$cache")"
+    return 2
+  fi
+  if [[ ! -d "$specs" || ! -f "$specs/epics.md" ]]; then
+    log_error "ralph_fix_plan_prepare: no epics.md in SPECS_DIR $(_ch_clean "$specs")"
+    return 1
+  fi
+  if [[ ! -e "$plan" && ! -L "$plan" ]]; then
+    printf 'FIX_PLAN: absent\n'
+    return 0
+  fi
+  if [[ -L "$plan" || ! -f "$plan" ]]; then
+    log_error "ralph_fix_plan_prepare: $plan is a symbolic link or not a regular file; move it aside by hand"
+    return 1
+  fi
+  verdict="$(_rh_py decide "$specs" "$plan" "$cache")" || return 1
+  case "$verdict" in
+    current)
+      printf 'FIX_PLAN: current\n'
+      return 0
+      ;;
+    keep) progress=keep-progress ;;
+    *) progress=discard-progress ;;
+  esac
+  stamp="$(utc_stamp)" || return 1
+  archive="target/rust-sdlc/ralph-archive/$stamp-fix_plan.md"
+  if [[ -e "$archive" || -L "$archive" ]]; then
+    log_error "ralph_fix_plan_prepare: $archive exists; the fix plan stays in place"
+    return 1
+  fi
+  safe_write_target "$archive" "$PWD" || return 1
+  mkdir -p -- target/rust-sdlc/ralph-archive || return 1
+  mv -- .ralph/@fix_plan.md "$archive" || return 1
+  printf 'ARCHIVED: %s %s\n' "$archive" "$progress"
+}
+
+# ralph_fix_plan_restore ARCHIVE — after a keep-progress archive and the new
+# bmalph implement (ADR-10a): re-marks `- [ ] Story <id>: <title>` as
+# `- [x] Story <id>: <title>` in .ralph/@fix_plan.md for every story whose id
+# and title were both checked in ARCHIVE (a renamed or renumbered story stays
+# open) and prints `RESTORED: <n> stories`. The plan is rewritten atomically
+# only when n > 0. ARCHIVE must lie below target/rust-sdlc/ralph-archive/
+# (exit 2 otherwise, or on a wrong argument count); exit 1 when ARCHIVE or the
+# fix plan is not a readable regular file.
+ralph_fix_plan_restore() {
+  local usage='(usage: ralph_fix_plan_restore ARCHIVE)'
+  local archive="${1-}" plan='.ralph/@fix_plan.md' out count text
+  if (($# != 1)) || [[ -z "$archive" ]]; then
+    log_error "ralph_fix_plan_restore: needs one ARCHIVE $usage"
+    return 2
+  fi
+  if ! _ch_resolved_under "$archive" target/rust-sdlc/ralph-archive; then
+    log_error "ralph_fix_plan_restore: ARCHIVE must lie below target/rust-sdlc/ralph-archive/: $(_ch_clean "$archive")"
+    return 2
+  fi
+  if [[ ! -f "$archive" ]]; then
+    log_error "ralph_fix_plan_restore: no archived fix plan at $(_ch_clean "$archive")"
+    return 1
+  fi
+  if [[ -L "$plan" || ! -f "$plan" ]]; then
+    log_error "ralph_fix_plan_restore: no regular $plan (run bmalph implement first)"
+    return 1
+  fi
+  out="$(_rh_py restore "$archive" "$plan" && printf x)" || return 1
+  out="${out%x}"
+  count="${out%%$'\n'*}"
+  text="${out#*$'\n'}"
+  if [[ "$count" != 0 ]]; then
+    safe_write_target .ralph/@fix_plan.md "$PWD" || return 1
+    printf '%s' "$text" | atomic_write .ralph/@fix_plan.md || return 1
+  fi
+  printf 'RESTORED: %s stories\n' "$count"
+}
+
+# ralph_agent_md_patch SPECS_DIR — the ADR-10b overrides of .ralph/@AGENT.md,
+# run after every bmalph implement and before every bmalph run. With the
+# profile .claude/rust-sdlc.yml it rewrites the fenced block under
+# `## Project Setup` to `make <make.bootstrap>`, under `## Running Tests` to
+# `make <make.unit_tests>` then `make <make.setup_test_db>`,
+# `make <make.integration_tests>` and `make <make.e2e_tests>`, under
+# `## Build Commands` to `make <make.tests_with_coverage>` and under
+# `## Development Server` to `make <make.start>` (a null key drops its line,
+# an empty block reads `not available (capability absent)`); replaces every
+# line containing `85%` with `Coverage floor: <quality.coverage_lines>% lines
+# and <quality.coverage_functions>% functions`; replaces items 1-3 of
+# `### Git Workflow Requirements` with three rules (commit each story as
+# `<type>(#<N>): story N.M <title>` with the hooks active; stay on
+# `<type>/<N>-<slug>`; never push, the plugin command pushes) and keeps
+# item 4; and, so that no other command or push step remains, rewrites the
+# fenced examples under the `**Coverage Validation**` item to the
+# make.tests_with_coverage line and turns the checklist item `All commits
+# pushed to remote repository` into `No commit pushed: the plugin command
+# pushes`. N and slug
+# come from the SPECS_DIR name `<N>-<slug>`. A missing heading (or a heading
+# without its fenced block or numbered list) appends a
+# `## rust-backend-sdlc overrides` section holding the four commands, the
+# coverage floor and the three rules; an existing overrides section is
+# re-rendered in place. Prints `UPDATED: .ralph/@AGENT.md` or, when the file
+# already reads so, `UNCHANGED: .ralph/@AGENT.md` (idempotent). The profile
+# check covers the keys the patch consumes: schema_version 1, each of the
+# seven make keys present and null or its identity target (validate-profile
+# rules V4, V10, V12) and both coverage floors the integer 100 (V6, V11).
+# Exit 2 on a wrong argument count or a SPECS_DIR not named <N>-<slug>;
+# exit 1 when SPECS_DIR is not a directory, .ralph/@AGENT.md is absent (or a
+# symbolic link), or the profile is absent, unparseable or invalid; the file
+# is unchanged then.
+ralph_agent_md_patch() {
+  local usage='(usage: ralph_agent_md_patch SPECS_DIR)'
+  local specs="${1-}" name base number slug agent='.ralph/@AGENT.md' profile json out verdict
+  if (($# != 1)) || [[ -z "$specs" ]]; then
+    log_error "ralph_agent_md_patch: needs one SPECS_DIR $usage"
+    return 2
+  fi
+  name="$specs"
+  while [[ "$name" == */ && "$name" != / ]]; do
+    name="${name%/}"
+  done
+  base="${name##*/}"
+  if [[ ! "$base" =~ ^([1-9][0-9]*)-([a-z0-9-]+)$ ]]; then
+    log_error "ralph_agent_md_patch: SPECS_DIR must be named <N>-<slug> (specs/<N>-<slug>): $(_ch_clean "$specs")"
+    return 2
+  fi
+  number="${BASH_REMATCH[1]}"
+  slug="${BASH_REMATCH[2]}"
+  if [[ ! -d "$specs" ]]; then
+    log_error "ralph_agent_md_patch: SPECS_DIR is not a directory: $(_ch_clean "$specs")"
+    return 1
+  fi
+  if [[ -L "$agent" || ! -f "$agent" ]]; then
+    log_error "ralph_agent_md_patch: no regular $agent (run bmalph implement first)"
+    return 1
+  fi
+  profile="$(profile_path)"
+  if [[ ! -f "$profile" ]]; then
+    log_error "ralph_agent_md_patch: no profile at .claude/rust-sdlc.yml (run /rs-sdlc-setup)"
+    return 1
+  fi
+  json="$(yaml_to_json "$profile")" || return 1
+  out="$(printf '%s\n' "$json" | _rh_py agent "$agent" "$number" "$slug" && printf x)" || return 1
+  out="${out%x}"
+  verdict="${out%%$'\n'*}"
+  if [[ "$verdict" == UPDATED ]]; then
+    safe_write_target .ralph/@AGENT.md "$PWD" || return 1
+    printf '%s' "${out#*$'\n'}" | atomic_write .ralph/@AGENT.md || return 1
+  fi
+  printf '%s: .ralph/@AGENT.md\n' "$verdict"
+}
+
+# ralph_breaker_state — the ADR-10c pre-check before every bmalph run. Prints
+# `BREAKER: CLOSED|OPEN|HALF_OPEN|ABSENT` (the `.state` of
+# .ralph/.circuit_breaker_state, read with python3 json; ABSENT without the
+# file) and `AUTO_RESET: true|false`: CB_AUTO_RESET from the environment when
+# it is non-empty, else the last `CB_AUTO_RESET=` line of .ralph/.ralphrc
+# (Ralph's precedence), else false; true only for the value `true`, as in
+# Ralph, and also when the .ralphrc value needs shell evaluation (it cannot be
+# shown to be false). Exit 0 only for CLOSED or ABSENT with AUTO_RESET: false,
+# 1 otherwise (OPEN, HALF_OPEN or an auto-reset: the command escalates without
+# running, D22, because Ralph would reset the breaker itself, NFR-5). A state
+# file that holds none of the three states exits 1 with nothing on stdout.
+# Reads only: no file is created, edited or removed. Exit 2 when an argument
+# is given.
+ralph_breaker_state() {
+  local state value="" auto=false line
+  if (($#)); then
+    log_error "ralph_breaker_state: takes no argument (usage: ralph_breaker_state)"
+    return 2
+  fi
+  if [[ ! -e .ralph/.circuit_breaker_state && ! -L .ralph/.circuit_breaker_state ]]; then
+    state=ABSENT
+  else
+    state="$(_sr_breaker)"
+    if [[ -z "$state" ]]; then
+      log_error "ralph_breaker_state: .ralph/.circuit_breaker_state holds no CLOSED, OPEN or HALF_OPEN state; inspect it by hand and never reset it"
+      return 1
+    fi
+  fi
+  if [[ -n "${CB_AUTO_RESET:-}" ]]; then
+    value="$CB_AUTO_RESET"
+  elif [[ -f .ralph/.ralphrc ]]; then
+    line="$(_rh_py autoreset .ralph/.ralphrc)" || return 1
+    case "$line" in
+      'value '*) value="${line#value }" ;;
+      'uncertain '*)
+        log_warn "ralph_breaker_state: cannot evaluate CB_AUTO_RESET=${line#uncertain } of .ralph/.ralphrc; treated as true"
+        value=true
+        ;;
+      *) ;;
+    esac
+  fi
+  if [[ "$value" == true ]]; then
+    auto=true
+  fi
+  printf 'BREAKER: %s\nAUTO_RESET: %s\n' "$state" "$auto"
+  case "$state:$auto" in
+    CLOSED:false | ABSENT:false) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# section: dispatch (keep last)
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  _sdlc_dispatch "$@"
+fi

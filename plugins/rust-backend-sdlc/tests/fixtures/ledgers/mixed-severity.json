@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "lens": "code-review",
+  "iteration": 2,
+  "head_sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  "findings": [
+    {
+      "id": "CQ-1",
+      "severity": "Low",
+      "file": "crates/shared/domain/src/money.rs",
+      "line": 12,
+      "rule": "Q2",
+      "summary": "Prefer a named constant for the rounding scale",
+      "status": "open"
+    },
+    {
+      "id": "CQ-2",
+      "severity": "Critical",
+      "file": "crates/billing/invoice/infrastructure/src/invoice_repository.rs",
+      "line": 64,
+      "rule": "rust-error-handling",
+      "summary": "unwrap on the repository result panics the request task when the database is unreachable",
+      "status": "open"
+    },
+    {
+      "id": "CQ-3",
+      "severity": "Info",
+      "file": "crates/service/src/main.rs",
+      "line": 20,
+      "rule": "Q15",
+      "summary": "Startup log line could name the bound address",
+      "status": "open"
+    },
+    {
+      "id": "CQ-4",
+      "severity": "Medium",
+      "file": "crates/billing/invoice/application/src/list_invoices.rs",
+      "line": 40,
+      "rule": "async-runtime-safety",
+      "summary": "Blocking file read inside an async handler stalls the runtime worker",
+      "status": "open"
+    },
+    {
+      "id": "CQ-5",
+      "severity": "High",
+      "file": "crates/billing/invoice/infrastructure/src/invoice_repository.rs",
+      "line": 102,
+      "rule": "Q10",
+      "summary": "Surviving mutant in the overdue check is not caught by any test",
+      "status": "open"
+    }
+  ]
+}

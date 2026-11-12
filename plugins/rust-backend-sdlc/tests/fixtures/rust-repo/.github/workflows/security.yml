@@ -1,0 +1,127 @@
+name: Security
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  changes:
+    name: Changes (Security)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.detect.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/ci/detect-changes.sh >> "$GITHUB_OUTPUT"
+
+  secrets-scan:
+    name: Secrets scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - run: make secrets-scan
+
+  image-scan:
+    name: Production-image scan
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      APP_IMAGE: service-under-test:prod
+      BUILD_IMAGE: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: prod
+          load: true
+          tags: ${{ env.APP_IMAGE }}
+          cache-from: type=gha,scope=prod-image
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,scope=prod-image,mode=max' || '' }}
+      - run: make image-scan
+
+  codeql:
+    name: CodeQL
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [rust, actions]
+    permissions:
+      contents: read # checkout
+      actions: read # CodeQL reads workflow metadata
+      security-events: write # upload of the CodeQL results
+    steps:
+      - id: publish
+        env:
+          CODE_SCANNING_ENABLED: ${{ vars.CODE_SCANNING_ENABLED }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          reason=''
+          if [ "$EVENT_NAME" = 'pull_request' ] && [ "$HEAD_REPOSITORY" != "$GITHUB_REPOSITORY" ]; then
+            reason='pull request from a fork'
+          elif [ "$EVENT_NAME" = 'pull_request' ] && [ "$PR_AUTHOR" = 'dependabot[bot]' ]; then
+            reason='pull request from Dependabot'
+          elif [ "$CODE_SCANNING_ENABLED" = 'false' ]; then
+            reason='CODE_SCANNING_ENABLED is false'
+          elif [ -z "$CODE_SCANNING_ENABLED" ]; then
+            visibility="$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)"
+            if [ "$visibility" != 'public' ]; then
+              reason="CODE_SCANNING_ENABLED is unset and the repository is $visibility"
+            fi
+          fi
+          if [ -n "$reason" ]; then
+            echo "::notice::Code scanning publication skipped: $reason"
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: ${{ steps.publish.outputs.publish == 'true' }}
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        if: ${{ steps.publish.outputs.publish == 'true' }}
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        if: ${{ steps.publish.outputs.publish == 'true' }}
+        with:
+          category: /language:${{ matrix.language }}

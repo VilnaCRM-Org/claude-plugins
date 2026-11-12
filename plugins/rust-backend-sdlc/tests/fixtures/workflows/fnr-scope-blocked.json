@@ -1,0 +1,25 @@
+{
+  "args": "42-invoice-totals",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "status": "OK",
+        "profile_valid": false,
+        "blocked": "run /rs-sdlc-setup on the default branch and commit the result",
+        "base": "",
+        "files": [],
+        "specs_present": false,
+        "slug": null,
+        "spec_files": [],
+        "pr": null,
+        "pr_requirements": false,
+        "linked_issues": [],
+        "clean": true,
+        "head_matches": null,
+        "summary": "",
+        "notes": []
+      }
+    }
+  ]
+}

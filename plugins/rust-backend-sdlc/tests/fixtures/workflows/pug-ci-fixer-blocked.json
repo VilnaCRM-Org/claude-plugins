@@ -1,0 +1,65 @@
+{
+  "args": "7",
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": {
+        "verdict": "FIX",
+        "next": "fix failing checks Dependency policy (ci-fixer); then commit and push",
+        "pr": 7,
+        "url": "https://github.com/acme/billing-service/pull/7",
+        "head": "a1b2c3d",
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "ci": {
+          "status": "red",
+          "failing": [
+            "Dependency policy"
+          ],
+          "pending": [],
+          "missing": []
+        },
+        "fr_nfr": {
+          "status": "success"
+        },
+        "unresolved": {
+          "total": 0
+        },
+        "reviewers": [
+          {
+            "name": "coderabbit",
+            "status": "APPROVED"
+          }
+        ],
+        "human_gated": {
+          "checks": [
+            "Protected configuration",
+            "OpenAPI breaking changes",
+            "GraphQL breaking changes"
+          ],
+          "failing": [],
+          "labels": {
+            "Protected configuration": "approved-config-change",
+            "OpenAPI breaking changes": "approved-breaking-change",
+            "GraphQL breaking changes": "approved-breaking-change"
+          }
+        },
+        "notes": []
+      }
+    },
+    {
+      "match": "^ci-fixer ",
+      "reply": {
+        "status": "BLOCKED",
+        "changed_files": [],
+        "fixed_check": null,
+        "blocking_finding": "Dependency policy https://github.com/acme/billing-service/actions/runs/912345678 — RUSTSEC-2026-0031 in rsa 0.9.6 has no fixed version (cargo tree -i rsa: rsa <- sqlx-mysql <- sqlx)",
+        "recommended_action": "replace the dependency or drop the sqlx feature that pulls it in, or a maintainer-approved deny.toml exception (a protected file: approved-config-change and ALLOW_PROTECTED_CONFIG_EDIT=1)",
+        "summary": "Dependency policy fails on an advisory without a fixed version; nothing was changed",
+        "degrade_notes": [
+          "base ref origin/main unavailable; protected_changes ran against HEAD (D24)"
+        ]
+      }
+    }
+  ]
+}

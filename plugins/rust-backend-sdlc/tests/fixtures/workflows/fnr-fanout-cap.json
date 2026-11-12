@@ -1,0 +1,164 @@
+{
+  "args": "58-currency-rounding --pr 9",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "status": "OK",
+        "profile_valid": true,
+        "blocked": null,
+        "base": "origin/main",
+        "files": [
+          "crates/billing/invoicing/domain/src/invoice.rs",
+          "crates/billing/payments/domain/src/refund.rs",
+          "crates/catalog/pricing/domain/src/price.rs",
+          "crates/catalog/inventory/domain/src/valuation.rs",
+          "crates/service/src/routes.rs"
+        ],
+        "specs_present": true,
+        "slug": "58-currency-rounding",
+        "spec_files": [
+          "prd.md",
+          "architecture.md",
+          "epics.md"
+        ],
+        "pr": 9,
+        "pr_requirements": true,
+        "linked_issues": [
+          58
+        ],
+        "clean": true,
+        "head_matches": true,
+        "summary": "half-even currency rounding across invoicing, payments, pricing and inventory valuation",
+        "notes": []
+      }
+    },
+    {
+      "match": "^fr-nfr-reviewer ",
+      "reply": [
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=1/5 new_findings=6 verdict=FAIL",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/58-currency-rounding/ --iteration 1 --pr 9",
+          "status_posted": "STATUS_POSTED: failure def5678",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": [
+            {
+              "id": "FRN-1",
+              "severity": "High",
+              "file": "crates/billing/invoicing/domain/src/invoice.rs",
+              "line": 57,
+              "rule": "FR-3",
+              "summary": "invoice totals round half-up; FR-3 demands half-even per currency",
+              "status": "open"
+            },
+            {
+              "id": "FRN-2",
+              "severity": "Medium",
+              "file": "crates/billing/invoicing/domain/src/invoice.rs",
+              "line": 12,
+              "rule": "NFR-BASE-PERF",
+              "summary": "rounding allocates per line item; NFR-BASE-PERF budgets the invoice hot path",
+              "status": "open"
+            },
+            {
+              "id": "FRN-3",
+              "severity": "High",
+              "file": "crates/billing/payments/domain/src/refund.rs",
+              "line": 40,
+              "rule": "FR-4",
+              "summary": "refunds round half-up; FR-4 requires a refund to mirror the invoice rounding",
+              "status": "open"
+            },
+            {
+              "id": "FRN-4",
+              "severity": "Medium",
+              "file": "crates/catalog/pricing/domain/src/price.rs",
+              "line": 23,
+              "rule": "FR-5",
+              "summary": "list prices are stored rounded; FR-5 requires unrounded storage with half-even display",
+              "status": "open"
+            },
+            {
+              "id": "FRN-5",
+              "severity": "Medium",
+              "file": "crates/catalog/inventory/domain/src/valuation.rs",
+              "line": 31,
+              "rule": "FR-6",
+              "summary": "stock valuation truncates fractional cents; FR-6 requires half-even per currency",
+              "status": "open"
+            },
+            {
+              "id": "FRN-6",
+              "severity": "Low",
+              "file": "crates/service/src/routes.rs",
+              "line": 118,
+              "rule": "NFR-BASE-OBS",
+              "summary": "the price route opens no tracing span carrying request_id",
+              "status": "open"
+            }
+          ]
+        },
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=2/5 new_findings=1 verdict=FAIL",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/58-currency-rounding/ --iteration 2 --pr 9",
+          "status_posted": "STATUS_POSTED: failure def5678",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": [
+            {
+              "id": "FRN-2",
+              "severity": "Medium",
+              "file": "crates/billing/invoicing/domain/src/invoice.rs",
+              "line": 12,
+              "rule": "NFR-BASE-PERF",
+              "summary": "rounding allocates per line item; NFR-BASE-PERF budgets the invoice hot path",
+              "status": "dropped"
+            },
+            {
+              "id": "FRN-6",
+              "severity": "Low",
+              "file": "crates/service/src/routes.rs",
+              "line": 118,
+              "rule": "NFR-BASE-OBS",
+              "summary": "the price route opens no tracing span carrying request_id",
+              "status": "open"
+            }
+          ]
+        },
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=3/5 new_findings=0 verdict=PASS",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/58-currency-rounding/ --iteration 3 --pr 9",
+          "status_posted": "STATUS_POSTED: success def5678",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": []
+        }
+      ]
+    },
+    {
+      "match": "^fix:",
+      "reply": {
+        "status": "COMPLETE",
+        "files_modified": 2,
+        "tests_status": "PASSING",
+        "recommendation": "re-run the FR/NFR gate"
+      }
+    },
+    {
+      "match": "^verify ",
+      "reply": {
+        "status": "COMPLETE",
+        "files_modified": 0,
+        "tests_status": "PASSING",
+        "recommendation": "re-run the FR/NFR gate"
+      }
+    }
+  ]
+}

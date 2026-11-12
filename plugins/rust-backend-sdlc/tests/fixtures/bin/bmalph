@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Stub `bmalph` CLI for the hermetic bats suites (§ Test Architecture › Stub executables).
+# Env config:
+#   STUB_BMALPH_VERSION      printed by --version/-V/-v                 (default: 2.11.0)
+#   STUB_BMALPH_EXIT         exit code of every call not listed below   (default: 0)
+#   STUB_BMALPH_DOCTOR_EXIT  exit code of `bmalph doctor`               (default: STUB_BMALPH_EXIT)
+#   STUB_BMALPH_OUTPUT       stdout of doctor, run and other commands   (default: none)
+#   STUB_BMALPH_LOG          append-log of `bmalph <argv>` per call     (default: off)
+# `implement` mirrors bmalph 2.11.0 (ADR-10a), in the project directory (the working
+# directory, or the global option -C/--project-dir):
+#   - `.ralph/@fix_plan.md` exists → prints `Warning: bmalph implement has already
+#     been run.` and exits 1, whatever the options;
+#   - STUB_BMALPH_EXIT non-zero → prints STUB_BMALPH_OUTPUT, writes nothing, exits
+#     with it;
+#   - otherwise reads the staged bundle in `_bmad-output/planning-artifacts/` and
+#     writes `.ralph/@fix_plan.md` (one `- [ ] Story <id>: <title>` line per
+#     `### Story <id>: <title>` heading of `epics.md`), `.ralph/PROJECT_CONTEXT.md`
+#     (the body of `## Constraints` of `architecture.md`, trimmed and truncated at
+#     5,000 characters, under `## Architecture Constraints`) and `.ralph/@AGENT.md`
+#     (a copy of `../ralph/AGENT.md.tpl` relative to this stub, symlinks resolved);
+#     a missing `epics.md` or template exits 1 with nothing written.
+set -euo pipefail
+
+if [[ -n "${STUB_BMALPH_LOG:-}" ]]; then
+  printf 'bmalph %s\n' "$*" >>"$STUB_BMALPH_LOG"
+fi
+
+stub_dir() {
+  local path="${BASH_SOURCE[0]}" target
+  while [[ -L "$path" ]]; do
+    target="$(readlink "$path")"
+    case "$target" in
+      /*) path="$target" ;;
+      *) path="$(dirname "$path")/$target" ;;
+    esac
+  done
+  cd "$(dirname "$path")" && pwd
+}
+
+project_name() {
+  local config="bmalph/config.json" name=""
+  if [[ -f "$config" ]]; then
+    name="$(sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$config" | head -n 1)"
+  fi
+  printf '%s\n' "${name:-project}"
+}
+
+constraints_body() {
+  python3 -I - "$1" <<'PY'
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    text = handle.read()
+match = re.search(r"^##\s+Constraints", text, re.M)
+if match:
+    rest = text[match.end():]
+    end = re.search(r"^#{1,2}\s", rest, re.M)
+    body = (rest[: end.start()] if end else rest).strip()
+    sys.stdout.write(body[:5000])
+PY
+}
+
+write_fix_plan() {
+  local epics="$1" line id title
+  printf '# Ralph Fix Plan\n\n## Stories to Implement\n\n'
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ "$line" =~ ^###[[:space:]]+Story[[:space:]]+([0-9.]+):[[:space:]]+(.+)$ ]]; then
+      id="${BASH_REMATCH[1]}"
+      title="${BASH_REMATCH[2]}"
+      title="${title%"${title##*[![:space:]]}"}"
+      printf -- '- [ ] Story %s: %s\n' "$id" "$title"
+    fi
+  done <"$epics"
+  printf '\n## Completed\n\n## Notes\n'
+  printf -- '- Follow TDD methodology (red-green-refactor)\n'
+  printf -- '- One story per Ralph loop iteration\n'
+  printf -- '- Update this file after completing each story\n'
+}
+
+run_implement() {
+  local staged="_bmad-output/planning-artifacts" template constraints count
+  if [[ -e ".ralph/@fix_plan.md" ]]; then
+    printf 'Warning: bmalph implement has already been run.\n'
+    exit 1
+  fi
+  if [[ "${STUB_BMALPH_EXIT:-0}" != 0 ]]; then
+    if [[ -n "${STUB_BMALPH_OUTPUT:-}" ]]; then
+      printf '%s\n' "$STUB_BMALPH_OUTPUT"
+    fi
+    exit "$STUB_BMALPH_EXIT"
+  fi
+  template="$STUB_DIR/../ralph/AGENT.md.tpl"
+  if [[ ! -f "$staged/epics.md" ]]; then
+    printf 'Error: no epics.md in %s/\n' "$staged" >&2
+    exit 1
+  fi
+  if [[ ! -f "$template" ]]; then
+    printf 'Error: stub template missing: %s\n' "$template" >&2
+    exit 1
+  fi
+  constraints=""
+  if [[ -f "$staged/architecture.md" ]]; then
+    constraints="$(constraints_body "$staged/architecture.md")"
+  fi
+  mkdir -p .ralph
+  write_fix_plan "$staged/epics.md" >".ralph/@fix_plan.md"
+  {
+    printf '# %s — Project Context\n\n' "$(project_name)"
+    if [[ -n "$constraints" ]]; then
+      printf '## Architecture Constraints\n\n%s\n\n' "$constraints"
+    fi
+  } >".ralph/PROJECT_CONTEXT.md"
+  cp "$template" ".ralph/@AGENT.md"
+  if [[ -n "${STUB_BMALPH_OUTPUT:-}" ]]; then
+    printf '%s\n' "$STUB_BMALPH_OUTPUT"
+  else
+    count="$(grep -c '^- \[ \] Story ' ".ralph/@fix_plan.md" || true)"
+    printf 'Transition complete: %s stories\n' "$count"
+  fi
+  exit 0
+}
+
+# Resolved before any -C changes the working directory (BASH_SOURCE may be relative).
+STUB_DIR="$(stub_dir)"
+
+# Global options precede the command, as in bmalph's CLI.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -C | --project-dir)
+      cd "${2:?bmalph: $1 needs a directory}"
+      shift 2
+      ;;
+    --project-dir=*)
+      cd "${1#--project-dir=}"
+      shift
+      ;;
+    --verbose | --no-color | --quiet) shift ;;
+    *) break ;;
+  esac
+done
+
+case "${1:-}" in
+  --version | -V | -v)
+    printf '%s\n' "${STUB_BMALPH_VERSION:-2.11.0}"
+    exit "${STUB_BMALPH_EXIT:-0}"
+    ;;
+  doctor)
+    if [[ -n "${STUB_BMALPH_OUTPUT:-}" ]]; then
+      printf '%s\n' "$STUB_BMALPH_OUTPUT"
+    fi
+    exit "${STUB_BMALPH_DOCTOR_EXIT:-${STUB_BMALPH_EXIT:-0}}"
+    ;;
+  implement) run_implement ;;
+esac
+if [[ -n "${STUB_BMALPH_OUTPUT:-}" ]]; then
+  printf '%s\n' "$STUB_BMALPH_OUTPUT"
+fi
+exit "${STUB_BMALPH_EXIT:-0}"

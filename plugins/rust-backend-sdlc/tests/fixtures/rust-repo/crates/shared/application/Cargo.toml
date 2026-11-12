@@ -1,0 +1,26 @@
+[package]
+name = "shared-application"
+description = "Shared kernel, application layer: problem documents, extractors and HTTP and GraphQL helpers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-graphql.workspace = true
+axum.workspace = true
+serde.workspace = true
+shared-domain.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+utoipa.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true
+serde_json.workspace = true
+test-support.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,188 @@
+{
+  "args": {
+    "pr": 7,
+    "reviewers": [
+      "coderabbit"
+    ],
+    "onGate": "return",
+    "carry": {
+      "counters": {
+        "fix": 2,
+        "wait": 4,
+        "request": 1,
+        "gate": 1
+      },
+      "journal": [
+        "1: FIX -> ci-fixer FIXES-READY (1 file(s)) (fix 1/5), publish -> pushed b2c3d4e",
+        "2: FIX -> pr-comment-resolver 1 file(s) changed (fix 2/5), publish -> pushed c3d4e5f",
+        "3: GATE -> hand-back (gate 1/3) -> GATE on c3d4e5f returned to the caller"
+      ],
+      "degrade_notes": [
+        "FR/NFR review: iteration 1: gate run failed (transport); the failed run consumed one iteration without a findings count"
+      ]
+    }
+  },
+  "replies": [
+    {
+      "match": "^(pr-state|wait )",
+      "reply": [
+        {
+          "verdict": "FIX",
+          "next": "resolve 1 review thread(s) (pr-comment-resolver); then commit and push",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "d4e5f6a",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 1
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "NOT_APPROVED",
+              "reason": "latest review on the head is COMMENTED"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        },
+        {
+          "verdict": "WAIT",
+          "next": "pr-state.sh --pr 7 --wait-seconds 540 — waiting for checks Static analysis",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "e5f6a7b",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "pending",
+            "failing": [],
+            "pending": [
+              "Static analysis"
+            ],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "APPROVED"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        },
+        {
+          "verdict": "READY",
+          "next": "exit condition met — hand the PR to its human merger",
+          "pr": 7,
+          "url": "https://github.com/acme/billing-service/pull/7",
+          "head": "e5f6a7b",
+          "state": "OPEN",
+          "mergeable": "MERGEABLE",
+          "ci": {
+            "status": "green",
+            "failing": [],
+            "pending": [],
+            "missing": []
+          },
+          "fr_nfr": {
+            "status": "success"
+          },
+          "unresolved": {
+            "total": 0
+          },
+          "reviewers": [
+            {
+              "name": "coderabbit",
+              "status": "APPROVED"
+            }
+          ],
+          "human_gated": {
+            "checks": [
+              "Protected configuration",
+              "OpenAPI breaking changes",
+              "GraphQL breaking changes"
+            ],
+            "failing": [],
+            "labels": {
+              "Protected configuration": "approved-config-change",
+              "OpenAPI breaking changes": "approved-breaking-change",
+              "GraphQL breaking changes": "approved-breaking-change"
+            }
+          },
+          "notes": []
+        }
+      ]
+    },
+    {
+      "match": "^pr-comment-resolver ",
+      "reply": {
+        "remaining_unresolved": 0,
+        "changed_files": [
+          "crates/billing/invoicing/domain/src/invoice.rs"
+        ],
+        "fix_path": "crates/billing/invoicing/domain/src/invoice.rs",
+        "not_actioned": 0,
+        "blocking_finding": null,
+        "summary": "1 thread fixed with a test, replied and resolved",
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^publish ",
+      "reply": {
+        "pushed": true,
+        "head": "e5f6a7b",
+        "issue": 42,
+        "commits": [
+          "fix(#42): address review comment on crates/billing/invoicing/domain/src/invoice.rs"
+        ],
+        "reason": null,
+        "protected": null,
+        "profile_changed": false,
+        "log_tail": null,
+        "degrade_notes": []
+      }
+    }
+  ]
+}

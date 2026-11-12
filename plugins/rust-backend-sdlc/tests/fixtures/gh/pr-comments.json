@@ -1,0 +1,86 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "authorAssociation": "NONE",
+                    "body": "Validate the invoice total before persisting it.\r\n\r\nA negative total reaches the repository unchecked.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 42,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r100"
+                  },
+                  {
+                    "author": {
+                      "login": "acme-maintainer"
+                    },
+                    "authorAssociation": "OWNER",
+                    "body": "Good catch, adding a guard.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 42,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r101"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Rename `calc` to `total_cents` for clarity.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 17,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r102"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "Y3Vyc29yOnYyOpHOAAAAAg=="
+          }
+        },
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "github-actions"
+              },
+              "authorAssociation": "NONE",
+              "body": "Coverage: 100% lines; mutation score 100%.",
+              "url": "https://github.com/acme/billing-service/pull/7#issuecomment-900"
+            },
+            {
+              "author": {
+                "login": "acme-maintainer"
+              },
+              "authorAssociation": "OWNER",
+              "body": "Merging once the guard lands — café ✓",
+              "url": "https://github.com/acme/billing-service/pull/7#issuecomment-901"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,2028 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 1 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 1,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1001"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 2 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 2,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1002"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 3 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 3,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1003"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 4 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 4,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1004"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 5 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 5,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1005"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 6 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 6,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1006"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 7 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 7,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1007"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 8 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 8,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1008"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 9 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 9,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1009"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 10 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 10,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1010"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 11 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 11,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1011"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 12 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 12,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1012"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 13 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 13,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1013"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 14 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 14,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1014"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 15 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 15,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1015"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 16 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 16,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1016"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 17 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 17,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1017"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 18 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 18,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1018"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 19 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 19,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1019"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 20 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 20,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1020"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 21 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 21,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1021"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 22 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 22,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1022"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 23 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 23,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1023"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 24 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 24,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1024"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 25 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 25,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1025"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 26 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 26,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1026"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 27 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 27,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1027"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 28 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 28,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1028"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 29 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 29,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1029"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 30 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 30,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1030"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 31 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 31,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1031"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 32 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 32,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1032"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 33 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 33,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1033"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 34 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 34,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1034"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 35 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 35,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1035"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 36 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 36,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1036"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 37 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 37,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1037"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 38 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 38,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1038"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 39 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 39,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1039"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 40 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 40,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1040"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 41 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 41,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1041"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 42 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 42,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1042"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 43 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 43,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1043"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 44 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 44,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1044"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 45 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 45,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1045"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 46 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 46,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1046"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 47 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 47,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1047"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 48 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 48,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1048"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 49 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 49,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1049"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 50 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 50,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1050"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 51 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 51,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1051"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 52 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 52,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1052"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 53 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 53,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1053"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 54 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 54,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1054"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 55 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 55,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1055"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 56 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 56,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1056"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 57 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 57,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1057"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 58 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 58,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1058"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 59 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 59,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1059"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 60 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 60,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1060"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 61 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 61,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1061"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 62 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 62,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1062"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 63 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 63,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1063"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 64 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 64,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1064"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 65 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 65,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1065"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 66 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 66,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1066"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 67 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 67,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1067"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 68 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 68,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1068"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 69 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 69,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1069"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 70 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 70,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1070"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 71 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 71,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1071"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 72 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 72,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1072"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 73 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 73,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1073"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 74 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 74,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1074"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 75 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 75,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1075"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 76 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 76,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1076"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 77 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 77,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1077"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 78 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 78,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1078"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 79 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 79,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1079"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 80 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 80,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1080"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 81 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 81,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1081"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 82 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 82,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1082"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 83 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 83,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1083"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 84 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 84,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1084"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 85 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 85,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1085"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 86 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 86,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1086"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 87 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 87,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1087"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 88 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 88,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1088"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 89 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 89,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1089"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 90 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 90,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1090"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 91 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 91,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1091"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 92 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 92,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1092"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 93 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 93,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1093"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 94 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 94,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1094"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 95 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 95,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1095"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 96 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 96,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1096"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 97 of the first page.",
+                    "path": "crates/billing/invoice/application/src/query/list_invoices.rs",
+                    "line": 97,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1097"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 98 of the first page.",
+                    "path": "crates/billing/invoice/infrastructure/src/postgres_invoice_repository.rs",
+                    "line": 98,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1098"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 99 of the first page.",
+                    "path": "crates/service/src/http/invoice_routes.rs",
+                    "line": 99,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1099"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            },
+            {
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "author": {
+                      "login": "acme-reviewer"
+                    },
+                    "authorAssociation": "MEMBER",
+                    "body": "Thread 100 of the first page.",
+                    "path": "crates/billing/invoice/domain/src/invoice.rs",
+                    "line": 100,
+                    "url": "https://github.com/acme/billing-service/pull/7#discussion_r1100"
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false
+                }
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "Y3Vyc29yOnYyOpHOAAAAZA=="
+          }
+        },
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "github-actions"
+              },
+              "authorAssociation": "NONE",
+              "body": "First-page issue comment.",
+              "url": "https://github.com/acme/billing-service/pull/7#issuecomment-800"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -7,7 +7,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ['php-backend-sdlc-v*', 'react-frontend-sdlc-v*', 'devops-sdlc-v*']
+    tags: ['php-backend-sdlc-v*', 'react-frontend-sdlc-v*', 'devops-sdlc-v*', 'rust-backend-sdlc-v*']
 
 # Least-privilege default token: jobs only read repo contents (checkout).
 # Any job needing more must opt in explicitly with its own permissions block.
@@ -115,6 +115,25 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
+      - name: Install template-compatibility linters (rust-backend-sdlc K7 cases)
+        run: |
+          set -euo pipefail
+          # A private pipx home under RUNNER_TEMP: the hosted image already
+          # ships yamllint in the root-owned /opt/pipx, which the runner user
+          # can neither reuse at the pinned version nor replace.
+          export PIPX_HOME="$RUNNER_TEMP/k7-pipx"
+          export PIPX_BIN_DIR="$RUNNER_TEMP/k7-pipx/bin"
+          pipx install yamllint==1.38.0
+          pipx install typos==1.52.0
+          pipx_bin="$PIPX_BIN_DIR"
+          npm install --prefix "$RUNNER_TEMP/k7" prettier@3.9.10 markdownlint-cli2@0.24.0
+          echo "$pipx_bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/k7/node_modules/.bin" >> "$GITHUB_PATH"
+          "$pipx_bin/yamllint" --version
+          "$pipx_bin/typos" --version
+          "$RUNNER_TEMP/k7/node_modules/.bin/prettier" --version
+          # markdownlint-cli2 --help exits 2 by design; print the installed version instead.
+          npm ls --prefix "$RUNNER_TEMP/k7" markdownlint-cli2
       - name: Run bats suites
         run: |
           set -euo pipefail
@@ -216,31 +235,38 @@ jobs:
       - name: Skill profile keys declared in docs/profile-schema.md (FR-17)
         run: |
           set -euo pipefail
-          PLUGIN=plugins/php-backend-sdlc
-          SCHEMA="$PLUGIN/docs/profile-schema.md"
           shopt -s nullglob
-          skills=("$PLUGIN"/skills/*/SKILL.md)
-          if [ "${#skills[@]}" -eq 0 ]; then
-            echo "No skills yet — pass"
-            exit 0
-          fi
-          [ -f "$SCHEMA" ] || { echo "FAIL: $SCHEMA missing — it is the canonical key list"; exit 1; }
           fail=0
-          for f in "${skills[@]}"; do
-            # Section between '## Profile keys consumed' and the next H2.
-            section=$(awk '/^## Profile keys consumed/{flag=1; next} /^## /{flag=0} flag' "$f")
-            [ -n "$section" ] || continue
-            # Profile keys are namespaced (dot-separated) or the bare
-            # schema_version root key; other backticked words in the
-            # section (null, false, ...) are not keys.
-            keys=$(printf '%s\n' "$section" \
-              | grep -oE "\`(schema_version|[a-z0-9_]+(\.[a-z0-9_<>]+)+)\`" \
-              | tr -d '`' | sort -u) || true
-            for key in $keys; do
-              if ! grep -qF "\`$key\`" "$SCHEMA"; then
-                echo "FAIL: $f consumes profile key '$key' not declared in profile-schema.md"
-                fail=1
-              fi
+          # Explicit plugin list, not plugins/*: devops-sdlc and
+          # react-frontend-sdlc carry no profile schema.
+          for PLUGIN in plugins/php-backend-sdlc plugins/rust-backend-sdlc; do
+            SCHEMA="$PLUGIN/docs/profile-schema.md"
+            skills=("$PLUGIN"/skills/*/SKILL.md)
+            if [ "${#skills[@]}" -eq 0 ]; then
+              echo "$PLUGIN: no skills yet — pass"
+              continue
+            fi
+            if [ ! -f "$SCHEMA" ]; then
+              echo "FAIL: $SCHEMA missing — it is the canonical key list"
+              fail=1
+              continue
+            fi
+            for f in "${skills[@]}"; do
+              # Section between '## Profile keys consumed' and the next H2.
+              section=$(awk '/^## Profile keys consumed/{flag=1; next} /^## /{flag=0} flag' "$f")
+              [ -n "$section" ] || continue
+              # Profile keys are namespaced (dot-separated) or the bare
+              # schema_version root key; other backticked words in the
+              # section (null, false, ...) are not keys.
+              keys=$(printf '%s\n' "$section" \
+                | grep -oE "\`(schema_version|[a-z0-9_]+(\.[a-z0-9_<>]+)+)\`" \
+                | tr -d '`' | sort -u) || true
+              for key in $keys; do
+                if ! grep -qF "\`$key\`" "$SCHEMA"; then
+                  echo "FAIL: $f consumes profile key '$key' not declared in profile-schema.md"
+                  fail=1
+                fi
+              done
             done
           done
           exit "$fail"
@@ -254,16 +280,7 @@ jobs:
       - name: NFR-2 denylist grep + NFR-7 tree hygiene
         run: |
           set -euo pipefail
-          PLUGIN=plugins/php-backend-sdlc
           fail=0
-
-          # NFR-7: no _bmad/ or .ralph/ files inside the plugin tree.
-          stray=$(find "$PLUGIN" \( -name '_bmad' -o -name '.ralph' \) -print)
-          if [ -n "$stray" ]; then
-            echo "FAIL (NFR-7): _bmad/.ralph entries inside plugin tree:"
-            echo "$stray"
-            fail=1
-          fi
 
           # Drop fenced code blocks whose opening fence carries the
           # '# profile-example' marker — those may cite user-service values.
@@ -279,19 +296,45 @@ jobs:
           }
 
           # NFR-2 denylist (case-insensitive). user[-_ ]service also covers
-          # the workspace.dsl container name "User Service". Scope is the
-          # PRD's four component dirs — README/docs may legitimately carry
-          # the marketplace org in install instructions and release URLs.
+          # the workspace.dsl container name "User Service". Scope is each
+          # plugin's component dirs (skills commands agents scripts
+          # workflows) — README/docs may legitimately carry the marketplace
+          # org in install instructions and release URLs.
           DENY='user[-_ ]service|mongo[a-z][a-z0-9_]*repository|apprunner|src/user|src/oauth|vilnacrm'
-          while IFS= read -r -d '' f; do
-            hits=$(strip_profile_examples "$f" | grep -inE "$DENY" || true)
-            if [ -n "$hits" ]; then
-              echo "FAIL (NFR-2): $f contains denylisted identifiers:"
-              echo "$hits"
+
+          # Explicit plugin list, not plugins/* (same list as
+          # profile-keys-check).
+          for PLUGIN in plugins/php-backend-sdlc plugins/rust-backend-sdlc; do
+            # NFR-7: no _bmad/ or .ralph/ files inside the plugin tree.
+            stray=$(find "$PLUGIN" \( -name '_bmad' -o -name '.ralph' \) -print)
+            if [ -n "$stray" ]; then
+              echo "FAIL (NFR-7): _bmad/.ralph entries inside plugin tree $PLUGIN:"
+              echo "$stray"
               fail=1
             fi
-          done < <(find "$PLUGIN/skills" "$PLUGIN/commands" "$PLUGIN/agents" "$PLUGIN/scripts" \
-            -type f \
-            \( -name '*.md' -o -name '*.sh' -o -name '*.json' \
-               -o -name '*.yml' -o -name '*.yaml' -o -name '*.bats' \) -print0 2>/dev/null)
+
+            # Scanned component dirs; a missing directory is ignored.
+            dirs=()
+            for d in skills commands agents scripts workflows; do
+              if [ -d "$PLUGIN/$d" ]; then
+                dirs+=("$PLUGIN/$d")
+              fi
+            done
+            if [ "${#dirs[@]}" -eq 0 ]; then
+              echo "$PLUGIN: no component directories yet — pass"
+              continue
+            fi
+            while IFS= read -r -d '' f; do
+              hits=$(strip_profile_examples "$f" | grep -inE "$DENY" || true)
+              if [ -n "$hits" ]; then
+                echo "FAIL (NFR-2): $f contains denylisted identifiers:"
+                echo "$hits"
+                fail=1
+              fi
+            done < <(find "${dirs[@]}" \
+              -type f \
+              \( -name '*.md' -o -name '*.sh' -o -name '*.json' \
+                 -o -name '*.yml' -o -name '*.yaml' -o -name '*.bats' \
+                 -o -name '*.js' \) -print0)
+          done
           exit "$fail"

@@ -1,0 +1,61 @@
+{
+  "args": "7",
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": {
+        "verdict": "GATE",
+        "next": "rs-sdlc-fr-nfr-review --pr 7 --head a1b2c3d — the BMAD FR/NFR Review Gate status is missing on head a1b2c3d; the gate is mandatory for every PR",
+        "pr": 7,
+        "url": "https://github.com/acme/billing-service/pull/7",
+        "head": "a1b2c3d",
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "ci": {
+          "status": "green",
+          "failing": [],
+          "pending": [],
+          "missing": []
+        },
+        "fr_nfr": {
+          "status": "missing"
+        },
+        "unresolved": {
+          "total": 0
+        },
+        "reviewers": [
+          {
+            "name": "coderabbit",
+            "status": "APPROVED"
+          }
+        ],
+        "human_gated": {
+          "checks": [
+            "Protected configuration",
+            "OpenAPI breaking changes",
+            "GraphQL breaking changes"
+          ],
+          "failing": [],
+          "labels": {
+            "Protected configuration": "approved-config-change",
+            "OpenAPI breaking changes": "approved-breaking-change",
+            "GraphQL breaking changes": "approved-breaking-change"
+          }
+        },
+        "notes": []
+      }
+    }
+  ],
+  "workflows": {
+    "rust-backend-sdlc:rs-sdlc-fr-nfr-review": {
+      "result": "ESCALATED",
+      "iterations": 0,
+      "new_findings": null,
+      "fixed": [],
+      "requirement_source": "none",
+      "advisory": false,
+      "degrade_notes": [],
+      "escalation": "=== SDLC ESCALATION ===\nstage: review\niteration: 0/5\nexit_condition: zero new gate findings: fr-nfr-reviewer reports new_findings=0 with verdict=PASS in the last gate iteration\nstatus: NOT MET\nblocking_finding: no requirement source for this change set — no specs/<N>-<slug>/ bundle, and PR #7 has an empty description and no linked issue with a body\niteration_log: 0: scope -> no requirement source\nrecommended_action: link the issue it implements (Closes #N), then re-run\n=== END ==="
+    }
+  }
+}

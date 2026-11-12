@@ -1,0 +1,58 @@
+# cargo-deny 0.20 configuration: `cargo deny check` runs all four checks.
+# Replaces `composer validate` (manifest hygiene), `symfony security:check`
+# (advisories) and adds licence and source policy.
+
+[graph]
+all-features = true
+
+[output]
+feature-depth = 1
+
+[advisories]
+# RustSec advisory database: vulnerabilities and unsound crates always fail.
+yanked = "deny"
+unmaintained = "all"
+ignore = [
+    # { id = "RUSTSEC-0000-0000", reason = "why this is acceptable, and until when" },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+
+[licenses.private]
+# Workspace crates are `publish = false`; they carry the repository licence.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+deny = [
+    { crate = "openssl-sys", reason = "TLS goes through rustls; no system OpenSSL in the image" },
+    { crate = "native-tls", reason = "TLS goes through rustls" },
+]
+
+[bans.workspace-dependencies]
+# Every dependency version is declared once, in [workspace.dependencies].
+duplicates = "deny"
+include-path-dependencies = true
+unused = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "lens": "fr-nfr",
+  "iteration": 3,
+  "head_sha": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  "findings": [
+    {
+      "id": "FRN-1",
+      "severity": "Critical",
+      "file": "crates/billing/invoice/domain/src/invoice.rs",
+      "line": 42,
+      "rule": "FR-3",
+      "summary": "Invoice total ignores the discount that FR-3 requires",
+      "status": "open"
+    },
+    {
+      "id": "FRN-2",
+      "severity": "High",
+      "file": "crates/billing/invoice/domain/src/invoice.rs",
+      "line": 57,
+      "rule": "FR-3",
+      "summary": "Credit note total skips the same FR-3 discount rule",
+      "status": "open"
+    },
+    {
+      "id": "FRN-3",
+      "severity": "Medium",
+      "file": "crates/billing/invoice/application/src/create_invoice.rs",
+      "line": 18,
+      "rule": "NFR-BASE-TEST",
+      "summary": "Create handler had no unit test for the rejected-currency path",
+      "status": "fixed"
+    },
+    {
+      "id": "FRN-4",
+      "severity": "Low",
+      "file": null,
+      "line": null,
+      "rule": "FR-5",
+      "summary": "No acceptance test covers the overdue reminder of FR-5",
+      "status": "open"
+    },
+    {
+      "id": "FRN-5",
+      "severity": "Info",
+      "file": "crates/billing/invoice/domain/Cargo.toml",
+      "line": null,
+      "rule": "NFR-BASE-QUALITY",
+      "summary": "Crate description still repeats the crate name",
+      "status": "open"
+    },
+    {
+      "id": "FRN-6",
+      "severity": "High",
+      "file": "crates/billing/invoice/infrastructure/src/invoice_repository.rs",
+      "line": 88,
+      "rule": "NFR-BASE-DATA",
+      "summary": "Reported missing index on invoices.customer_id; the migration already creates it",
+      "status": "dropped"
+    }
+  ]
+}

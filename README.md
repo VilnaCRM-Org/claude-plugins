@@ -7,6 +7,7 @@ Claude Code plugin marketplace for VilnaCRM engineering automation.
 ```bash
 claude plugin marketplace add VilnaCRM-Org/claude-plugins
 claude plugin install php-backend-sdlc@vilnacrm-plugins
+claude plugin install rust-backend-sdlc@vilnacrm-plugins
 ```
 
 ## Plugins
@@ -15,6 +16,7 @@ claude plugin install php-backend-sdlc@vilnacrm-plugins
 | --- | --- |
 | [php-backend-sdlc](plugins/php-backend-sdlc/) | Full-SDLC automation for PHP backend engineering: GitHub issue → BMAD planning → bmalph/Ralph implementation → multi-skill review + BMAD FR/NFR gate → QA → CI auto-fix → finished PR. |
 | [react-frontend-sdlc](plugins/react-frontend-sdlc/) | Full-SDLC automation for React/TypeScript frontend engineering: GitHub issue → BMAD planning → bmalph/Ralph implementation → multi-skill review + BMAD FR/NFR gate + mandatory accessibility gate → visual/E2E/Lighthouse QA → CI auto-fix → finished PR. |
+| [rust-backend-sdlc](plugins/rust-backend-sdlc/) | Full-SDLC automation for Rust microservices built from the Rust service template: one-command service creation and bounded-context scaffolding → GitHub issue → BMAD planning → bmalph/Ralph implementation → multi-lens review + BMAD FR/NFR gate → black-box REST/GraphQL QA → CI auto-fix → finished PR. |
 
 ## Repository layout
 

@@ -1,0 +1,101 @@
+name: Change control
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  changes:
+    name: Changes (Change control)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.detect.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/ci/detect-changes.sh >> "$GITHUB_OUTPUT"
+
+  title:
+    name: Pull-request title
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]' && !contains(github.event.pull_request.labels.*.name, 'template_sync') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - env:
+          COMMIT_TITLE: ${{ github.event.pull_request.title }}
+        run: make check-commit-message
+
+  validate-configuration:
+    name: Protected configuration
+    if: ${{ github.event_name == 'pull_request' || github.event.before != '0000000000000000000000000000000000000000' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+        with:
+          cache-shared-key: xtask
+          cache-save-if: false
+      - env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          CONFIG_CHANGE_APPROVED: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'approved-config-change') }}
+        run: make validate-configuration base_ref="$BASE"
+
+  openapi-diff:
+    name: OpenAPI breaking changes
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name == 'pull_request' || github.event.before != '0000000000000000000000000000000000000000') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          BREAKING_CHANGE_APPROVED: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'approved-breaking-change') }}
+        run: make openapi-diff base_ref="$BASE"
+
+  graphql-diff:
+    name: GraphQL breaking changes
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' && (github.event_name == 'pull_request' || github.event.before != '0000000000000000000000000000000000000000') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+          BREAKING_CHANGE_APPROVED: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'approved-breaking-change') }}
+        run: make graphql-diff base_ref="$BASE"

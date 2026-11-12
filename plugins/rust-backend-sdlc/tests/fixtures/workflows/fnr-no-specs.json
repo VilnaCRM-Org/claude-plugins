@@ -1,0 +1,30 @@
+{
+  "args": "--slug ghost",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "status": "OK",
+        "profile_valid": true,
+        "blocked": null,
+        "base": "origin/main",
+        "files": [
+          "crates/billing/invoicing/domain/src/invoice.rs",
+          "crates/billing/invoicing/domain/src/invoice/tests.rs",
+          "crates/billing/invoicing/application/src/create_invoice.rs",
+          "crates/service/src/routes.rs"
+        ],
+        "specs_present": false,
+        "slug": null,
+        "spec_files": [],
+        "pr": null,
+        "pr_requirements": false,
+        "linked_issues": [],
+        "clean": true,
+        "head_matches": null,
+        "summary": "invoice totals rounded half-even per currency",
+        "notes": []
+      }
+    }
+  ]
+}

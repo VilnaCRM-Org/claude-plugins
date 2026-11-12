@@ -1,0 +1,49 @@
+{
+  "args": "#7",
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": {
+        "verdict": "BLOCKED",
+        "next": "PR is MERGED; nothing bounded to do — reopen or stop",
+        "pr": 7,
+        "url": "https://github.com/acme/billing-service/pull/7",
+        "head": "a1b2c3d",
+        "state": "MERGED",
+        "mergeable": "MERGEABLE",
+        "ci": {
+          "status": "green",
+          "failing": [],
+          "pending": [],
+          "missing": []
+        },
+        "fr_nfr": {
+          "status": "success"
+        },
+        "unresolved": {
+          "total": 0
+        },
+        "reviewers": [
+          {
+            "name": "coderabbit",
+            "status": "APPROVED"
+          }
+        ],
+        "human_gated": {
+          "checks": [
+            "Protected configuration",
+            "OpenAPI breaking changes",
+            "GraphQL breaking changes"
+          ],
+          "failing": [],
+          "labels": {
+            "Protected configuration": "approved-config-change",
+            "OpenAPI breaking changes": "approved-breaking-change",
+            "GraphQL breaking changes": "approved-breaking-change"
+          }
+        },
+        "notes": []
+      }
+    }
+  ]
+}

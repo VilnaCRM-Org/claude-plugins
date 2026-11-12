@@ -1,0 +1,61 @@
+{
+  "args": "42-invoice-totals --pr 7",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "status": "OK",
+        "profile_valid": true,
+        "blocked": null,
+        "base": "origin/main",
+        "files": [
+          "crates/billing/invoicing/domain/src/invoice.rs",
+          "crates/billing/invoicing/domain/src/invoice/tests.rs",
+          "crates/billing/invoicing/application/src/create_invoice.rs",
+          "crates/service/src/routes.rs"
+        ],
+        "specs_present": true,
+        "slug": "42-invoice-totals",
+        "spec_files": [
+          "prd.md",
+          "architecture.md",
+          "epics.md"
+        ],
+        "pr": 7,
+        "pr_requirements": true,
+        "linked_issues": [
+          42
+        ],
+        "clean": true,
+        "head_matches": true,
+        "summary": "invoice totals rounded half-even per currency",
+        "notes": []
+      }
+    },
+    {
+      "match": "^fr-nfr-reviewer ",
+      "reply": [
+        {
+          "status": "OK",
+          "handle": "FR_NFR_NEW_FINDINGS: 0",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 1 --pr 7",
+          "status_posted": "STATUS_POSTED: success abc1234",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": []
+        },
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=2/5 new_findings=0 verdict=PASS",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 2 --pr 7",
+          "status_posted": "STATUS_POSTED: success abc1234",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,294 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  changes:
+    name: Changes (Tests)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.detect.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/ci/detect-changes.sh >> "$GITHUB_OUTPUT"
+
+  tests:
+    name: Tests and coverage
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - id: codecov
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          if [ -n "$CODECOV_TOKEN" ]; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo '::notice::Coverage upload skipped: CODECOV_TOKEN is not available'
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+        with:
+          cache-shared-key: tests
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest@0.9.151,cargo-llvm-cov@0.9.1
+          fallback: none
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: sqlx-cli@0.9.0
+          fallback: cargo-binstall
+      - id: run
+        run: make tests-with-coverage doc-tests
+      - if: ${{ !cancelled() }}
+        env:
+          TESTS_OUTCOME: ${{ steps.run.outcome }}
+        run: scripts/ci/summarize-tests.sh
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-html
+          path: target/coverage/html
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nextest-junit
+          path: target/nextest/ci/junit.xml
+      - if: ${{ steps.codecov.outputs.available == 'true' }}
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: target/coverage/lcov.info
+          disable_search: true
+          fail_ci_if_error: false
+      - if: ${{ failure() }}
+        run: docker compose logs --no-color
+
+  e2e-tests:
+    name: End-to-end tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+        with:
+          cache-shared-key: e2e
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: sqlx-cli@0.9.0
+          fallback: cargo-binstall
+      - run: make e2e-tests
+      - if: ${{ failure() }}
+        run: docker compose logs --no-color
+
+  mutation-plan:
+    name: Mutation plan
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      count: ${{ steps.plan.outputs.count }}
+      shards: ${{ steps.plan.outputs.shards }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+        with:
+          cache-shared-key: mutation
+          cache-save-if: false
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-mutants@27.1.0
+          fallback: none
+      - id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: scripts/ci/mutation-plan.sh >> "$GITHUB_OUTPUT"
+
+  mutation-shard:
+    name: Mutation shard ${{ matrix.shard }}
+    needs: [changes, mutation-plan]
+    if: needs.changes.outputs.code == 'true' && needs.mutation-plan.outputs.count != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.mutation-plan.outputs.shards) }}
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      BASE_REF: ${{ github.base_ref }}
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
+        with:
+          cache-shared-key: mutation
+          cache-save-if: ${{ github.ref == 'refs/heads/main' && matrix.index == 1 }}
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-mutants@27.1.0,cargo-nextest@0.9.151
+          fallback: none
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: sqlx-cli@0.9.0
+          fallback: cargo-binstall
+      - if: ${{ env.EVENT_NAME == 'pull_request' }}
+        run: make mutation-tests-diff base_ref="origin/$BASE_REF" MUTANTS_SHARD="$SHARD"
+      - if: ${{ env.EVENT_NAME != 'pull_request' }}
+        run: make mutation-tests MUTANTS_SHARD="$SHARD"
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutants-${{ matrix.index }}
+          path: mutants.out/
+      - if: ${{ failure() }}
+        run: docker compose logs --no-color
+
+  mutation-tests:
+    name: Mutation tests
+    needs: [changes, mutation-plan, mutation-shard]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ needs.changes.result }} ${{ needs.mutation-plan.result }} ${{ needs.mutation-shard.result }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *)
+                echo "A mutation job ended with: $RESULTS" >&2
+                exit 1
+                ;;
+            esac
+          done
+
+  bats-group:
+    name: 'Bats: ${{ matrix.group }}'
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { group: surface, image: dev }
+          - { group: quality, image: none }
+          - { group: tests, image: none }
+          - { group: contracts, image: prod }
+          - { group: load, image: prod }
+          - { group: repository, image: none }
+    env:
+      GROUP: ${{ matrix.group }}
+      APP_IMAGE: service-under-test:prod
+      DEV_IMAGE: service-under-test:dev
+      BUILD_IMAGE: '0'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1 # zizmor: ignore[cache-poisoning] images are loaded locally, never pushed
+        with:
+          cache-shared-key: bats-${{ matrix.group }}
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-nextest@0.9.151,cargo-llvm-cov@0.9.1,cargo-mutants@27.1.0,cargo-deny@0.20.2,cargo-shear@1.14.0,cargo-hack@0.6.46,taplo@0.10.0,typos@1.52.0,zizmor@1.32.0
+          fallback: none
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: sqlx-cli@0.9.0,clippy-sarif@0.8.0,cocogitto@7.0.0
+          fallback: cargo-binstall
+      - run: scripts/install-bats.sh
+      - if: ${{ matrix.image == 'prod' }}
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: ${{ matrix.image == 'prod' }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: prod
+          load: true
+          tags: ${{ env.APP_IMAGE }}
+          cache-from: type=gha,scope=prod-image
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,scope=prod-image,mode=max' || '' }}
+      - if: ${{ matrix.image == 'dev' }}
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: ${{ matrix.image == 'dev' }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: dev
+          load: true
+          tags: ${{ env.DEV_IMAGE }}
+          cache-from: type=gha,scope=dev-image
+          cache-to: ${{ github.ref == 'refs/heads/main' && 'type=gha,scope=dev-image,mode=max' || '' }}
+          secrets: |
+            github_token=${{ github.token }}
+      - run: make bats BATS_ARGS="--filter-tags $GROUP"
+      - if: ${{ failure() }}
+        run: docker compose logs --no-color
+
+  bats:
+    name: Makefile tests (Bats)
+    needs: [changes, bats-group]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ needs.changes.result }} ${{ needs.bats-group.result }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *)
+                echo "A Bats job ended with: $RESULTS" >&2
+                exit 1
+                ;;
+            esac
+          done

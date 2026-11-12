@@ -1,0 +1,87 @@
+{
+  "args": "42-invoice-totals",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "status": "OK",
+        "profile_valid": true,
+        "blocked": null,
+        "base": "origin/main",
+        "files": [
+          "crates/billing/invoicing/domain/src/invoice.rs",
+          "crates/billing/invoicing/domain/src/invoice/tests.rs",
+          "crates/billing/invoicing/application/src/create_invoice.rs",
+          "crates/service/src/routes.rs"
+        ],
+        "specs_present": true,
+        "slug": "42-invoice-totals",
+        "spec_files": [
+          "prd.md",
+          "architecture.md",
+          "epics.md"
+        ],
+        "pr": null,
+        "pr_requirements": false,
+        "linked_issues": [],
+        "clean": false,
+        "head_matches": null,
+        "summary": "invoice totals rounded half-even per currency",
+        "notes": []
+      }
+    },
+    {
+      "match": "^fr-nfr-reviewer ",
+      "reply": [
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=1/5 new_findings=2 verdict=FAIL",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 1 --advisory",
+          "status_posted": "ADVISORY: no status or comment posted",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": [
+            {
+              "id": "FRN-1",
+              "severity": "High",
+              "file": "crates/billing/invoicing/domain/src/invoice.rs",
+              "line": 57,
+              "rule": "FR-3",
+              "summary": "totals round half-up; FR-3 demands half-even per currency and no test covers the tie case",
+              "status": "open"
+            },
+            {
+              "id": "FRN-2",
+              "severity": "Medium",
+              "file": "crates/billing/invoicing/application/src/create_invoice.rs",
+              "line": 31,
+              "rule": "FR-4",
+              "summary": "a zero-line invoice is accepted; FR-4 requires a 422 problem document and no test asserts it",
+              "status": "open"
+            }
+          ]
+        },
+        {
+          "status": "OK",
+          "handle": "FR_NFR_REVIEWER: iteration=2/5 new_findings=0 verdict=PASS",
+          "gate_run": "fr-nfr-gate.sh --spec-path specs/42-invoice-totals/ --iteration 2 --advisory",
+          "status_posted": "ADVISORY: no status or comment posted",
+          "degraded": [],
+          "blocking_finding": null,
+          "note": null,
+          "findings": []
+        }
+      ]
+    },
+    {
+      "match": "^fix:",
+      "reply": {
+        "status": "COMPLETE",
+        "files_modified": 2,
+        "tests_status": "PASSING",
+        "recommendation": "re-run the FR/NFR gate"
+      }
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+{"args": "12-invoice-due-date", "replies": [
+ {"match": "^scope$", "reply": {"profile_valid": false, "blocked": "run /rs-sdlc-setup on the default branch and commit the result", "base": "", "files": [], "protected": [], "specs_dir": null, "pr": null, "execute_skills": [], "not_applicable": [], "degrade_notes": []}}
+]}

@@ -1,0 +1,55 @@
+{
+  "args": "7",
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": {
+        "verdict": "BLOCKED",
+        "next": "apply the label approved-config-change — failing human-gated check(s): Protected configuration; a maintainer applies the label (never the plugin), then re-run pr-state.sh --pr 7",
+        "pr": 7,
+        "url": "https://github.com/acme/billing-service/pull/7",
+        "head": "a1b2c3d",
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "ci": {
+          "status": "red",
+          "failing": [
+            "Protected configuration"
+          ],
+          "pending": [],
+          "missing": []
+        },
+        "fr_nfr": {
+          "status": "success"
+        },
+        "unresolved": {
+          "total": 0
+        },
+        "reviewers": [
+          {
+            "name": "coderabbit",
+            "status": "APPROVED"
+          }
+        ],
+        "human_gated": {
+          "checks": [
+            "Protected configuration",
+            "OpenAPI breaking changes",
+            "GraphQL breaking changes"
+          ],
+          "failing": [
+            "Protected configuration"
+          ],
+          "labels": {
+            "Protected configuration": "approved-config-change",
+            "OpenAPI breaking changes": "approved-breaking-change",
+            "GraphQL breaking changes": "approved-breaking-change"
+          }
+        },
+        "notes": [
+          "Protected configuration: failing human-gated check — a maintainer applies the label approved-config-change; the plugin never applies a label and never re-runs or fixes this check"
+        ]
+      }
+    }
+  ]
+}

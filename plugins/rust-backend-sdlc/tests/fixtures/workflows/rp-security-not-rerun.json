@@ -1,0 +1,175 @@
+{
+  "args": "12-invoice-due-date",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "profile_valid": true,
+        "blocked": null,
+        "base": "3e0bd3e5f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0",
+        "files": [
+          "crates/billing/invoice/application/src/command/create_invoice.rs",
+          "docs/invoices.md"
+        ],
+        "protected": [],
+        "specs_dir": "specs/12-invoice-due-date/",
+        "pr": 34,
+        "execute_skills": [
+          "code-review",
+          "quality-standards",
+          "documentation-sync",
+          "api-contract-development",
+          "api-resource-development",
+          "async-runtime-safety",
+          "bmad-fr-nfr-review-gate",
+          "clean-architecture-llm",
+          "complexity-management",
+          "observability-instrumentation",
+          "rust-error-handling",
+          "security-audit",
+          "testing-workflow",
+          "verification-workflow"
+        ],
+        "not_applicable": [
+          {
+            "skill": "database-migrations",
+            "reason": "no migration changed"
+          },
+          {
+            "skill": "architecture-boundary-fixer",
+            "reason": "no boundary target is red and no code moved between layers or contexts"
+          },
+          {
+            "skill": "architecture-model-sync",
+            "reason": "no workspace member, crate-to-crate dependency or external system appears or disappears"
+          },
+          {
+            "skill": "bmad-autonomous-planning",
+            "reason": "the planning bundle is already committed with a ready verdict"
+          },
+          {
+            "skill": "bounded-context-scaffolding",
+            "reason": "every context the change touches already exists at the merge base"
+          },
+          {
+            "skill": "cache-management",
+            "reason": "no cache adapter is added or changed and the story gives no staleness budget"
+          },
+          {
+            "skill": "code-organization",
+            "reason": "no crate, module, source file or test file is added, moved, renamed or split"
+          },
+          {
+            "skill": "configuration-management",
+            "reason": "no setting, environment variable, make or compose variable or port changes"
+          },
+          {
+            "skill": "dependency-policy",
+            "reason": "no manifest or lock file changed and neither dependency target reports a finding"
+          },
+          {
+            "skill": "documentation-creation",
+            "reason": "the change adds no documentation page"
+          },
+          {
+            "skill": "implementing-ddd-architecture",
+            "reason": "no domain crate changed and no context is added"
+          },
+          {
+            "skill": "load-testing",
+            "reason": "no load-test file changed and no smoke run is red"
+          },
+          {
+            "skill": "query-performance-analysis",
+            "reason": "no query or index changes and no slow query is reported"
+          },
+          {
+            "skill": "service-scaffolding",
+            "reason": "an existing service whose bootstrap pull request has merged"
+          }
+        ],
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^code-quality-reviewer$",
+      "reply": [
+        {
+          "status": "OK",
+          "verdict": "FAIL",
+          "note": null,
+          "degrade_notes": [],
+          "findings": [
+            {
+              "id": "CQ-1",
+              "severity": "Medium",
+              "file": "docs/invoices.md",
+              "line": 12,
+              "rule": "documentation-sync/endpoint",
+              "summary": "the page names the removed endpoint /invoices/{id}/pdf; describe /invoices/{id}/document",
+              "status": "open",
+              "evidence": "GET /invoices/{id}/pdf in the endpoint table",
+              "fix": "rename the endpoint in the table and the example"
+            }
+          ]
+        },
+        {
+          "status": "OK",
+          "verdict": "PASS",
+          "note": null,
+          "degrade_notes": [],
+          "findings": [
+            {
+              "id": "CQ-1",
+              "severity": "Medium",
+              "file": "docs/invoices.md",
+              "line": 12,
+              "rule": "documentation-sync/endpoint",
+              "summary": "endpoint renamed in the page",
+              "status": "fixed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "match": "^fr-nfr-reviewer$",
+      "reply": {
+        "status": "OK",
+        "verdict": "PASS",
+        "note": "FR_NFR_NEW_FINDINGS: 0",
+        "degrade_notes": [],
+        "findings": []
+      }
+    },
+    {
+      "match": "^security-auditor:all$",
+      "reply": {
+        "status": "OK",
+        "verdict": "PASS",
+        "note": null,
+        "degrade_notes": [],
+        "findings": []
+      }
+    },
+    {
+      "match": "^verify:",
+      "reply": {
+        "refuted": false,
+        "reason": "the page names an endpoint the change removed"
+      }
+    },
+    {
+      "match": "^fix:docs/invoices\\.md$",
+      "reply": {
+        "status": "COMPLETE",
+        "files_modified": 1,
+        "changed_files": [
+          "docs/invoices.md"
+        ],
+        "tests_status": "NOT_RUN",
+        "recommendation": "none"
+      }
+    }
+  ]
+}

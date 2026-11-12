@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Stub `claude` CLI for the hermetic bats suites (§ Test Architecture › Stub executables).
+# Env config:
+#   STUB_CLAUDE_VERSION      printed by --version/-v                      (default: 2.1.322)
+#   STUB_CLAUDE_RESTRICTED   1 → --help lists --restricted; else omitted  (default: 1)
+#   STUB_CLAUDE_EXIT         exit code of every call except --help        (default: 0)
+#   STUB_CLAUDE_OUTPUT       stdout of a session call                     (default: none)
+#   STUB_CLAUDE_OUTPUTS_DIR  the n-th session call prints <dir>/<n>.json, the last
+#                            file repeating once the sequence runs out; wins over
+#                            STUB_CLAUDE_OUTPUT (default: off)
+#   STUB_CLAUDE_LOG          append-log (default: off): one `claude <argv>` line per
+#                            call (--help and --version included, so count sessions
+#                            with `grep -c '^claude -p'`); a session call then adds one
+#                            line per ADR-8 isolation variable, `NAME=<value>` or
+#                            `NAME unset`
+# --help always exits 0: it is the `--restricted` capability probe that precedes a
+# session, so STUB_CLAUDE_EXIT can simulate a session transport failure on its own.
+# The OUTPUTS_DIR call counter lives under $BATS_TEST_TMPDIR (else $TMPDIR or /tmp),
+# never inside the replies directory, so a committed fixture directory stays clean.
+set -euo pipefail
+
+log="${STUB_CLAUDE_LOG:-}"
+if [[ -n "$log" ]]; then
+  printf 'claude %s\n' "$*" >>"$log"
+fi
+
+case "${1:-}" in
+  --version | -v)
+    printf '%s\n' "${STUB_CLAUDE_VERSION:-2.1.322}"
+    exit "${STUB_CLAUDE_EXIT:-0}"
+    ;;
+  --help | -h)
+    printf 'Usage: claude [options] [command] [prompt]\n\n'
+    printf 'Options:\n'
+    printf '  -p, --print                       Print response and exit\n'
+    printf '  --output-format <format>          Output format: "text", "json" or "stream-json"\n'
+    printf '  --permission-mode <mode>          Permission mode for the session\n'
+    printf '  --max-turns <turns>               Maximum number of agentic turns\n'
+    printf '  --tools <tools...>                Built-in tools the session may use\n'
+    printf '  --disallowedTools <tools...>      Tools the session must not use\n'
+    printf '  --strict-mcp-config               Only use MCP servers from --mcp-config\n'
+    printf '  -v, --version                     Output the version number\n'
+    printf '  -h, --help                        Display help for command\n'
+    # Last line on purpose: a `| grep -q -- --restricted` probe under pipefail can
+    # never close the pipe before the stub has finished writing.
+    if [[ "${STUB_CLAUDE_RESTRICTED:-1}" == "1" ]]; then
+      printf '  --restricted                      Restricted mode (no shell, no network tools)\n'
+    fi
+    exit 0
+    ;;
+esac
+
+# A session call: record the isolation environment (ADR-8), then reply.
+if [[ -n "$log" ]]; then
+  for name in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN \
+    SSH_AUTH_SOCK GIT_ASKPASS SSH_ASKPASS GH_CONFIG_DIR GIT_CONFIG_NOSYSTEM \
+    GIT_CONFIG_GLOBAL GIT_TERMINAL_PROMPT GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 \
+    GIT_CONFIG_VALUE_0; do
+    if [[ -n "${!name+x}" ]]; then
+      printf '%s=%s\n' "$name" "${!name}" >>"$log"
+    else
+      printf '%s unset\n' "$name" >>"$log"
+    fi
+  done
+fi
+
+replies="${STUB_CLAUDE_OUTPUTS_DIR:-}"
+if [[ -n "$replies" ]]; then
+  state_dir="${BATS_TEST_TMPDIR:-${TMPDIR:-/tmp}}"
+  key="$(printf '%s' "$replies" | cksum | cut -d ' ' -f 1)"
+  counter="$state_dir/.stub-claude-calls.$key"
+  n=0
+  if [[ -f "$counter" ]]; then
+    n="$(cat "$counter")"
+  fi
+  n=$((10#$n + 1))
+  printf '%s\n' "$n" >"$counter"
+  k=$n
+  while ((k > 1)) && [[ ! -f "$replies/$k.json" ]]; do
+    k=$((k - 1))
+  done
+  if [[ ! -f "$replies/$k.json" ]]; then
+    printf 'stub claude: no reply file %s/1.json\n' "$replies" >&2
+    exit 1
+  fi
+  cat "$replies/$k.json"
+elif [[ -n "${STUB_CLAUDE_OUTPUT:-}" ]]; then
+  printf '%s\n' "$STUB_CLAUDE_OUTPUT"
+fi
+exit "${STUB_CLAUDE_EXIT:-0}"

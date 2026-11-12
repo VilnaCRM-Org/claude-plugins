@@ -1,0 +1,214 @@
+{
+  "args": "Add a due date to invoices so that overdue invoices can be listed over REST and GraphQL",
+  "replies": [
+    {
+      "match": "^setup-check$",
+      "reply": {
+        "ok": true,
+        "message": "ok",
+        "failures": [],
+        "warnings": []
+      }
+    },
+    {
+      "match": "^resolve-plan$",
+      "reply": {
+        "issue_url": "https://github.com/acme/billing-service/issues/12",
+        "issue_number": 12,
+        "branch": "feat/12-invoice-due-date",
+        "slug": "12-invoice-due-date",
+        "readiness_ready": true,
+        "bundle_uncommitted": false,
+        "blocked": null,
+        "blocked_stage": null,
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^stage$",
+      "reply": {
+        "prepare": "FIX_PLAN: absent",
+        "steps": [
+          "ralph_fix_plan_prepare: FIX_PLAN: absent",
+          "stage-planning-artifacts.sh: STAGED: specs/12-invoice-due-date/prd.md -> _bmad-output/planning-artifacts/prd.md (7 STAGED: lines, 0 REMOVED:)",
+          "bmalph implement: exit 0 (.ralph/@fix_plan.md, .ralph/@AGENT.md and .ralph/PROJECT_CONTEXT.md written)",
+          "state_cache_update: WROTE: target/rust-sdlc/state/12-invoice-due-date.json",
+          "ralph_agent_md_patch: UPDATED: .ralph/@AGENT.md",
+          "PROJECT_CONTEXT.md check: part (a) (#12) and part (b) (all ten make.* keys) present"
+        ],
+        "agent_md": "UPDATED: .ralph/@AGENT.md",
+        "context": {
+          "part_a": true,
+          "part_b": true,
+          "missing": []
+        },
+        "stories": [
+          {
+            "id": "1.1",
+            "title": "Add the due date to the Invoice aggregate",
+            "done": false,
+            "layer": "domain",
+            "independent": false
+          },
+          {
+            "id": "1.2",
+            "title": "Expose the due date over REST and GraphQL",
+            "done": false,
+            "layer": "service",
+            "independent": false
+          }
+        ],
+        "blocked": null
+      }
+    },
+    {
+      "match": "^story ",
+      "reply": {
+        "status": "COMPLETE",
+        "exit_signal": true,
+        "tests_status": "PASSING",
+        "files_modified": 1,
+        "files": [
+          "crates/billing/invoice/domain/src/invoice.rs"
+        ],
+        "recommendation": "none"
+      }
+    },
+    {
+      "match": "^publish implement$",
+      "reply": {
+        "pushed": true,
+        "head": "b2c3d4e5f60718293a4b5c6d7e8f901234567890",
+        "commits": [
+          "feat(#12): story 1.1 Add the due date to the Invoice aggregate",
+          "feat(#12): story 1.2 Expose the due date over REST and GraphQL"
+        ],
+        "skipped": [],
+        "reason": null,
+        "protected": null,
+        "profile_changed": false,
+        "log_tail": null,
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^publish finish\\-pr$",
+      "reply": {
+        "pushed": true,
+        "head": "b2c3d4e5f60718293a4b5c6d7e8f901234567890",
+        "commits": [],
+        "skipped": [],
+        "reason": null,
+        "protected": null,
+        "profile_changed": false,
+        "log_tail": null,
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^qa-boot$",
+      "reply": {
+        "status": "UP",
+        "head": "b2c3d4e5f60718293a4b5c6d7e8f901234567890",
+        "targets": [
+          "make start: passed",
+          "make migrate: passed"
+        ],
+        "migrations": "applied",
+        "blocked": null,
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^qa-manual-tester$",
+      "reply": {
+        "verdict": "PASS",
+        "fail_rows": [],
+        "degrade_notes": []
+      }
+    },
+    {
+      "match": "^pr create/update$",
+      "reply": {
+        "pr": 34,
+        "url": "https://github.com/acme/billing-service/pull/34",
+        "blocked": null
+      }
+    }
+  ],
+  "workflows": {
+    "rust-backend-sdlc:rs-sdlc-review-panel": {
+      "result": "SUCCESS",
+      "iterations": 1,
+      "findings": [],
+      "fixed": [],
+      "carried": [],
+      "degrade_notes": []
+    },
+    "rust-backend-sdlc:rs-sdlc-fr-nfr-review": [
+      {
+        "result": "SUCCESS-WITH-REPORT",
+        "iterations": 1,
+        "new_findings": 0,
+        "fixed": [],
+        "changed_files": [],
+        "requirement_source": "specs/12-invoice-due-date/ + NFR-BASE",
+        "advisory": true,
+        "degrade_notes": [
+          "advisory gate run: no pull request (D11) — the gate ran with --advisory and posted no \"BMAD FR/NFR Review Gate\" status or comment; the authoritative run happens on the clean, published PR head"
+        ]
+      },
+      {
+        "result": "SUCCESS",
+        "iterations": 1,
+        "new_findings": 0,
+        "fixed": [],
+        "changed_files": [],
+        "requirement_source": "specs/12-invoice-due-date/ + PR #34 + NFR-BASE",
+        "advisory": false,
+        "degrade_notes": []
+      }
+    ],
+    "rust-backend-sdlc:rs-sdlc-pr-until-green": [
+      {
+        "result": "GATE",
+        "pr": 34,
+        "head": "b2c3d4e5f60718293a4b5c6d7e8f901234567890",
+        "counters": {
+          "fix": 0,
+          "wait": 0,
+          "request": 0,
+          "gate": 1
+        },
+        "journal": [
+          "1: GATE -> hand-back (gate 1/3) -> GATE on b2c3d4e returned to the caller"
+        ],
+        "degrade_notes": [
+          "no AI reviewer is configured — the verdict waits for no review approval (D7)"
+        ]
+      },
+      {
+        "result": "SUCCESS-WITH-REPORT",
+        "pr": 34,
+        "head": "b2c3d4e5f60718293a4b5c6d7e8f901234567890",
+        "verdict": "READY",
+        "counters": {
+          "fix": 1,
+          "wait": 0,
+          "request": 0,
+          "gate": 1
+        },
+        "journal": [
+          "1: GATE -> hand-back (gate 1/3) -> GATE on b2c3d4e returned to the caller",
+          "2: GATE hand-back -> rs-sdlc-fr-nfr-review --pr 34 --head b2c3d4e (gate 1/3) -> SUCCESS, iterations 1, 0 fixed",
+          "3: READY -> D7 review pass (fix 1/5) -> remaining_unresolved 0, no changed file: clean on b2c3d4e",
+          "4: READY -> confirmation snapshot -> READY on b2c3d4e"
+        ],
+        "degrade_notes": [
+          "no AI reviewer is configured — the verdict waits for no review approval (D7)",
+          "no AI reviewer — ai-review-loop findings used as the comment source (D7)"
+        ]
+      }
+    ]
+  }
+}

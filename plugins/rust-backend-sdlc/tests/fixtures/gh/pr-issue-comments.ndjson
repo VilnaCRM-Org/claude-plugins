@@ -1,0 +1,9 @@
+{"user":"coderabbitai","body":"<!-- walkthrough_start --> Walkthrough of the change set: the invoice export query and its REST route.","created_at":"2026-09-01T10:00:00Z"}
+{"user":"qodo-code-review","body":"### Qodo reviews are paused because the subscription is no longer active.","created_at":"2026-09-01T10:00:30Z"}
+{"user":"maintainer","body":"@coderabbitai full review","created_at":"2026-09-01T10:15:00Z"}
+{"user":"maintainer","body":"@cubic-dev-ai review","created_at":"2026-09-01T10:16:00Z"}
+{"user":"cubic-dev-ai","body":"<!-- cubic --> Reviewed 6 files; left 2 comments.","created_at":"2026-09-01T10:40:00Z"}
+{"user":"maintainer","body":"Thanks. I will ask @coderabbitai review once the fixes land.","created_at":"2026-09-01T11:20:00Z"}
+{"user":"maintainer","body":"@coderabbitai review","created_at":"2026-09-01T11:00:00Z"}
+{"user":"coderabbitai","body":"<!-- auto-reply --> `@maintainer`: Starting a review of `#7`.","created_at":"2026-09-01T11:00:20Z"}
+{"user":"qltysh","body":"### Qlty summary: no new issues.","created_at":"2026-09-01T11:05:00Z"}

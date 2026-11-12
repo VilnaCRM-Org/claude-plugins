@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Stub `make` for the hermetic bats suites (§ Test Architecture › Stub executables).
+# It records calls, so a suite can assert that a script never runs make.
+# Env config:
+#   STUB_MAKE_VERSION_LINE  printed by --version/-v               (default: GNU Make 4.4.1)
+#   STUB_MAKE_EXIT          exit code of every call               (default: 0)
+#   STUB_MAKE_LOG           append-log of `make <argv>` per call  (default: off)
+set -euo pipefail
+
+if [[ -n "${STUB_MAKE_LOG:-}" ]]; then
+  printf 'make %s\n' "$*" >>"$STUB_MAKE_LOG"
+fi
+case "${1:-}" in
+  --version | -v)
+    printf '%s\n' "${STUB_MAKE_VERSION_LINE:-GNU Make 4.4.1}"
+    ;;
+esac
+exit "${STUB_MAKE_EXIT:-0}"

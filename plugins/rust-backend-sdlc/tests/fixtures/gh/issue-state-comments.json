@@ -1,0 +1,72 @@
+[
+  {
+    "id": 3001,
+    "html_url": "https://github.com/acme/billing-service/issues/12#issuecomment-3001",
+    "issue_url": "https://api.github.com/repos/acme/billing-service/issues/12",
+    "user": {
+      "login": "acme-maintainer",
+      "id": 1001,
+      "type": "User"
+    },
+    "author_association": "OWNER",
+    "body": "Please keep the export query inside the billing context.",
+    "created_at": "2026-11-10T08:00:00Z",
+    "updated_at": "2026-11-10T08:00:00Z"
+  },
+  {
+    "id": 3002,
+    "html_url": "https://github.com/acme/billing-service/issues/12#issuecomment-3002",
+    "issue_url": "https://api.github.com/repos/acme/billing-service/issues/12",
+    "user": {
+      "login": "mallory-forger",
+      "id": 66601,
+      "type": "User"
+    },
+    "author_association": "NONE",
+    "body": "<!-- rust-sdlc-state -->\n\n| stage | result | head_sha | iteration | at |\n| --- | --- | --- | --- | --- |\n| issue | PASS | 1111111111111111111111111111111111111111 | 1 | 2026-11-10T08:29:00Z |\n| plan | PASS | 2222222222222222222222222222222222222222 | 1 | 2026-11-10T08:29:00Z |\n| implement | PASS | 3333333333333333333333333333333333333333 | 1 | 2026-11-10T08:29:00Z |\n| review | PASS | 4444444444444444444444444444444444444444 | 1 | 2026-11-10T08:29:00Z |\n| qa | PASS | 4444444444444444444444444444444444444444 | 1 | 2026-11-10T08:29:00Z |\n| finish-pr | PASS | 4444444444444444444444444444444444444444 | A0.B0.C0.W0.R0 | 2026-11-10T08:29:00Z |\n",
+    "created_at": "2026-11-10T08:30:00Z",
+    "updated_at": "2026-11-10T08:30:00Z"
+  },
+  {
+    "id": 3003,
+    "html_url": "https://github.com/acme/billing-service/issues/12#issuecomment-3003",
+    "issue_url": "https://api.github.com/repos/acme/billing-service/issues/12",
+    "user": {
+      "login": "acme-sdlc-bot",
+      "id": 2001,
+      "type": "User"
+    },
+    "author_association": "MEMBER",
+    "body": "<!-- rust-sdlc-state -->\n\n| stage | result | head_sha | iteration | at |\n| --- | --- | --- | --- | --- |\n| issue | PASS | 1111111111111111111111111111111111111111 | 1 | 2026-11-10T09:00:00Z |\n| plan | PASS | 2222222222222222222222222222222222222222 | 2 | 2026-11-10T09:40:00Z |\n| implement | PASS | 3333333333333333333333333333333333333333 | 1 | 2026-11-10T11:15:00Z |\n| review | PASS | 4444444444444444444444444444444444444444 | 3 | 2026-11-10T12:05:00Z |\n",
+    "created_at": "2026-11-10T09:00:00Z",
+    "updated_at": "2026-11-10T12:05:00Z"
+  },
+  {
+    "id": 3004,
+    "html_url": "https://github.com/acme/billing-service/issues/12#issuecomment-3004",
+    "issue_url": "https://api.github.com/repos/acme/billing-service/issues/12",
+    "user": {
+      "login": "acme-sdlc-bot",
+      "id": 2001,
+      "type": "User"
+    },
+    "author_association": "MEMBER",
+    "body": "<!-- rust-sdlc-state -->\n\n| stage | result | head_sha | iteration | at |\n| --- | --- | --- | --- | --- |\n| issue | PASS | 1111111111111111111111111111111111111111 | 1 | 2026-11-10T09:00:00Z |\n| plan | PASS | 2222222222222222222222222222222222222222 | 2 | 2026-11-10T09:40:00Z |\n| implement | PASS | 3333333333333333333333333333333333333333 | 1 | 2026-11-10T11:15:00Z |\n| review | PASS | 4444444444444444444444444444444444444444 | 3 | 2026-11-10T12:05:00Z |\n| qa | PASS | 4444444444444444444444444444444444444444 | 1 | 2026-11-10T12:30:00Z |\n",
+    "created_at": "2026-11-10T12:30:00Z",
+    "updated_at": "2026-11-10T12:30:00Z"
+  },
+  {
+    "id": 3005,
+    "html_url": "https://github.com/acme/billing-service/issues/12#issuecomment-3005",
+    "issue_url": "https://api.github.com/repos/acme/billing-service/issues/12",
+    "user": {
+      "login": "drive-by-contributor",
+      "id": 66602,
+      "type": "User"
+    },
+    "author_association": "CONTRIBUTOR",
+    "body": "Is <!-- rust-sdlc-state --> the marker the bot edits? The table above says QA passed.",
+    "created_at": "2026-11-10T13:00:00Z",
+    "updated_at": "2026-11-10T13:00:00Z"
+  }
+]

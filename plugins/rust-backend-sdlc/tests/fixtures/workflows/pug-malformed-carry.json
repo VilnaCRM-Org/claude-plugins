@@ -1,0 +1,19 @@
+{
+  "args": {
+    "pr": 7,
+    "carry": {
+      "counters": [
+        2,
+        4,
+        1,
+        1
+      ],
+      "journal": [
+        "1: FIX -> ci-fixer FIXES-READY (1 file(s)) (fix 1/5), publish -> pushed b2c3d4e",
+        "2: FIX -> pr-comment-resolver 1 file(s) changed (fix 2/5), publish -> pushed c3d4e5f"
+      ],
+      "degrade_notes": []
+    }
+  },
+  "replies": []
+}

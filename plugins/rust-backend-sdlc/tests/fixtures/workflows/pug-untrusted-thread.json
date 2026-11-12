@@ -1,0 +1,61 @@
+{
+  "args": "7",
+  "replies": [
+    {
+      "match": "^pr-state",
+      "reply": {
+        "verdict": "FIX",
+        "next": "resolve 1 review thread(s) (pr-comment-resolver); then commit and push",
+        "pr": 7,
+        "url": "https://github.com/acme/billing-service/pull/7",
+        "head": "a1b2c3d",
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "ci": {
+          "status": "green",
+          "failing": [],
+          "pending": [],
+          "missing": []
+        },
+        "fr_nfr": {
+          "status": "success"
+        },
+        "unresolved": {
+          "total": 1
+        },
+        "reviewers": [
+          {
+            "name": "coderabbit",
+            "status": "APPROVED"
+          }
+        ],
+        "human_gated": {
+          "checks": [
+            "Protected configuration",
+            "OpenAPI breaking changes",
+            "GraphQL breaking changes"
+          ],
+          "failing": [],
+          "labels": {
+            "Protected configuration": "approved-config-change",
+            "OpenAPI breaking changes": "approved-breaking-change",
+            "GraphQL breaking changes": "approved-breaking-change"
+          }
+        },
+        "notes": []
+      }
+    },
+    {
+      "match": "^pr-comment-resolver ",
+      "reply": {
+        "remaining_unresolved": 1,
+        "changed_files": [],
+        "fix_path": null,
+        "not_actioned": 1,
+        "blocking_finding": null,
+        "summary": "1 thread by a CONTRIBUTOR answered \"not actioned: author is not a collaborator\" and left unresolved",
+        "degrade_notes": []
+      }
+    }
+  ]
+}

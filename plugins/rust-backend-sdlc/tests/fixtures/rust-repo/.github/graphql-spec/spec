@@ -1,0 +1,45 @@
+"Input of the create mutation."
+input CreateExampleApiResourceInput {
+  "Description."
+  description: String!
+  "Name."
+  name: String!
+}
+
+"Template example resource."
+type ExampleApiResource {
+  "Description."
+  description: String!
+  "Identifier."
+  id: ID!
+  "Name."
+  name: String!
+}
+
+"Mutation root."
+type Mutation {
+  "Creates an example API resource."
+  createExampleApiResource(input: CreateExampleApiResourceInput!): ExampleApiResource!
+}
+
+"Query root."
+type Query {
+  "Retrieves an example API resource by id."
+  exampleApiResource(id: ID!): ExampleApiResource
+  "Retrieves one page of example API resources, newest first."
+  exampleApiResources(
+    "Number of items per page, from 1 to 100."
+    itemsPerPage: Int! = 30,
+    "Page number, from 1."
+    page: Int! = 1
+  ): [ExampleApiResource!]!
+}
+
+"Directs the executor to include this field or fragment only when the `if` argument is true."
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"Directs the executor to skip this field or fragment when the `if` argument is true."
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+schema {
+  query: Query
+  mutation: Mutation
+}

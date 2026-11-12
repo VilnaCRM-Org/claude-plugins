@@ -1,0 +1,33 @@
+{
+  "args": "12-invoice-due-date --base origin/main",
+  "replies": [
+    {
+      "match": "^scope$",
+      "reply": {
+        "profile_valid": true,
+        "blocked": null,
+        "base": "3e0bd3e5f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0",
+        "files": [
+          "crates/billing/invoice/domain/src/invoice.rs",
+          "clippy.toml"
+        ],
+        "protected": [
+          "PROTECTED: clippy.toml (working tree)"
+        ],
+        "specs_dir": "specs/12-invoice-due-date/",
+        "pr": 34,
+        "execute_skills": [
+          "code-review",
+          "quality-standards"
+        ],
+        "not_applicable": [
+          {
+            "skill": "database-migrations",
+            "reason": "no migration changed"
+          }
+        ],
+        "degrade_notes": []
+      }
+    }
+  ]
+}
