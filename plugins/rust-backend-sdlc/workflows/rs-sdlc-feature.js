@@ -41,13 +41,16 @@ const clip = (text, n = 200) => {
 const sha7 = (head) => (typeof head === 'string' && HEAD_RE.test(head.trim()) ? head.trim().slice(0, 7) : 'unknown')
 const isList = (v) => Array.isArray(v) && v.every((e) => typeof e === 'string')
 
-if (Array.isArray(args)) badArgs.push('arguments must be a task string or an object')
-else if (args != null && typeof args === 'object') {
-  for (const k of Object.keys(args)) {
+function readArgObject(given) {
+  for (const k of Object.keys(given)) {
     if (!ARG_KEYS.includes(k)) log(`ignored unknown argument key ${clip(k, 40)}`)
-    else if (args[k] != null) OPTS[k] = args[k]
+    else if (given[k] != null) OPTS[k] = given[k]
   }
-} else if (args != null) OPTS.task = String(args)
+}
+
+if (Array.isArray(args)) badArgs.push('arguments must be a task string or an object')
+else if (args != null && typeof args === 'object') readArgObject(args)
+else if (args != null) OPTS.task = String(args)
 
 let task = null
 if (OPTS.task != null) {
@@ -536,28 +539,52 @@ function prPrompt(qaLine, targets) {
 async function publish(what, ph, changes) {
   const pub = await agent(publishPrompt(what, changes), { label: `publish ${what}`, phase: ph, schema: PUBLISH_SCHEMA })
   addNotes(pub?.degrade_notes)
-  if (pub && pub.pushed === true) {
-    // Fail closed: every listed change is either committed or reported as
-    // skipped (none of its paths changed); a silent drop is never a pass.
-    const commits = isList(pub.commits) ? pub.commits.map((s) => s.trim()) : []
-    const skipped = isList(pub.skipped) ? pub.skipped.map((s) => s.trim()) : []
-    const lost = changes.map((c) => withIssue(c.subject)).filter((s) => !commits.includes(s) && !skipped.includes(s))
-    if (lost.length) {
-      record(`publish ${what} (${changes.length} change(s))`, `pushed ${sha7(pub.head)} without ${lost.length} listed change(s)`)
-      return { finding: `publish ${what} reported a push without committing or skipping: ${lost.map((s) => `'${clip(s, 120)}'`).join(', ')}`, action: 'inspect git status and git log of the branch, commit the missing change by hand through the git rules, then re-run' }
-    }
-    record(`publish ${what} (${changes.length} change(s))`, `${commits.length} commit(s), pushed ${sha7(pub.head)}${skipped.length ? `; skipped ${skipped.length}` : ''}`)
-    return null
-  }
+  if (pub && pub.pushed === true) return publishLanded(what, changes, pub)
   record(`publish ${what}`, pub ? `failed: ${clip(pub.reason || 'no reason given', 160)}` : 'returned nothing')
-  if (!pub) return { finding: 'the publish agent returned nothing', action: 'commit and push the working-tree changes by hand through the git rules, then re-run' }
-  if (pub.protected) return { finding: `protected file ${clip(pub.protected, 200)} changed (D23)`, action: PROTECTED_ACTION }
-  if (pub.profile_changed === true) return { finding: 'PROFILE_CHANGED: .claude/rust-sdlc.yml', action: 'move the profile change to its own pull request from the default branch (/rs-sdlc-setup --refresh), then re-run' }
+  return publishRefused(what, pub)
+}
+
+// Fail closed: every listed change is either committed or reported as skipped
+// (none of its paths changed); a silent drop is never a pass.
+function publishLanded(what, changes, pub) {
+  const commits = isList(pub.commits) ? pub.commits.map((s) => s.trim()) : []
+  const skipped = isList(pub.skipped) ? pub.skipped.map((s) => s.trim()) : []
+  const lost = changes.map((c) => withIssue(c.subject)).filter((s) => !commits.includes(s) && !skipped.includes(s))
+  if (lost.length) {
+    record(`publish ${what} (${changes.length} change(s))`, `pushed ${sha7(pub.head)} without ${lost.length} listed change(s)`)
+    return { finding: `publish ${what} reported a push without committing or skipping: ${lost.map((s) => `'${clip(s, 120)}'`).join(', ')}`, action: 'inspect git status and git log of the branch, commit the missing change by hand through the git rules, then re-run' }
+  }
+  record(`publish ${what} (${changes.length} change(s))`, `${commits.length} commit(s), pushed ${sha7(pub.head)}${skipped.length ? `; skipped ${skipped.length}` : ''}`)
+  return null
+}
+
+// The refusals of a publish call that did not push, first match wins; any
+// other refusal is a failing step (a hook or a rejected push).
+const PUBLISH_REFUSALS = [
+  { when: (pub) => !pub, finding: () => 'the publish agent returned nothing', action: 'commit and push the working-tree changes by hand through the git rules, then re-run' },
+  { when: (pub) => Boolean(pub.protected), finding: (pub) => `protected file ${clip(pub.protected, 200)} changed (D23)`, action: PROTECTED_ACTION },
+  { when: (pub) => pub.profile_changed === true, finding: () => 'PROFILE_CHANGED: .claude/rust-sdlc.yml', action: 'move the profile change to its own pull request from the default branch (/rs-sdlc-setup --refresh), then re-run' },
+]
+
+function publishRefused(what, pub) {
+  const refusal = PUBLISH_REFUSALS.find((r) => r.when(pub))
+  if (refusal) return { finding: refusal.finding(pub), action: refusal.action }
   return {
     finding: `publish ${what} failed — ${clip(pub.reason || 'no reason given', 300)}${pub.log_tail ? ` (log tail: ${clip(pub.log_tail, 300)})` : ''}`,
     action: 'fix the hook failure the log shows, or integrate the remote branch by hand, then re-run; a failing hook is never bypassed and a rejected push is never retried under another spelling',
   }
 }
+
+// Publish inside a stage: a failed publish escalates that stage, at = {stage,
+// ph, it} (it: the iteration text of the escalation). Returns the escalation
+// or null.
+async function publishOrEscalate(at, what, changes) {
+  const failed = await publish(what, at.ph, changes)
+  return failed ? escalate(at.stage, at.ph, at.it, failed.finding, failed.action) : null
+}
+
+// The single change that publishes the fixes of a nested review run.
+const gateFixes = (iteration) => [{ subject: `fix(#<N>): address review gate iteration ${iteration} findings`, files: [], rest: true }]
 
 // ---------------------------------------------------------------------------
 // Implementation rounds. A round dispatches the pending stories layer-first:
@@ -596,60 +623,361 @@ function track(id, reply, round) {
 
 const subjectOf = (s) => (s.qa ? `fix(#<N>): address QA findings ${s.n}` : `${run.type}(#<N>): story ${s.id} ${subjectTitle(s.title)}`)
 
+const implementBlocked = (round, what, recommendation) =>
+  escalate('implement', 'Implement', `${round}/${CAP.implement}`, `rust-implementer BLOCKED on ${what} — ${clip(recommendation || 'no recommendation', 400)}`, BLOCKED_ACTION)
+
+function roundCapSpent(pending) {
+  record(`implement round ${counters.implement + 1}`, 'not started: the round cap is spent')
+  return escalate('implement', 'Implement', `${CAP.implement}/${CAP.implement}`, `stories still open: ${pending.map((s) => s.id).join(', ')}`, 'inspect the open stories and their RALPH_STATUS recommendations in the iteration log (the working tree still holds the uncommitted work), finish them by hand or through /rs-sdlc-implement, then re-run')
+}
+
+// One round of rust-implementer agents over the next batch. Returns the round
+// {round, mode, batch, replies, ran}; a reply that is no object counts as none.
+async function dispatchRound(pending) {
+  counters.implement += 1
+  const round = counters.implement
+  phase('Implement')
+  const batch = nextBatch(pending)
+  const mode = batch.length > 1 ? 'parallel' : 'serial'
+  const results = await parallel(
+    batch.map((s) => () => agent(storyPrompt(s, round, mode, batch.length), { label: `story ${s.id}`, phase: 'Implement', agentType: IMPLEMENTER, schema: STORY_SCHEMA })),
+  )
+  const replies = batch.map((s, i) => ({ s, r: results[i] && typeof results[i] === 'object' ? results[i] : null }))
+  for (const { s, r } of replies) track(s.id, r, round)
+  const ran = `implement round ${round}/${CAP.implement} (${mode}: ${batch.map((s) => `story ${s.id}`).join(', ')})`
+  return { round, mode, batch, replies, ran }
+}
+
+// A serial story is complete with STATUS: COMPLETE and EXIT_SIGNAL true.
+const serialEnd = ({ replies }) => ({ completed: replies.filter(({ r }) => r && r.status === 'COMPLETE' && r.exit_signal === true), verifyText: '' })
+
+// A parallel round ends with the serialized verify step: the written stories
+// count only when it completes. Returns {halt} on BLOCKED, else {completed,
+// verifyText}.
+async function verifyEnd({ round, batch, replies, ran }) {
+  const written = replies.filter(({ r }) => r && r.status === 'COMPLETE')
+  const v = await agent(verifyPrompt(round, batch), { label: `verify ${round}`, phase: 'Implement', agentType: IMPLEMENTER, schema: STORY_SCHEMA })
+  track(`verify ${round}`, v, round)
+  if (v && v.status === 'BLOCKED') {
+    record(`${ran}, verify ${round}`, 'verify BLOCKED')
+    return { halt: implementBlocked(round, `the serialized verify step of round ${round}`, v.recommendation) }
+  }
+  const verified = Boolean(v && v.status === 'COMPLETE' && v.exit_signal === true)
+  const verifyText = `, verify ${v ? `${v.status}${v.exit_signal === true ? '' : ' (EXIT_SIGNAL false)'}` : 'returned nothing'}`
+  if (!verified) log(`implement round ${round}: the serialized verify step did not complete; the round's stories stay open`)
+  return { completed: verified ? written : [], verifyText }
+}
+
+const openState = (r, mode) => (r ? `${r.status}${r.status === 'COMPLETE' && r.exit_signal !== true && mode === 'serial' ? ' without EXIT_SIGNAL' : ''}` : 'no reply')
+
+function closeRound({ round, mode, batch, replies, ran }, { completed, verifyText }, doneNow) {
+  for (const { s } of completed) {
+    s.done = true
+    doneNow.push(s)
+  }
+  const open = replies.filter(({ s }) => !s.done).map(({ s, r }) => `${s.id} ${openState(r, mode)}`)
+  record(`${ran}${mode === 'parallel' ? `, verify ${round}` : ''}`, `${completed.length}/${batch.length} complete${verifyText}${open.length ? `; open: ${open.join(', ')}` : ''}`)
+}
+
+// Returns the escalation that stops the run, else null (doneNow collects the
+// stories this round completed).
+async function implementRound(pending, doneNow) {
+  if (counters.implement >= CAP.implement) return roundCapSpent(pending)
+  const rd = await dispatchRound(pending)
+  const blocked = rd.replies.find(({ r }) => r && r.status === 'BLOCKED')
+  if (blocked) {
+    record(rd.ran, `story ${blocked.s.id} BLOCKED`)
+    return implementBlocked(rd.round, `story ${blocked.s.id}`, blocked.r.recommendation)
+  }
+  const end = rd.mode === 'serial' ? serialEnd(rd) : await verifyEnd(rd)
+  if (end.halt) return end.halt
+  closeRound(rd, end, doneNow)
+  return null
+}
+
+// The publish step commits every story completed by this call, in fix-plan
+// order; the last change also takes every other changed path.
+async function publishStories(doneNow, what) {
+  if (!doneNow.length) return null
+  const ordered = [...doneNow].sort((a, b) => a.order - b.order)
+  const changes = ordered.map((s, i) => ({ subject: subjectOf(s), files: [...(storyFiles.get(s.id) || [])], rest: i === ordered.length - 1 }))
+  return publishOrEscalate({ stage: 'implement', ph: 'Implement', it: `${counters.implement}/${CAP.implement}` }, what, changes)
+}
+
 async function implement(list, what) {
   const doneNow = []
   for (let guard = 0; guard <= CAP.implement; guard++) {
     const pending = list.filter((s) => !s.done)
     if (!pending.length) break
-    if (counters.implement >= CAP.implement) {
-      record(`implement round ${counters.implement + 1}`, 'not started: the round cap is spent')
-      return escalate('implement', 'Implement', `${CAP.implement}/${CAP.implement}`, `stories still open: ${pending.map((s) => s.id).join(', ')}`, 'inspect the open stories and their RALPH_STATUS recommendations in the iteration log (the working tree still holds the uncommitted work), finish them by hand or through /rs-sdlc-implement, then re-run')
-    }
-    counters.implement += 1
-    const round = counters.implement
-    phase('Implement')
-    const batch = nextBatch(pending)
-    const mode = batch.length > 1 ? 'parallel' : 'serial'
-    const results = await parallel(
-      batch.map((s) => () => agent(storyPrompt(s, round, mode, batch.length), { label: `story ${s.id}`, phase: 'Implement', agentType: IMPLEMENTER, schema: STORY_SCHEMA })),
-    )
-    const replies = batch.map((s, i) => ({ s, r: results[i] && typeof results[i] === 'object' ? results[i] : null }))
-    for (const { s, r } of replies) track(s.id, r, round)
-    const ran = `implement round ${round}/${CAP.implement} (${mode}: ${batch.map((s) => `story ${s.id}`).join(', ')})`
-    const blocked = replies.find(({ r }) => r && r.status === 'BLOCKED')
-    if (blocked) {
-      record(ran, `story ${blocked.s.id} BLOCKED`)
-      return escalate('implement', 'Implement', `${round}/${CAP.implement}`, `rust-implementer BLOCKED on story ${blocked.s.id} — ${clip(blocked.r.recommendation || 'no recommendation', 400)}`, BLOCKED_ACTION)
-    }
-    let completed
-    let verifyText = ''
-    if (mode === 'serial') completed = replies.filter(({ r }) => r && r.status === 'COMPLETE' && r.exit_signal === true)
-    else {
-      const written = replies.filter(({ r }) => r && r.status === 'COMPLETE')
-      const v = await agent(verifyPrompt(round, batch), { label: `verify ${round}`, phase: 'Implement', agentType: IMPLEMENTER, schema: STORY_SCHEMA })
-      track(`verify ${round}`, v, round)
-      if (v && v.status === 'BLOCKED') {
-        record(`${ran}, verify ${round}`, 'verify BLOCKED')
-        return escalate('implement', 'Implement', `${round}/${CAP.implement}`, `rust-implementer BLOCKED on the serialized verify step of round ${round} — ${clip(v.recommendation || 'no recommendation', 400)}`, BLOCKED_ACTION)
-      }
-      const verified = Boolean(v && v.status === 'COMPLETE' && v.exit_signal === true)
-      completed = verified ? written : []
-      verifyText = `, verify ${v ? `${v.status}${v.exit_signal === true ? '' : ' (EXIT_SIGNAL false)'}` : 'returned nothing'}`
-      if (!verified) log(`implement round ${round}: the serialized verify step did not complete; the round's stories stay open`)
-    }
-    for (const { s } of completed) {
-      s.done = true
-      doneNow.push(s)
-    }
-    const open = replies.filter(({ s }) => !s.done).map(({ s, r }) => `${s.id} ${r ? `${r.status}${r.status === 'COMPLETE' && r.exit_signal !== true && mode === 'serial' ? ' without EXIT_SIGNAL' : ''}` : 'no reply'}`)
-    record(`${ran}${mode === 'parallel' ? `, verify ${round}` : ''}`, `${completed.length}/${batch.length} complete${verifyText}${open.length ? `; open: ${open.join(', ')}` : ''}`)
+    const halt = await implementRound(pending, doneNow)
+    if (halt) return halt
   }
-  if (!doneNow.length) return null
-  const ordered = [...doneNow].sort((a, b) => a.order - b.order)
-  const changes = ordered.map((s, i) => ({ subject: subjectOf(s), files: [...(storyFiles.get(s.id) || [])], rest: i === ordered.length - 1 }))
-  const failed = await publish(what, 'Implement', changes)
-  if (failed) return escalate('implement', 'Implement', `${counters.implement}/${CAP.implement}`, failed.finding, failed.action)
+  return publishStories(doneNow, what)
+}
+
+// ---------------------------------------------------------------------------
+// Nested workflows, one level deep. Every nested call shares its failure
+// handling: a throw is D21 (the runtime refused the nesting), a reply that is
+// no object is a contract break, an ESCALATED reply carries its block upward
+// and any result other than SUCCESS or SUCCESS-WITH-REPORT means the
+// workflows disagree. A call site describes its call as nest:
+//   name, args     the nested workflow and its arguments
+//   called, ran    the journal subject before a reply exists, and after it
+//   stage, ph, it  where an escalation lands; it(reply) is its iteration text
+//   innerIt        the iteration line of an ESCALATED reply wins over it()
+//   who, suffix    the reply in a finding: "<who> returned no result<suffix>"
+//   escalated      the finding prefix of an ESCALATED reply
+//   act            the recommended actions {unavailable, noResult, escalated}
+// Returns {halt} or {reply, it}.
+async function callNested(nest) {
+  let reply
+  try {
+    reply = await workflow(nest.name, nest.args)
+  } catch (e) {
+    const msg = clip(e && e.message ? e.message : e, 300)
+    record(nest.called, `nested workflow unavailable: ${msg}`)
+    return { halt: escalate(nest.stage, nest.ph, nest.it(), `nested workflow ${nest.name} unavailable: ${msg} (D21)`, nest.act.unavailable) }
+  }
+  const it = nest.it(reply)
+  if (!reply || typeof reply !== 'object') {
+    record(nest.called, 'no result')
+    return { halt: escalate(nest.stage, nest.ph, it, `${nest.who} returned no result${nest.suffix}`, nest.act.noResult) }
+  }
+  return { reply, it }
+}
+
+// The result checks of a nested reply. Returns the escalation, or null when
+// the result is SUCCESS or SUCCESS-WITH-REPORT.
+function nestedVerdict(nest, reply, it, escalatedNote = 'ESCALATED') {
+  const inner = (key) => innerLine(reply.escalation, key)
+  if (reply.result === 'ESCALATED') {
+    record(nest.ran, escalatedNote)
+    return escalate(nest.stage, nest.ph, (nest.innerIt && inner('iteration')) || it, `${nest.escalated}${inner('blocking_finding') || 'see the nested escalation block'}`, inner('recommended_action') || nest.act.escalated)
+  }
+  if (reply.result !== 'SUCCESS' && reply.result !== 'SUCCESS-WITH-REPORT') {
+    record(nest.ran, `unknown result ${clip(reply.result, 40)}`)
+    return escalate(nest.stage, nest.ph, it, `${nest.who} returned the unknown result "${clip(reply.result, 40)}"${nest.suffix}`, 'upgrade the plugin; the workflows disagree')
+  }
   return null
+}
+
+const GATE_RESOLVE = 'resolve the blocking finding of the FR/NFR review, then re-run; the FR/NFR gate is mandatory and cannot be skipped'
+const gateCount = () => `${counters.gate}/${CAP.gate} (fr_nfr_gate)`
+const reviewIt = (reply) => `${Number.isInteger(reply?.iterations) ? reply.iterations : 0}/5`
+const fixedCount = (reply) => (Array.isArray(reply.fixed) ? reply.fixed.length : 0)
+
+// ---------------------------------------------------------------------------
+// Stages 4-5: the two reviews of a QA pass, in this order, each publishing
+// its fixes; S is the bundle directory.
+const QA_REVIEWS = [
+  {
+    name: 'rust-backend-sdlc:rs-sdlc-review-panel',
+    ph: 'Review',
+    who: 'review panel',
+    escalated: 'review panel escalated — ',
+    publishAs: 'review',
+    act: (S) => ({ unavailable: `run /rs-sdlc-review ${S} by hand, then /rs-sdlc-qa ${S} and /rs-sdlc-finish-pr; rs-sdlc-feature runs only at the top level, where it nests one level`, noResult: `run /rs-sdlc-review ${S} by hand, then re-run`, escalated: `run /rs-sdlc-review ${S} by hand, then re-run` }),
+    recorded: () => '',
+    detail: (r, fixed) => `review panel ${r.result}, ${fixed} finding(s) fixed`,
+  },
+  {
+    name: 'rust-backend-sdlc:rs-sdlc-fr-nfr-review',
+    ph: 'FR/NFR gate',
+    who: 'FR/NFR review',
+    escalated: 'FR/NFR gate escalated — ',
+    publishAs: 'fr-nfr',
+    act: (S) => ({ unavailable: `run /rs-sdlc-review ${S} by hand (its fr-nfr-reviewer runs the gate), then /rs-sdlc-qa ${S} and /rs-sdlc-finish-pr`, noResult: `run /rs-sdlc-review ${S} by hand, then re-run; the FR/NFR gate is mandatory`, escalated: GATE_RESOLVE }),
+    recorded: (r) => (r.advisory === true ? ', advisory (no pull request yet)' : ''),
+    detail: (r, fixed) => `FR/NFR review ${r.result}, new_findings ${r.new_findings ?? 'unknown'}, ${fixed} fixed${r.advisory === true ? ', advisory before the pull request exists' : ''}`,
+  },
+]
+
+// One review of QA pass `pass`. Returns the escalation, or null.
+async function qaReview(kind, pass) {
+  phase(kind.ph)
+  const called = kind.name.split(':')[1]
+  const nest = { name: kind.name, args: { slug: run.slug }, called, ran: `${called} (pass ${pass})`, stage: 'review', ph: kind.ph, it: reviewIt, innerIt: true, who: `the nested ${kind.who}`, suffix: '', escalated: kind.escalated, act: kind.act(run.specsDir) }
+  const call = await callNested(nest)
+  if (call.halt) return call.halt
+  const { reply, it } = call
+  addNotes(reply.degrade_notes, `${kind.who}: `)
+  const verdict = nestedVerdict(nest, reply, it)
+  if (verdict) return verdict
+  const fixed = fixedCount(reply)
+  record(nest.ran, `${reply.result}, iterations ${it}, ${fixed} fixed${kind.recorded(reply)}`)
+  const halt = fixed ? await publishOrEscalate({ stage: 'review', ph: kind.ph, it }, `${kind.publishAs} ${pass}`, gateFixes(Number.isInteger(reply.iterations) ? reply.iterations : 1)) : null
+  if (!halt) row('review', kind.ph, it, reply.result === 'SUCCESS' ? 'yes' : 'yes (degraded)', kind.detail(reply, fixed))
+  return halt
+}
+
+// QA reports SKIPPED only for a profile whose make.start is null (D1); the
+// skip is checked against the profile before it is accepted.
+async function qaSkipped(pass, qaIt) {
+  const check = await agent(skipCheckPrompt(), { label: 'qa-skip-check', phase: 'QA', effort: 'low', schema: { type: 'object', required: ['start_null'], properties: { start_null: { type: 'boolean' } } } })
+  if (!check || check.start_null !== true) {
+    record(`qa boot (pass ${pass})`, `SKIPPED, but make.start is ${check ? 'mapped' : 'unverified'}`)
+    return { halt: escalate('qa', 'QA', qaIt, 'the QA boot agent returned SKIPPED although the profile maps make.start (or the check returned nothing)', `run /rs-sdlc-qa ${run.specsDir} by hand; a bootable service is QA-verified, never skipped`) }
+  }
+  addNote('make.start absent: black-box QA not run (the stack is down)')
+  record(`qa boot (pass ${pass})`, 'SKIPPED: make.start is null (verified against the profile)')
+  row('qa', 'QA', qaIt, 'yes (degraded)', 'SKIP: qa (make.start absent); no verdict exists, so none is reported as a pass')
+  return { line: 'not run (make.start absent)' }
+}
+
+const failRows = (qa) => (Array.isArray(qa.fail_rows) ? qa.fail_rows.filter((r) => r && typeof r.check === 'string' && typeof r.expected === 'string' && typeof r.observed === 'string') : [])
+
+// A QA FAIL: the workflow owns its implementers, so the FAIL rows go to one
+// implementer round directly, never through a restage of the bundle.
+async function qaFail(pass, boot, qa, qaIt) {
+  const rows = failRows(qa)
+  record(`qa-manual-tester (pass ${pass})`, `FAIL on ${sha7(boot.head)}, ${rows.length} FAIL row(s)`)
+  if (!rows.length) {
+    return { halt: escalate('qa', 'QA', qaIt, 'qa-manual-tester reported FAIL without a FAIL row (check, expected, observed)', `run /rs-sdlc-qa ${run.specsDir} by hand and read its evidence table, then re-run`) }
+  }
+  if (counters.qa_loops >= CAP.qa) {
+    return { halt: escalate('qa', 'QA', `${CAP.qa}/${CAP.qa} (qa_loops)`, `QA still failing on ${sha7(boot.head)}: ${rows.slice(0, 3).map((r) => `${clip(r.check, 80)} (expected ${clip(r.expected, 80)}, observed ${clip(r.observed, 80)})`).join('; ')}`, 'fix the failures by hand (the reproduction lines are in the qa-manual-tester report), then re-run') }
+  }
+  counters.qa_loops += 1
+  row('qa', 'QA', `${counters.qa_loops}/${CAP.qa} (qa_loops)`, 'no', `## Verdict: FAIL on ${sha7(boot.head)}; ${rows.length} FAIL row(s) handed to one rust-implementer round (no restage)`)
+  const fix = { id: `QA-${counters.qa_loops}`, n: counters.qa_loops, title: `fix QA findings ${counters.qa_loops}`, qa: rows, head: sha7(boot.head), done: false, layer: 'other', independent: false, order: stories.length + counters.qa_loops }
+  const failed = await implement([fix], `qa-fix ${counters.qa_loops}`)
+  if (!failed) row('implement', 'Implement', `${counters.implement}/${CAP.implement}`, 'yes (degraded)', `QA fix ${fix.n} done through one rust-implementer round and committed; ${NO_BMALPH_RUN}`)
+  return { halt: failed }
+}
+
+async function qaTest(pass, boot, qaIt) {
+  const qa = await agent(qaPrompt(pass, boot), { label: 'qa-manual-tester', phase: 'QA', agentType: QA_TESTER, schema: QA_SCHEMA })
+  if (!qa) {
+    record(`qa-manual-tester (pass ${pass})`, 'no result')
+    return { halt: escalate('qa', 'QA', qaIt, 'qa-manual-tester returned nothing', `run /rs-sdlc-qa ${run.specsDir} by hand, then re-run`) }
+  }
+  addNotes(qa.degrade_notes)
+  if (qa.verdict !== 'PASS') return qaFail(pass, boot, qa, qaIt)
+  record(`qa-manual-tester (pass ${pass})`, `PASS on ${sha7(boot.head)}`)
+  row('qa', 'QA', qaIt, 'yes', `## Verdict: PASS on ${sha7(boot.head)}`)
+  return { line: `PASS on ${sha7(boot.head)}` }
+}
+
+// Black-box QA of pass `pass`: boot (make start, make migrate), then
+// qa-manual-tester. Returns {halt}, {line} (the verdict line) or {halt: null}
+// after a QA fix round.
+async function qaStep(pass) {
+  phase('QA')
+  const boot = await agent(bootPrompt(pass), { label: 'qa-boot', phase: 'QA', schema: BOOT_SCHEMA })
+  const qaIt = `${counters.qa_loops}/${CAP.qa} (qa_loops)`
+  if (!boot) {
+    record(`qa boot (pass ${pass})`, 'no result')
+    return { halt: escalate('qa', 'QA', qaIt, 'the QA boot agent returned nothing', `run /rs-sdlc-qa ${run.specsDir} by hand, then re-run`) }
+  }
+  addNotes(boot.degrade_notes)
+  qaTargets = isList(boot.targets) ? boot.targets.map((t) => clip(t, 120)) : []
+  if (boot.status === 'SKIPPED') return qaSkipped(pass, qaIt)
+  if (boot.status === 'UP') return qaTest(pass, boot, qaIt)
+  record(`qa boot (pass ${pass})`, `BLOCKED: ${clip(boot.blocked || 'no reason given', 160)}`)
+  return { halt: escalate('qa', 'QA', qaIt, clip(boot.blocked || 'the QA boot agent reported BLOCKED without a reason', 400), 'start the container engine and check make doctor (D2, D25), or fix the boot or migration failure in the code, then re-run') }
+}
+
+// One pass of stages 4-5: the two reviews, then black-box QA.
+async function qaPass(pass) {
+  for (const kind of QA_REVIEWS) {
+    const halt = await qaReview(kind, pass)
+    if (halt) return { halt }
+  }
+  return qaStep(pass)
+}
+
+// ---------------------------------------------------------------------------
+// Stage 6: one entry of pr-until-green under onGate return, and the GATE
+// hand-back the feature answers itself (ADR-18): one nesting level, counters
+// carried, never reset.
+const finishByHand = () => `run /rs-sdlc-finish-pr --pr ${run.pr} by hand`
+const handBackMalformed = (finish, c, head) => !HEAD_RE.test(head) || !c || (finish.pr != null && finish.pr !== run.pr) || !isList(finish.journal) || !isList(finish.degrade_notes)
+
+function handBackRefused(entry, finish, c, head) {
+  const subject = `rs-sdlc-pr-until-green (entry ${entry})`
+  if (counters.gate >= CAP.gate) {
+    record(subject, `GATE on ${sha7(head)}; feature gate budget spent`)
+    return escalate('finish-pr', 'FR/NFR gate', `${CAP.gate}/${CAP.gate} (fr_nfr_gate)`, `the BMAD FR/NFR Review Gate is still not green on head ${sha7(head)} after ${CAP.gate} hand-back rounds`, 'read the last fr-nfr-reviewer matrix and the gate comment on the pull request, fix the unmet requirement by hand (or correct it through /rs-sdlc-plan), then re-run /rs-sdlc-finish-pr')
+  }
+  if (!handBackMalformed(finish, c, head)) return null
+  record(subject, 'malformed GATE hand-back')
+  return escalate('finish-pr', 'FR/NFR gate', gateCount(), 'malformed GATE hand-back from pr-until-green (head, pr, counters, journal or degrade_notes missing or invalid)', 'upgrade the plugin; the workflows disagree')
+}
+
+// An advisory gate run posts no status: the hand-back cannot be answered.
+function handBackAdvisory(gate, head, ran) {
+  if (gate.advisory !== true) return null
+  record(ran, `${gate.result}, advisory run`)
+  return escalate('finish-pr', 'FR/NFR gate', gateCount(), `the FR/NFR gate ran advisory on head ${sha7(head)}: the local checkout is not the clean PR head, so no gate status was posted`, `check out the head branch of PR #${run.pr} at ${sha7(head)} with a clean tracked tree, then re-run /rs-sdlc-finish-pr --pr ${run.pr}`)
+}
+
+async function handBackFixes(gate, head, c, ran) {
+  const fixed = fixedCount(gate)
+  const summary = `${gate.result}, iterations ${Number.isInteger(gate.iterations) ? gate.iterations : '?'}, ${fixed} fixed`
+  record(ran, `${summary}${fixed ? '; publishing the fixes' : '; gate status on the head'}`)
+  const iteration = Number.isInteger(c.gate) && c.gate >= 1 ? c.gate : counters.gate
+  const halt = fixed ? await publishOrEscalate({ stage: 'finish-pr', ph: 'FR/NFR gate', it: gateCount() }, `gate ${counters.gate}/${CAP.gate}`, gateFixes(iteration)) : null
+  if (!halt) row('finish-pr', 'FR/NFR gate', gateCount(), 'no', `GATE hand-back on ${sha7(head)}: FR/NFR review ${summary}; re-entering pr-until-green with carry`)
+  return { halt, ran, summary, fixed }
+}
+
+// The FR/NFR review of a handed-back head. Returns {halt} or the published
+// result {ran, summary, fixed}.
+async function handBackGate(head, c) {
+  const ran = `rs-sdlc-fr-nfr-review --pr ${run.pr} --head ${sha7(head)} (gate ${counters.gate}/${CAP.gate})`
+  const act = {
+    unavailable: `run the gate by hand on the clean PR head: "$CLAUDE_PLUGIN_ROOT/scripts/fr-nfr-gate.sh" --pr ${run.pr} --iteration ${c.gate ?? counters.gate} (or /rs-sdlc-finish-pr --pr ${run.pr}, whose GATE action runs it)`,
+    noResult: `${finishByHand()}; the FR/NFR gate is mandatory`,
+    escalated: GATE_RESOLVE,
+  }
+  const nest = { name: 'rust-backend-sdlc:rs-sdlc-fr-nfr-review', args: { pr: run.pr, head }, called: ran, ran, stage: 'finish-pr', ph: 'FR/NFR gate', it: gateCount, innerIt: false, who: 'the FR/NFR review', suffix: ` on head ${sha7(head)}`, escalated: `FR/NFR gate escalated on head ${sha7(head)} — `, act }
+  const call = await callNested(nest)
+  if (call.halt) return call
+  addNotes(call.reply.degrade_notes, 'FR/NFR review: ')
+  const halt = nestedVerdict(nest, call.reply, call.it) || handBackAdvisory(call.reply, head, ran)
+  if (halt) return { halt }
+  return handBackFixes(call.reply, head, c, ran)
+}
+
+// Returns {done} to stop the run or {carry} to re-enter pr-until-green.
+async function gateHandBack({ entry, finish, c, counterText }) {
+  const head = typeof finish.head === 'string' ? finish.head.trim() : ''
+  const refused = handBackRefused(entry, finish, c, head)
+  if (refused) return { done: refused }
+  counters.gate += 1
+  record(`rs-sdlc-pr-until-green (entry ${entry})`, `GATE on ${sha7(head)} handed back (${counterText})`)
+  phase('FR/NFR gate')
+  const gated = await handBackGate(head, c)
+  if (gated.halt) return { done: gated.halt }
+  // carry resumes the counters, the journal and the degrade notes of the
+  // run that handed back; pr-until-green never resets a counter.
+  const journalCarry = [...finish.journal, `${finish.journal.length + 1}: GATE hand-back -> ${gated.ran} -> ${gated.summary}${gated.fixed ? ', fixes published' : ''}`]
+  return { carry: { counters: { ...c }, journal: journalCarry, degrade_notes: [...finish.degrade_notes] } }
+}
+
+function finishCounters(finish) {
+  const c = finish.counters && typeof finish.counters === 'object' && !Array.isArray(finish.counters) ? finish.counters : null
+  return { c, counterText: c ? `fix ${c.fix ?? '?'}, wait ${c.wait ?? '?'}, request ${c.request ?? '?'}, gate ${c.gate ?? '?'}` : 'counters unknown' }
+}
+
+// One entry of rs-sdlc-pr-until-green. Returns {done} with the return value of
+// the run, or {carry} to re-enter after a GATE hand-back.
+async function finishEntry(entry, carry) {
+  if (entry > 1) phase('Finish PR')
+  const called = `rs-sdlc-pr-until-green (entry ${entry})`
+  const byHand = finishByHand()
+  const nest = { name: 'rust-backend-sdlc:rs-sdlc-pr-until-green', args: { pr: run.pr, reviewers: reviewersList, onGate: 'return', carry }, called, ran: called, stage: 'finish-pr', ph: 'Finish PR', it: gateCount, innerIt: true, who: 'the nested pr-until-green', suffix: '', escalated: 'pr-until-green escalated — ', act: { unavailable: byHand, noResult: byHand, escalated: byHand } }
+  const call = await callNested(nest)
+  if (call.halt) return { done: call.halt }
+  const finish = call.reply
+  const { c, counterText } = finishCounters(finish)
+  if (finish.result === 'GATE') return gateHandBack({ entry, finish, c, counterText })
+  addNotes(finish.degrade_notes)
+  const halt = nestedVerdict(nest, finish, call.it, `ESCALATED (${counterText})`)
+  if (halt) return { done: halt }
+  record(called, `${finish.result} on ${sha7(finish.head)} (${counterText})`)
+  row('finish-pr', 'Finish PR', `${counterText}; feature gate ${counters.gate}/${CAP.gate}`, finish.result === 'SUCCESS' ? 'yes' : 'yes (degraded)', `PR_URL: ${run.prUrl || `#${run.pr}`}; READY confirmed on ${sha7(finish.head)}`)
+  return { done: report(degradeNotes.length ? 'SUCCESS-WITH-REPORT' : 'SUCCESS') }
 }
 
 // ---------------------------------------------------------------------------
@@ -711,8 +1039,8 @@ record('issue, branch and plan procedures', `issue #${N}, branch ${run.branch}, 
 row('issue', 'Resolve plan', '1/5', 'yes', `ISSUE_URL: ${run.issueUrl}`)
 row('branch', 'Resolve plan', '1/1', 'yes', `BRANCH: ${run.branch}`)
 if (plan.bundle_uncommitted === true) {
-  const failed = await publish('plan', 'Resolve plan', [{ subject: `docs(#<N>): add planning bundle ${slug}`, files: [run.specsDir], rest: false }])
-  if (failed) return escalate('plan', 'Resolve plan', '1/5', failed.finding, failed.action)
+  const halt = await publishOrEscalate({ stage: 'plan', ph: 'Resolve plan', it: '1/5' }, 'plan', [{ subject: `docs(#<N>): add planning bundle ${slug}`, files: [run.specsDir], rest: false }])
+  if (halt) return halt
 }
 row('plan', 'Resolve plan', '1/5', 'yes', `SPECS_DIR: ${run.specsDir}${plan.bundle_uncommitted ? ' (committed by the publish step)' : ' (already committed)'}`)
 
@@ -775,121 +1103,9 @@ row('implement', 'Implement', `${counters.implement}/${CAP.implement}`, 'yes (de
 let qaLine = null
 let qaTargets = []
 for (let pass = 1; pass <= CAP.qa + 1 && qaLine === null; pass++) {
-  phase('Review')
-  let review
-  try {
-    review = await workflow('rust-backend-sdlc:rs-sdlc-review-panel', { slug: run.slug })
-  } catch (e) {
-    const msg = clip(e && e.message ? e.message : e, 300)
-    record('rs-sdlc-review-panel', `nested workflow unavailable: ${msg}`)
-    return escalate('review', 'Review', '0/5', `nested workflow rust-backend-sdlc:rs-sdlc-review-panel unavailable: ${msg} (D21)`, `run /rs-sdlc-review ${run.specsDir} by hand, then /rs-sdlc-qa ${run.specsDir} and /rs-sdlc-finish-pr; rs-sdlc-feature runs only at the top level, where it nests one level`)
-  }
-  const reviewIt = `${Number.isInteger(review?.iterations) ? review.iterations : 0}/5`
-  if (!review || typeof review !== 'object') {
-    record('rs-sdlc-review-panel', 'no result')
-    return escalate('review', 'Review', reviewIt, 'the nested review panel returned no result', `run /rs-sdlc-review ${run.specsDir} by hand, then re-run`)
-  }
-  addNotes(review.degrade_notes, 'review panel: ')
-  if (review.result === 'ESCALATED') {
-    record(`rs-sdlc-review-panel (pass ${pass})`, 'ESCALATED')
-    return escalate('review', 'Review', innerLine(review.escalation, 'iteration') || reviewIt, `review panel escalated — ${innerLine(review.escalation, 'blocking_finding') || 'see the nested escalation block'}`, innerLine(review.escalation, 'recommended_action') || `run /rs-sdlc-review ${run.specsDir} by hand, then re-run`)
-  }
-  if (review.result !== 'SUCCESS' && review.result !== 'SUCCESS-WITH-REPORT') {
-    record(`rs-sdlc-review-panel (pass ${pass})`, `unknown result ${clip(review.result, 40)}`)
-    return escalate('review', 'Review', reviewIt, `the nested review panel returned the unknown result "${clip(review.result, 40)}"`, 'upgrade the plugin; the workflows disagree')
-  }
-  const reviewFixed = Array.isArray(review.fixed) ? review.fixed.length : 0
-  record(`rs-sdlc-review-panel (pass ${pass})`, `${review.result}, iterations ${reviewIt}, ${reviewFixed} fixed`)
-  if (reviewFixed) {
-    const failed = await publish(`review ${pass}`, 'Review', [{ subject: `fix(#<N>): address review gate iteration ${Number.isInteger(review.iterations) ? review.iterations : 1} findings`, files: [], rest: true }])
-    if (failed) return escalate('review', 'Review', reviewIt, failed.finding, failed.action)
-  }
-  row('review', 'Review', reviewIt, review.result === 'SUCCESS' ? 'yes' : 'yes (degraded)', `review panel ${review.result}, ${reviewFixed} finding(s) fixed`)
-
-  phase('FR/NFR gate')
-  let gate
-  try {
-    gate = await workflow('rust-backend-sdlc:rs-sdlc-fr-nfr-review', { slug: run.slug })
-  } catch (e) {
-    const msg = clip(e && e.message ? e.message : e, 300)
-    record('rs-sdlc-fr-nfr-review', `nested workflow unavailable: ${msg}`)
-    return escalate('review', 'FR/NFR gate', '0/5', `nested workflow rust-backend-sdlc:rs-sdlc-fr-nfr-review unavailable: ${msg} (D21)`, `run /rs-sdlc-review ${run.specsDir} by hand (its fr-nfr-reviewer runs the gate), then /rs-sdlc-qa ${run.specsDir} and /rs-sdlc-finish-pr`)
-  }
-  const gateIt = `${Number.isInteger(gate?.iterations) ? gate.iterations : 0}/5`
-  if (!gate || typeof gate !== 'object') {
-    record('rs-sdlc-fr-nfr-review', 'no result')
-    return escalate('review', 'FR/NFR gate', gateIt, 'the nested FR/NFR review returned no result', `run /rs-sdlc-review ${run.specsDir} by hand, then re-run; the FR/NFR gate is mandatory`)
-  }
-  addNotes(gate.degrade_notes, 'FR/NFR review: ')
-  if (gate.result === 'ESCALATED') {
-    record(`rs-sdlc-fr-nfr-review (pass ${pass})`, 'ESCALATED')
-    return escalate('review', 'FR/NFR gate', innerLine(gate.escalation, 'iteration') || gateIt, `FR/NFR gate escalated — ${innerLine(gate.escalation, 'blocking_finding') || 'see the nested escalation block'}`, innerLine(gate.escalation, 'recommended_action') || 'resolve the blocking finding of the FR/NFR review, then re-run; the FR/NFR gate is mandatory and cannot be skipped')
-  }
-  if (gate.result !== 'SUCCESS' && gate.result !== 'SUCCESS-WITH-REPORT') {
-    record(`rs-sdlc-fr-nfr-review (pass ${pass})`, `unknown result ${clip(gate.result, 40)}`)
-    return escalate('review', 'FR/NFR gate', gateIt, `the nested FR/NFR review returned the unknown result "${clip(gate.result, 40)}"`, 'upgrade the plugin; the workflows disagree')
-  }
-  const gateFixed = Array.isArray(gate.fixed) ? gate.fixed.length : 0
-  record(`rs-sdlc-fr-nfr-review (pass ${pass})`, `${gate.result}, iterations ${gateIt}, ${gateFixed} fixed${gate.advisory === true ? ', advisory (no pull request yet)' : ''}`)
-  if (gateFixed) {
-    const failed = await publish(`fr-nfr ${pass}`, 'FR/NFR gate', [{ subject: `fix(#<N>): address review gate iteration ${Number.isInteger(gate.iterations) ? gate.iterations : 1} findings`, files: [], rest: true }])
-    if (failed) return escalate('review', 'FR/NFR gate', gateIt, failed.finding, failed.action)
-  }
-  row('review', 'FR/NFR gate', gateIt, gate.result === 'SUCCESS' ? 'yes' : 'yes (degraded)', `FR/NFR review ${gate.result}, new_findings ${gate.new_findings ?? 'unknown'}, ${gateFixed} fixed${gate.advisory === true ? ', advisory before the pull request exists' : ''}`)
-
-  phase('QA')
-  const boot = await agent(bootPrompt(pass), { label: 'qa-boot', phase: 'QA', schema: BOOT_SCHEMA })
-  const qaIt = `${counters.qa_loops}/${CAP.qa} (qa_loops)`
-  if (!boot) {
-    record(`qa boot (pass ${pass})`, 'no result')
-    return escalate('qa', 'QA', qaIt, 'the QA boot agent returned nothing', `run /rs-sdlc-qa ${run.specsDir} by hand, then re-run`)
-  }
-  addNotes(boot.degrade_notes)
-  qaTargets = isList(boot.targets) ? boot.targets.map((t) => clip(t, 120)) : []
-  if (boot.status === 'SKIPPED') {
-    const check = await agent(skipCheckPrompt(), { label: 'qa-skip-check', phase: 'QA', effort: 'low', schema: { type: 'object', required: ['start_null'], properties: { start_null: { type: 'boolean' } } } })
-    if (!check || check.start_null !== true) {
-      record(`qa boot (pass ${pass})`, `SKIPPED, but make.start is ${check ? 'mapped' : 'unverified'}`)
-      return escalate('qa', 'QA', qaIt, 'the QA boot agent returned SKIPPED although the profile maps make.start (or the check returned nothing)', `run /rs-sdlc-qa ${run.specsDir} by hand; a bootable service is QA-verified, never skipped`)
-    }
-    addNote('make.start absent: black-box QA not run (the stack is down)')
-    record(`qa boot (pass ${pass})`, 'SKIPPED: make.start is null (verified against the profile)')
-    row('qa', 'QA', qaIt, 'yes (degraded)', 'SKIP: qa (make.start absent); no verdict exists, so none is reported as a pass')
-    qaLine = 'not run (make.start absent)'
-    break
-  }
-  if (boot.status !== 'UP') {
-    record(`qa boot (pass ${pass})`, `BLOCKED: ${clip(boot.blocked || 'no reason given', 160)}`)
-    return escalate('qa', 'QA', qaIt, clip(boot.blocked || 'the QA boot agent reported BLOCKED without a reason', 400), 'start the container engine and check make doctor (D2, D25), or fix the boot or migration failure in the code, then re-run')
-  }
-  const qa = await agent(qaPrompt(pass, boot), { label: 'qa-manual-tester', phase: 'QA', agentType: QA_TESTER, schema: QA_SCHEMA })
-  if (!qa) {
-    record(`qa-manual-tester (pass ${pass})`, 'no result')
-    return escalate('qa', 'QA', qaIt, 'qa-manual-tester returned nothing', `run /rs-sdlc-qa ${run.specsDir} by hand, then re-run`)
-  }
-  addNotes(qa.degrade_notes)
-  if (qa.verdict === 'PASS') {
-    record(`qa-manual-tester (pass ${pass})`, `PASS on ${sha7(boot.head)}`)
-    row('qa', 'QA', qaIt, 'yes', `## Verdict: PASS on ${sha7(boot.head)}`)
-    qaLine = `PASS on ${sha7(boot.head)}`
-    break
-  }
-  const rows = Array.isArray(qa.fail_rows) ? qa.fail_rows.filter((r) => r && typeof r.check === 'string' && typeof r.expected === 'string' && typeof r.observed === 'string') : []
-  record(`qa-manual-tester (pass ${pass})`, `FAIL on ${sha7(boot.head)}, ${rows.length} FAIL row(s)`)
-  if (!rows.length) {
-    return escalate('qa', 'QA', qaIt, 'qa-manual-tester reported FAIL without a FAIL row (check, expected, observed)', `run /rs-sdlc-qa ${run.specsDir} by hand and read its evidence table, then re-run`)
-  }
-  if (counters.qa_loops >= CAP.qa) {
-    return escalate('qa', 'QA', `${CAP.qa}/${CAP.qa} (qa_loops)`, `QA still failing on ${sha7(boot.head)}: ${rows.slice(0, 3).map((r) => `${clip(r.check, 80)} (expected ${clip(r.expected, 80)}, observed ${clip(r.observed, 80)})`).join('; ')}`, 'fix the failures by hand (the reproduction lines are in the qa-manual-tester report), then re-run')
-  }
-  counters.qa_loops += 1
-  row('qa', 'QA', `${counters.qa_loops}/${CAP.qa} (qa_loops)`, 'no', `## Verdict: FAIL on ${sha7(boot.head)}; ${rows.length} FAIL row(s) handed to one rust-implementer round (no restage)`)
-  // The workflow owns its implementers: the FAIL rows go to one implementer
-  // round directly, never through a restage of the bundle.
-  const fix = { id: `QA-${counters.qa_loops}`, n: counters.qa_loops, title: `fix QA findings ${counters.qa_loops}`, qa: rows, head: sha7(boot.head), done: false, layer: 'other', independent: false, order: stories.length + counters.qa_loops }
-  const failed = await implement([fix], `qa-fix ${counters.qa_loops}`)
-  if (failed) return failed
-  row('implement', 'Implement', `${counters.implement}/${CAP.implement}`, 'yes (degraded)', `QA fix ${fix.n} done through one rust-implementer round and committed; ${NO_BMALPH_RUN}`)
+  const step = await qaPass(pass)
+  if (step.halt) return step.halt
+  qaLine = step.line ?? null
 }
 if (qaLine === null) return escalate('qa', 'QA', `${counters.qa_loops}/${CAP.qa} (qa_loops)`, 'the QA loop ended without a verdict', `run /rs-sdlc-qa ${run.specsDir} by hand, then re-run`)
 
@@ -898,8 +1114,8 @@ if (qaLine === null) return escalate('qa', 'QA', `${counters.qa_loops}/${CAP.qa}
 // loop. Feature passes onGate 'return' and runs the FR/NFR review itself on
 // GATE (ADR-18): one nesting level, counters carried, never reset.
 phase('Finish PR')
-const pushed = await publish('finish-pr', 'Finish PR', [])
-if (pushed) return escalate('finish-pr', 'Finish PR', '0/5', pushed.finding, pushed.action)
+const pushed = await publishOrEscalate({ stage: 'finish-pr', ph: 'Finish PR', it: '0/5' }, 'finish-pr', [])
+if (pushed) return pushed
 const pr = await agent(prPrompt(qaLine, qaTargets), { label: 'pr create/update', phase: 'Finish PR', schema: PR_SCHEMA })
 if (!pr || pr.blocked || !Number.isInteger(pr.pr) || pr.pr < 1) {
   const finding = pr ? clip(pr.blocked || 'no pull-request number returned', 400) : 'the pull-request agent returned nothing'
@@ -912,89 +1128,9 @@ record('pull request create/update', `PR #${run.pr}${run.prUrl ? ` ${run.prUrl}`
 
 let carry = null
 for (let entry = 1; entry <= CAP.gate + 1; entry++) {
-  if (entry > 1) phase('Finish PR')
-  let finish
-  try {
-    finish = await workflow('rust-backend-sdlc:rs-sdlc-pr-until-green', { pr: run.pr, reviewers: reviewersList, onGate: 'return', carry })
-  } catch (e) {
-    const msg = clip(e && e.message ? e.message : e, 300)
-    record(`rs-sdlc-pr-until-green (entry ${entry})`, `nested workflow unavailable: ${msg}`)
-    return escalate('finish-pr', 'Finish PR', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, `nested workflow rust-backend-sdlc:rs-sdlc-pr-until-green unavailable: ${msg} (D21)`, `run /rs-sdlc-finish-pr --pr ${run.pr} by hand`)
-  }
-  if (!finish || typeof finish !== 'object') {
-    record(`rs-sdlc-pr-until-green (entry ${entry})`, 'no result')
-    return escalate('finish-pr', 'Finish PR', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, 'the nested pr-until-green returned no result', `run /rs-sdlc-finish-pr --pr ${run.pr} by hand`)
-  }
-  const c = finish.counters && typeof finish.counters === 'object' && !Array.isArray(finish.counters) ? finish.counters : null
-  const counterText = c ? `fix ${c.fix ?? '?'}, wait ${c.wait ?? '?'}, request ${c.request ?? '?'}, gate ${c.gate ?? '?'}` : 'counters unknown'
-
-  if (finish.result === 'GATE') {
-    const head = typeof finish.head === 'string' ? finish.head.trim() : ''
-    if (counters.gate >= CAP.gate) {
-      record(`rs-sdlc-pr-until-green (entry ${entry})`, `GATE on ${sha7(head)}; feature gate budget spent`)
-      return escalate('finish-pr', 'FR/NFR gate', `${CAP.gate}/${CAP.gate} (fr_nfr_gate)`, `the BMAD FR/NFR Review Gate is still not green on head ${sha7(head)} after ${CAP.gate} hand-back rounds`, 'read the last fr-nfr-reviewer matrix and the gate comment on the pull request, fix the unmet requirement by hand (or correct it through /rs-sdlc-plan), then re-run /rs-sdlc-finish-pr')
-    }
-    if (!HEAD_RE.test(head) || !c || (finish.pr != null && finish.pr !== run.pr) || !isList(finish.journal) || !isList(finish.degrade_notes)) {
-      record(`rs-sdlc-pr-until-green (entry ${entry})`, 'malformed GATE hand-back')
-      return escalate('finish-pr', 'FR/NFR gate', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, 'malformed GATE hand-back from pr-until-green (head, pr, counters, journal or degrade_notes missing or invalid)', 'upgrade the plugin; the workflows disagree')
-    }
-    counters.gate += 1
-    record(`rs-sdlc-pr-until-green (entry ${entry})`, `GATE on ${sha7(head)} handed back (${counterText})`)
-    phase('FR/NFR gate')
-    let gate
-    try {
-      gate = await workflow('rust-backend-sdlc:rs-sdlc-fr-nfr-review', { pr: run.pr, head })
-    } catch (e) {
-      const msg = clip(e && e.message ? e.message : e, 300)
-      record(`rs-sdlc-fr-nfr-review --pr ${run.pr} --head ${sha7(head)} (gate ${counters.gate}/${CAP.gate})`, `nested workflow unavailable: ${msg}`)
-      return escalate('finish-pr', 'FR/NFR gate', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, `nested workflow rust-backend-sdlc:rs-sdlc-fr-nfr-review unavailable: ${msg} (D21)`, `run the gate by hand on the clean PR head: "$CLAUDE_PLUGIN_ROOT/scripts/fr-nfr-gate.sh" --pr ${run.pr} --iteration ${c.gate ?? counters.gate} (or /rs-sdlc-finish-pr --pr ${run.pr}, whose GATE action runs it)`)
-    }
-    const ranGate = `rs-sdlc-fr-nfr-review --pr ${run.pr} --head ${sha7(head)} (gate ${counters.gate}/${CAP.gate})`
-    if (!gate || typeof gate !== 'object') {
-      record(ranGate, 'no result')
-      return escalate('finish-pr', 'FR/NFR gate', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, `the FR/NFR review returned no result on head ${sha7(head)}`, `run /rs-sdlc-finish-pr --pr ${run.pr} by hand; the FR/NFR gate is mandatory`)
-    }
-    addNotes(gate.degrade_notes, 'FR/NFR review: ')
-    if (gate.result === 'ESCALATED') {
-      record(ranGate, 'ESCALATED')
-      return escalate('finish-pr', 'FR/NFR gate', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, `FR/NFR gate escalated on head ${sha7(head)} — ${innerLine(gate.escalation, 'blocking_finding') || 'see the nested escalation block'}`, innerLine(gate.escalation, 'recommended_action') || 'resolve the blocking finding of the FR/NFR review, then re-run; the FR/NFR gate is mandatory and cannot be skipped')
-    }
-    if (gate.result !== 'SUCCESS' && gate.result !== 'SUCCESS-WITH-REPORT') {
-      record(ranGate, `unknown result ${clip(gate.result, 40)}`)
-      return escalate('finish-pr', 'FR/NFR gate', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, `the FR/NFR review returned the unknown result "${clip(gate.result, 40)}" on head ${sha7(head)}`, 'upgrade the plugin; the workflows disagree')
-    }
-    if (gate.advisory === true) {
-      record(ranGate, `${gate.result}, advisory run`)
-      return escalate('finish-pr', 'FR/NFR gate', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, `the FR/NFR gate ran advisory on head ${sha7(head)}: the local checkout is not the clean PR head, so no gate status was posted`, `check out the head branch of PR #${run.pr} at ${sha7(head)} with a clean tracked tree, then re-run /rs-sdlc-finish-pr --pr ${run.pr}`)
-    }
-    const fixed = Array.isArray(gate.fixed) ? gate.fixed.length : 0
-    const summary = `${gate.result}, iterations ${Number.isInteger(gate.iterations) ? gate.iterations : '?'}, ${fixed} fixed`
-    record(ranGate, `${summary}${fixed ? '; publishing the fixes' : '; gate status on the head'}`)
-    if (fixed) {
-      const iteration = Number.isInteger(c.gate) && c.gate >= 1 ? c.gate : counters.gate
-      const failed = await publish(`gate ${counters.gate}/${CAP.gate}`, 'FR/NFR gate', [{ subject: `fix(#<N>): address review gate iteration ${iteration} findings`, files: [], rest: true }])
-      if (failed) return escalate('finish-pr', 'FR/NFR gate', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, failed.finding, failed.action)
-    }
-    row('finish-pr', 'FR/NFR gate', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, 'no', `GATE hand-back on ${sha7(head)}: FR/NFR review ${summary}; re-entering pr-until-green with carry`)
-    // carry resumes the counters, the journal and the degrade notes of the
-    // run that handed back; pr-until-green never resets a counter.
-    const journalCarry = [...finish.journal, `${finish.journal.length + 1}: GATE hand-back -> ${ranGate} -> ${summary}${fixed ? ', fixes published' : ''}`]
-    carry = { counters: { ...c }, journal: journalCarry, degrade_notes: [...finish.degrade_notes] }
-    continue
-  }
-
-  addNotes(finish.degrade_notes)
-  if (finish.result === 'ESCALATED') {
-    record(`rs-sdlc-pr-until-green (entry ${entry})`, `ESCALATED (${counterText})`)
-    return escalate('finish-pr', 'Finish PR', innerLine(finish.escalation, 'iteration') || `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, `pr-until-green escalated — ${innerLine(finish.escalation, 'blocking_finding') || 'see the nested escalation block'}`, innerLine(finish.escalation, 'recommended_action') || `run /rs-sdlc-finish-pr --pr ${run.pr} by hand`)
-  }
-  if (finish.result !== 'SUCCESS' && finish.result !== 'SUCCESS-WITH-REPORT') {
-    record(`rs-sdlc-pr-until-green (entry ${entry})`, `unknown result ${clip(finish.result, 40)}`)
-    return escalate('finish-pr', 'Finish PR', `${counters.gate}/${CAP.gate} (fr_nfr_gate)`, `the nested pr-until-green returned the unknown result "${clip(finish.result, 40)}"`, 'upgrade the plugin; the workflows disagree')
-  }
-  record(`rs-sdlc-pr-until-green (entry ${entry})`, `${finish.result} on ${sha7(finish.head)} (${counterText})`)
-  row('finish-pr', 'Finish PR', `${counterText}; feature gate ${counters.gate}/${CAP.gate}`, finish.result === 'SUCCESS' ? 'yes' : 'yes (degraded)', `PR_URL: ${run.prUrl || `#${run.pr}`}; READY confirmed on ${sha7(finish.head)}`)
-  return report(degradeNotes.length ? 'SUCCESS-WITH-REPORT' : 'SUCCESS')
+  const step = await finishEntry(entry, carry)
+  if (step.done) return step.done
+  carry = step.carry
 }
 
 return escalate('finish-pr', 'Finish PR', `${CAP.gate}/${CAP.gate} (fr_nfr_gate)`, `pr-until-green kept handing back GATE beyond ${CAP.gate} rounds`, `run /rs-sdlc-finish-pr --pr ${run.pr} by hand`)
