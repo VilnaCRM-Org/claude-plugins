@@ -113,11 +113,11 @@ Apply the static patterns of [reference/attack-playbooks.md](reference/attack-pl
 Run this step only when the [Dynamic probing gate](#dynamic-probing-gate) is open. Every request uses this form and no other:
 
 ```text
-"<plugin-root>/scripts/lib/common.sh" http_probe <METHOD> <PATH> [--header 'K: V']... [--body TEXT | --body-file F]
+"<plugin-root>/scripts/lib/common.sh" http_probe <METHOD> '<PATH>' [--header 'K: V']... [--body TEXT | --body-file F]
 ```
 
 - The helper prints `HTTP_STATUS: <code>`, the response headers and at most 64 KiB of body. Exit 0 means any HTTP response, exit 2 a rejected argument: correct the argument once, and drop the probe when the helper cannot express it. Exit 1 is a transport failure: on the first probe it closes the lane (see the gate); after earlier probes were answered it means the service stopped answering, so record the probe sent just before as a `dos` candidate and end step 5.
-- `<PATH>` starts with `/` and holds only unreserved characters and `%`-escapes, so a quote is written `%27` and a space `%20`. `--body` holds at most 16 KiB; a larger body goes through `--body-file` with a file under `target/rust-sdlc/tmp/`.
+- `<PATH>` starts with `/` and matches `^/[A-Za-z0-9._~%/?&=:,+-]*$`, every other character percent-encoded (a quote is `%27`, a space `%20`), so a query string such as `?limit=1000` reaches its parameters; the path is quoted because it may hold `?` or `&`. `--body` holds at most 16 KiB; a larger body goes through `--body-file` with a file under `target/rust-sdlc/tmp/`.
 - Tag every probe with `--header 'x-request-id: sec-<rule>-<n>'` so its log lines can be found by request id.
 - Create the objects a probe needs through the API first, and probe only those objects.
 - Send the probes of [reference/attack-playbooks.md](reference/attack-playbooks.md) for each `PROBE` family that has an HTTP surface: `injection`, `bola-idor`, `mass-assignment`, `dos`, `information-disclosure`.

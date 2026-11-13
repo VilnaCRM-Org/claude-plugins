@@ -1149,7 +1149,14 @@ wf_same_as_child() {
     'order("resolve-plan", "publish plan", "stage") && subjects()[0] === "docs(#12): add planning bundle 12-invoice-due-date"' \
     'order("workflow:rust-backend-sdlc:rs-sdlc-review-panel", "publish review 1", "workflow:rust-backend-sdlc:rs-sdlc-fr-nfr-review") && subjects().some((s) => /^fix\(#12\): address review gate iteration [0-9]+ findings$/.test(s))' \
     'has(call("publish implement").prompt, "files: \"crates/billing/invoice/domain/src/invoice.rs\"", "git add -- \x27<path>\x27 … (a change", "re-stage the same paths with git add -- \x27<path>\x27", "written \x27\\\x27\x27, never unquoted and never in double quotes")' \
-    'note("advisory gate run: no pull request (D11)")'
+    'note("advisory gate run: no pull request (D11)")' \
+    'has(call("publish plan").prompt, "subject \"docs(#12): add planning bundle 12-invoice-due-date\"; files: \"specs/12-invoice-due-date/\"\n", "A path that ends in / names a directory")'
+  # The bundle the plan reported uncommitted is never skipped: a publish that commits nothing under it escalates at plan.
+  local skipped="$BATS_TEST_TMPDIR/feat-happy-plan-skipped.json"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); Object.assign(s.replies.find((r) => r.match === "^publish plan$").reply, {commits: [], skipped: ["docs(#12): add planning bundle 12-invoice-due-date"]}); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/feat-happy.json" "$skipped"
+  wf_scenario rs-sdlc-feature "$skipped"
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "plan" && labels[labels.length - 1] === "publish plan"' \
+    'has(field("blocking_finding"), "publish plan reported a push without committing: \x27docs(#12): add planning bundle 12-invoice-due-date\x27")'
 }
 
 @test "workflows: feat-setup-fails: a failed setup check halts with the /rs-sdlc-setup instruction" {
@@ -1173,6 +1180,12 @@ wf_same_as_child() {
     'count("story 1.1") === 5 && count(/^publish/) === 0' \
     'field("blocking_finding") === "stories still open: 1.1"' \
     'has(field("iteration_log"), "1.1 COMPLETE without EXIT_SIGNAL", "not started: the round cap is spent")'
+  # EXIT_SIGNAL true with failing tests never marks a story done either: COMPLETE means every due target passed.
+  local failing="$BATS_TEST_TMPDIR/feat-incomplete-story-failing.json"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); Object.assign(s.replies.find((r) => r.match === "^story ").reply, {exit_signal: true, tests_status: "FAILING"}); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/feat-incomplete-story.json" "$failing"
+  wf_scenario rs-sdlc-feature "$failing"
+  wf_expect 'r.result === "ESCALATED" && field("iteration") === "5/5" && count("story 1.1") === 5 && count(/^publish/) === 0' \
+    'has(field("iteration_log"), "1.1 COMPLETE with TESTS_STATUS FAILING")'
 }
 
 @test "workflows: feat-no-nested: an unresolved nested workflow escalates with the manual command line (D21)" {
@@ -1288,7 +1301,8 @@ wf_same_as_child() {
     'same(pick(/^(story |verify )/), ["story 1.1", "story 1.2", "story 1.3", "verify 1", "story 1.3"])' \
     '["story 1.1", "story 1.2", "story 1.3"].every((l) => has(call(l).prompt, "mode: parallel", "Run only the DB-free targets"))' \
     'has(call("verify 1").prompt, "mode: verify", "make.integration_tests", "make.sqlx_prepare") && call("verify 1").agentType === "rust-backend-sdlc:rust-implementer"' \
-    'has(all("story 1.3")[1].prompt, "mode: serial", "ended STATUS: IN_PROGRESS")'
+    'has(all("story 1.3")[1].prompt, "mode: serial", "ended STATUS: IN_PROGRESS")' \
+    'has(call("publish implement").prompt, "story 1.1 Create invoices with a due date\"; files: \"crates/billing/invoice/application/src/command/create_invoice.rs\", \".sqlx/query-4f1c.json\"\n")'
 }
 
 @test "workflows: feat-layer-first-batches: the earliest open layer runs first, at most 4 independent stories run in parallel and a dependent story runs alone" {
@@ -1305,7 +1319,14 @@ wf_same_as_child() {
   wf_scenario rs-sdlc-feature feat-verify-without-exit-signal
   wf_expect 'r.result === "SUCCESS-WITH-REPORT" && stage("Implement").iterations === "2/5"' \
     'same(pick(/^(story |verify )/), ["story 1.1", "story 1.2", "verify 1", "story 1.1", "story 1.2", "verify 2"])' \
-    'count("publish implement") === 1 && idx("publish implement") > idx("verify 2")'
+    'count("publish implement") === 1 && idx("publish implement") > idx("verify 2")' \
+    'has(call("publish implement").prompt, "story 1.1 Create invoices with a due date\"; files: \"crates/billing/invoice/application/src/command/create_invoice.rs\", \".sqlx/query-4f1c.json\"\n", "story 1.2 Reschedule the due date of an invoice\"; files: \"crates/billing/invoice/application/src/command/reschedule_invoice.rs\"; plus every other path")' \
+    'call("publish implement").prompt.split("reschedule_invoice.rs").length === 2'
+  local failing="$BATS_TEST_TMPDIR/feat-verify-failing-tests.json"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); Object.assign(s.replies.find((r) => r.match === "^verify ").reply[0], {exit_signal: true, tests_status: "FAILING"}); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/feat-verify-without-exit-signal.json" "$failing"
+  wf_scenario rs-sdlc-feature "$failing"
+  wf_expect 'r.result === "SUCCESS-WITH-REPORT" && same(pick(/^(story |verify )/), ["story 1.1", "story 1.2", "verify 1", "story 1.1", "story 1.2", "verify 2"])' \
+    'o.logs.some((l) => has(l, "verify COMPLETE with TESTS_STATUS FAILING"))'
 }
 
 @test "workflows: feat-verify-blocked: a serialized verify step that replies BLOCKED ends ESCALATED with the 7 fields (D22)" {

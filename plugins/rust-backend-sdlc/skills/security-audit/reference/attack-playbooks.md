@@ -9,7 +9,7 @@ Placeholders: `<plugin-root>` is the resolved plugin root the caller passed; `<c
 Every dynamic probe is one call of the helper, and nothing else sends HTTP:
 
 ```text
-"<plugin-root>/scripts/lib/common.sh" http_probe <METHOD> <PATH> [--header 'K: V']... [--body TEXT | --body-file F]
+"<plugin-root>/scripts/lib/common.sh" http_probe <METHOD> '<PATH>' [--header 'K: V']... [--body TEXT | --body-file F]
 ```
 
 - METHOD is one of `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`.

@@ -6,7 +6,7 @@ This page is the canonical key list of schema version 1. Every profile-key candi
 
 ## Conventions
 
-- **Location and ownership.** The profile lives at `.claude/rust-sdlc.yml` in the repository root and is committed. Only `generate-profile.sh` writes it (atomically, on the first run or with `--refresh`); `/rs-sdlc-setup` runs the generator. Hand edits are legal and survive until `--refresh` re-detects the key (see [Refresh and user-owned keys](#refresh-and-user-owned-keys)).
+- **Location and ownership.** The profile lives at `.claude/rust-sdlc.yml` in the repository root and is committed. Only `generate-profile.sh` writes it (atomically, on the first run, with `--refresh`, or with an explicit `--run-in-container true|false` that rewrites only `capabilities.run_in_container`); `/rs-sdlc-setup` runs the generator. Hand edits are legal and survive until `--refresh` re-detects the key (see [Refresh and user-owned keys](#refresh-and-user-owned-keys)).
 - **115 keys in 13 groups**, emitted in the order of the tables below. Group order: root, `project`, `rust`, `template`, `framework`, `persistence`, `architecture`, `service`, `make`, `quality`, `ci`, `review`, `capabilities`; inside a group the keys follow their table order.
 - **Required (R) keys must be present; optional (O) keys may be omitted.** "null means absent; omitted means error" for every R key whose Nullable column says yes: an explicit `null` declares the value or capability absent, a missing R key is a violation. A non-nullable key may never be `null`. Every `make.*` key is R and nullable.
 - **Unknown keys are violations.** A misspelled key (for example `coverage_line` under `quality`) or an unknown group fails validation (V4). A new key is a schema change: a MINOR plugin release that changes the generator, the validator, this page and the golden profile together.
@@ -51,7 +51,7 @@ Identity of the service checkout: Compose project name, GitHub slug, default bra
 
 | Key | Type | R/O | Nullable | Fallback (no source) | Allowed values / format | Detection source | Refresh | Consumers |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `project.name` | string | R | no | basename rule | `^[a-z0-9][a-z0-9_-]*$` | basename of TARGET_DIR, lower-cased, every `[^a-z0-9_-]` → `-` (the Makefile's `PROJECT_NAME` rule) | | `/rs-sdlc-new-service`, run report; skills: `documentation-creation`, `service-scaffolding` |
+| `project.name` | string | R | no | basename rule | `^[a-z0-9][a-z0-9_-]*$` | basename of TARGET_DIR, lower-cased, every `[^a-z0-9_-]` → `-` (the Makefile's `PROJECT_NAME` rule), then leading `-` and `_` stripped; an empty result falls back to `project` with a warning on stderr | | `/rs-sdlc-new-service`, run report; skills: `documentation-creation`, `service-scaffolding` |
 | `project.repo` | string | R | yes | `null` | `is_slug` | `git remote get-url origin` when the host is `github.com` (`https://github.com/o/n[.git]`, `git@github.com:o/n[.git]`, `ssh://git@github.com/o/n[.git]`) | | `/rs-sdlc-issue`, `/rs-sdlc-finish-pr`, `/rs-sdlc-new-service` S14; scripts resolve the slug live with `resolve_repo_slug`; skills: `service-scaffolding` |
 | `project.default_branch` | string | R | no | `'main'` | `^[A-Za-z0-9._/-]+$` | `default_branch` (origin/HEAD symbolic ref → `main` → `master` → `main`) | | `ci.base_ref`, orchestrator branch creation, setup branch warning; skills: `bmad-autonomous-planning` |
 | `project.description` | string | O | yes | `null` | ≤ 200 characters, single line | `[workspace.package].description` of `Cargo.toml` | | `/rs-sdlc-issue`, `/rs-sdlc-plan` prompts |
@@ -294,7 +294,7 @@ Every file `generate-profile.sh` reads, every protected file a quality bar is de
 | Source | Read with | Role | Keys and use |
 | --- | --- | --- | --- |
 | `git` | `git remote get-url origin`, the `origin/HEAD` symbolic ref and local branches, `git log --format=%s` | detection | `project.repo` (github.com origins only), `project.default_branch` and through it `ci.base_ref`, `template.source_commit` |
-| checkout directory | basename of TARGET_DIR | detection | `project.name` (lower-cased, every `[^a-z0-9_-]` replaced by `-`) |
+| checkout directory | basename of TARGET_DIR | detection | `project.name` (lower-cased, every `[^a-z0-9_-]` replaced by `-`, leading `-` and `_` stripped, `project` with a warning when empty) |
 | `Cargo.toml` | python3 `tomllib` | detection; bar source | `[workspace.package]`: `project.description`, `rust.edition`, `rust.msrv`; `[workspace.dependencies]`: `framework.http` (`axum`), `framework.openapi` (`utoipa`), `framework.graphql` (`async-graphql`), `persistence.engine` (`sqlx` with the `postgres` feature); `[workspace].members`: `architecture.bounded_contexts`, `architecture.shared_crates`; `[workspace.lints]` backs `quality.max_clippy_findings` |
 | `rust-toolchain.toml` | python3 `tomllib` | detection; marker | `rust.toolchain` (`[toolchain].channel`); marker of `capabilities.template_derived` |
 | `architecture.toml` | python3 `tomllib` | detection; marker; bar source | `architecture.layers` (`[[layer]].name`, file order); marker of `capabilities.template_derived`; with `ARCH_CMD` the source of `quality.max_architecture_violations` |
