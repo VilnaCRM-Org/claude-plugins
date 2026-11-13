@@ -109,6 +109,12 @@ gp_leftovers() {
   find "$STUB/.claude" -name '.rust-sdlc.yml.*' -print
 }
 
+# gp_tree — the stub's tree snapshot (NFR-1): every changed, untracked and
+# ignored path against its committed state, one porcelain line each.
+gp_tree() {
+  git -C "$STUB" status --porcelain --ignored --untracked-files=all
+}
+
 # gp_mode FILE — the permission bits of FILE in octal.
 gp_mode() {
   python3 -I -c 'import os, stat, sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode)))' "$1"
@@ -223,8 +229,9 @@ gp_workflows_without() {
 
 # --- first run: the golden profile (AC-6.1, AC-6.2, AC-6.3) ---------------------
 
-@test "generate-profile: golden — the stub without a profile gets golden.yml byte for byte, valid, within 5 s" {
+@test "generate-profile: golden — the stub without a profile gets golden.yml byte for byte, valid, within 5 s, and no other file" {
   [ ! -e "$PROFILE" ]
+  [ -z "$(gp_tree)" ]
   local start=$SECONDS
   run --separate-stderr "$GEN" "$STUB"
   local elapsed=$((SECONDS - start))
@@ -232,6 +239,7 @@ gp_workflows_without() {
   [ "$output" = "WROTE: .claude/rust-sdlc.yml" ]
   [ -z "$stderr" ]
   [ "$elapsed" -le 5 ]
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
   gp_same "$GOLDEN" "$PROFILE"
   grep -qx '  load_tests: load-tests' "$PROFILE"
   run --separate-stderr "$VALIDATE" "$PROFILE"
@@ -263,11 +271,14 @@ gp_workflows_without() {
 }
 
 @test "generate-profile: golden — --stdout prints the YAML and writes nothing" {
+  local before
   rm -rf "$STUB/.claude"
+  before="$(gp_tree)"
   gp_detect
   [ ! -s "$ERR" ]
   gp_same "$GOLDEN" "$OUT"
   [ ! -e "$STUB/.claude" ]
+  [ "$(gp_tree)" = "$before" ]
 }
 
 # --- an existing profile (NFR-3, NFR-1) --------------------------------------------
@@ -299,7 +310,7 @@ gp_workflows_without() {
   gp_same "$EXPECTED" "$PROFILE"
 }
 
-@test "generate-profile: --refresh rewrites atomically through mktemp .claude/.rust-sdlc.yml.XXXXXX and mv" {
+@test "generate-profile: --refresh rewrites atomically through mktemp .claude/.rust-sdlc.yml.XXXXXX and mv, and no other file" {
   local wrap="$BATS_TEST_TMPDIR/wrap" tool real before
   mkdir -p "$wrap"
   for tool in mktemp mv; do
@@ -311,11 +322,13 @@ gp_workflows_without() {
   gp_expect project.description "'Stale text'"
   gp_install "$EXPECTED"
   chmod 640 "$PROFILE"
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
   before="$(gp_inode "$PROFILE")"
   PATH="$wrap:$PATH" run --separate-stderr "$GEN" --refresh "$STUB"
   [ "$status" -eq 0 ]
   [ "$output" = "WROTE: .claude/rust-sdlc.yml" ]
   [ -z "$stderr" ]
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
   gp_same "$GOLDEN" "$PROFILE"
   [ "$(gp_inode "$PROFILE")" != "$before" ]
   [ "$(gp_mode "$PROFILE")" = 0o640 ]

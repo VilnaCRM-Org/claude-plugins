@@ -35,7 +35,7 @@ A floor is the minimum number of cases a suite holds, counted with `grep -c '^@t
 | `post-review-findings.bats` | 46 | 41 | `post-review-findings.sh` | the ADR-16 ledger schema; lens and conclusion markers; forged markers ignored; `--bot-login`; degrade-first exits |
 | `pr-state.bats` | 33 | 30 | `pr-state.sh` | the verdict priority; human-gated checks by check name; service-added checks; profile defaults; zero checks with a profile list is `WAIT`; the `NEXT:` label |
 | `request-ai-reviews.bats` | 17 | 17 | `request-ai-reviews.sh` | the react cases ported; profile default reviewers; validation harmonised with `pr-state.sh` |
-| `component-counts.bats` | 20 | 20 | Markdown contracts | one case per id CC-01 to CC-36 and the check of every citation in the degrade map below |
+| `component-counts.bats` | 20 | 20 | Markdown contracts | one case per id CC-01 to CC-36, the check of every citation in the degrade map below, the dependency-direction greps, the NFR-15 runtime-read check and the broken-copy and drifted-copy cases |
 | `workflows.bats` | 66 | 45 | workflows through the harness | 115 cases: 11 static cases (meta literal, phases, banned clock and random calls, nested names, call depth, P1–P7 and generalization grep, prompt sentences), one case per scenario (103) and one schema-gap case |
 | **Total** | **557** | 463 | | after the cut: 491 (NFR-8: 418) |
 
@@ -127,7 +127,7 @@ The scripts read YAML through one of two backends. `have_yq` accepts a `yq` only
 
 ## Degrade map (D1–D25)
 
-Every degrade path of [the degrade matrix](../degrade-matrix.md) is proven by at least one test. The map is machine-checked: the case `component-counts: D-map: …` of `tests/component-counts.bats` parses this table and fails when a citation does not resolve.
+Every degrade path of [the degrade matrix](../degrade-matrix.md) is proven by at least one test. The map is machine-checked: the case `component-counts: D-map: …` of `tests/component-counts.bats` parses this table and fails when a citation does not resolve or a row cites no test at all (NFR-3).
 
 Map format: each backticked entry of the Bats cases column is the exact name of a `@test` (the text between its quotes), and the word before its first colon names the suite (`<word>.bats`); each entry of the Contract cases column is the id of a `tests/component-counts.bats` case; each entry of the Workflow scenarios column is a file name under `tests/fixtures/workflows/`; `—` marks an empty cell.
 
@@ -184,6 +184,8 @@ FAIL (NFR-2): plugins/rust-backend-sdlc/skills/testing-workflow/SKILL.md contain
 
 `<n>` is the line number in the skill after the `# profile-example` fences are dropped. The same seeded copy also fails `python3 tools/plugin-quality/lint/lint_all.py plugins/rust-backend-sdlc` with one `[S1 L28]` finding (`denylisted identifier 'VilnaCRM'`), the rule the `prompt-lint` job applies. The only exemption is a fence whose opening line carries `# profile-example`.
 
+The bats side of NFR-2 is CC-28 of `tests/component-counts.bats`. It greps the five component directories, outside `# profile-example` fences, for the same denylist, the template slug and the template's example-context path, which no component may hardcode because the target's `architecture.bounded_contexts` names it. Its broken-copy case seeds the slug and the example-context path into `skills/testing-workflow/SKILL.md` and expects CC-28 to fail on each.
+
 To reproduce, run from the repository root. The commands extract the job's own script from `ci.yml`, so the check is exactly the one CI runs; either `yq` flavour works, and the scratch copy is the committed tree, as CI checks it out:
 
 ```bash
@@ -213,4 +215,4 @@ python3 tools/plugin-quality/lint/lint_all.py
 
 One suite runs with `npx --yes bats plugins/rust-backend-sdlc/tests/<suite>.bats`, and one group of cases with `--filter '<suite>: <words of the name>'`. To run the K7 cases locally, install the four pinned tools at the versions of the K7 table and put them on `PATH` first.
 
-In CI, the `bats` job runs every suite of every plugin with the K7 tools installed and node available for `workflows.bats`; `shellcheck`, `markdown-lint`, `frontmatter-check`, `profile-keys-check`, `generalization-audit` and `manifest-validate` cover the rest of `ci.yml`, and `prompt-quality.yml` runs `lint_all.py` and `claude plugin validate plugins/rust-backend-sdlc --strict`.
+In CI, the `bats` job installs the K7 tools, runs the suites of the other plugins in one step and runs this plugin's 16 suites in the step `Run rust-backend-sdlc bats suites (NFR-14 budget)`, with node available for `workflows.bats`. That step carries `timeout-minutes: 10`, the NFR-14 budget of the plugin's suites, and runs the suites one after another with the cases of each four at a time (`--jobs 4 --no-parallelize-across-files`); CC-24 fails when the step or its budget is missing. `shellcheck`, `markdown-lint`, `frontmatter-check`, `profile-keys-check`, `generalization-audit` and `manifest-validate` cover the rest of `ci.yml`, and `prompt-quality.yml` runs `lint_all.py` and `claude plugin validate plugins/rust-backend-sdlc --strict`.

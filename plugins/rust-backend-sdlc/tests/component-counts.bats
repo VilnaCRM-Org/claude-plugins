@@ -2,8 +2,9 @@
 # component-counts.bats — the contract suite of the rust-backend-sdlc plugin:
 # every count, Markdown contract, packaging rule and shared name, one case per
 # id CC-01 to CC-36 of the architecture's Test Architecture section, plus the
-# degrade-map citation check (D-map), the dependency-direction greps and two
-# cases proving that the checks fail on broken or drifted copies of the plugin.
+# degrade-map citation check (D-map), the dependency-direction greps, the
+# NFR-15 runtime-read check and two cases proving that the checks fail on
+# broken or drifted copies of the plugin.
 #
 # Pinned counts (§ Constraints): 10 commands, 7 agents, 28 skills,
 # 2 meta-guides, 13 scripts + scripts/lib/common.sh (17 dispatcher names),
@@ -17,16 +18,18 @@
 # bits, the --help runs, the command-token grep and `git check-ignore` run in
 # bash. RUST_SDLC_CC_PLUGIN_ROOT points the suite at another copy of the
 # plugin (a scratch copy with a component removed must fail its case), so the
-# counts are proven real. The template slug and the organization name are
-# assembled from two halves, so this file never carries either literal.
+# counts are proven real. The template slug, the organization name and the
+# template's example-context path are assembled from parts, so this file never
+# carries any of those literals.
 #
 # Hermetic: common_setup puts the stubs first on PATH, nothing reaches the
 # network, and every write lands under $BATS_TEST_TMPDIR (the materialized
-# repository billing-service, the merged settings, the golden profile as JSON
-# and the broken copy of the plugin).
+# repository billing-service, the merged settings, the golden profile as JSON,
+# the broken copy of the plugin and the drifted README and ci.yml copies).
 # Skips (each with its reason): CC-29's git check-ignore outside a git
 # checkout, CC-30 when the sibling plugins are absent, CC-24 when the
-# marketplace manifest is not part of the checkout.
+# repository wiring (marketplace manifest, root README, ci.yml) is not part of
+# the checkout; the drifted-copy case then leaves out its wiring steps.
 #
 # shellcheck disable=SC2016 # single-quoted programs and patterns are literal on purpose
 
@@ -55,9 +58,9 @@ cc_assert() {
   fi
 }
 
-# cc_fails COPY ID NEEDLE — check ID exits 1 on the plugin copy COPY and its output names NEEDLE.
+# cc_fails COPY ID NEEDLE [ARG...] — check ID (with ARG...) exits 1 on the plugin copy COPY and its output names NEEDLE.
 cc_fails() {
-  PLUGIN_ROOT="$1" run cc_check "$2"
+  PLUGIN_ROOT="$1" run cc_check "$2" "${@:4}"
   if [[ "$status" -ne 1 || "$output" != *"$3"* ]]; then
     echo "$2 on the broken copy: exit $status, no '$3' in: $output"
     return 1
@@ -248,6 +251,16 @@ def heading_starting(rel, level, prefix):
     return hits[0] if hits else None
 
 
+def subsection(rel, prefix):
+    """The ### section of REL whose heading starts with PREFIX ("" when there is none)."""
+    return section(rel, heading_starting(rel, 3, prefix) or "", 3)
+
+
+def line_with(text, marker):
+    """The first line of TEXT containing MARKER ("" when there is none)."""
+    return next((line for line in text.split("\n") if marker in line), "")
+
+
 def table_rows(text, first_cell):
     """Cells of the Markdown table rows whose first cell matches FIRST_CELL (a regex)."""
     out = []
@@ -288,6 +301,12 @@ def in_order(rel, text, tokens):
             bad(f"{rel}: {token!r} missing or out of order")
             return
         pos = nxt
+
+
+def line_order(rel, text, anchor, tokens):
+    """ANCHOR, then TOKENS in order, on the first line of TEXT that holds ANCHOR."""
+    line = next((l for l in text.split("\n") if anchor in l), "")
+    in_order(f"{rel} (the line of {anchor!r})", line, [anchor] + tokens)
 
 
 # --- pinned inventory ----------------------------------------------------------
@@ -834,6 +853,28 @@ def check_cc15():
     check_script_p_patterns()
     for stem in ("rs-sdlc-setup", "rs-sdlc-implement"):
         need(cmd(stem), ["`git config --get core.hooksPath`", "hooks_active"])
+    check_nfr5_extra()
+
+
+# NFR-5 beyond P1-P7: uncommitted user changes are never discarded, and QA never stops the shared stack.
+DISCARD = re.compile(r"git reset\s+--hard|git checkout\s+--\s+\.(?![\w/])|git clean\s+-[A-Za-z]*f")
+STACK_STOP = re.compile(r"\bmake[ \t]+(?:stop|down)\b|docker compose[ \t]+(?:stop|down|kill|rm|restart)\b")
+DISCARD_RULE = "Uncommitted user changes are never discarded: no `git reset --hard`, `git checkout -- .` or `git clean -fd`, ever."
+QA_FILES = (cmd("rs-sdlc-qa"), agent("qa-manual-tester"))
+
+
+def check_nfr5_extra():
+    for rel in component_files() + rels("scripts/**/*.sh"):
+        ok = script_line_ok if rel.startswith("scripts/") else PROHIBITION.search
+        for n, line in enumerate(read(rel).split("\n"), 1):
+            if DISCARD.search(line) and not ok(line):
+                bad(f"{rel}:{n}: a discard of uncommitted changes outside a prohibition line: {line.strip()[:120]}")
+            if rel in QA_FILES and STACK_STOP.search(line) and not ok(line):
+                bad(f"{rel}:{n}: QA stops the shared stack: {line.strip()[:120]}")
+    guide = "skills/AI-AGENT-GUIDE.md"
+    need(guide, [DISCARD_RULE], section(guide, "Git ownership rule"))
+    qa = cmd("rs-sdlc-qa")
+    need(qa, ["The shared stack is never stopped"], section(qa, heading_starting(qa, 3, "3. Boot the stack") or "", 3))
 
 
 CANDIDATE = re.compile(r"^(schema_version|(project|rust|template|framework|persistence|architecture|service|make|quality|ci|review|capabilities)\.[a-z0-9_<>]+)$")
@@ -875,8 +916,13 @@ def check_cc16():
 
 # --- CC-17 to CC-23: command, agent and skill content -------------------------------
 
+# AC-4.1: the step-8 background and container conditions, pinned inside ### Step 8, not file-wide.
+SETUP_STEP8 = ["make docs-check", "run_in_background: true", "never reported as passed",
+               "capabilities.run_in_container: false", "command -v cargo", "not run (no toolchain)",
+               "capabilities.run_in_container: true", "docker compose ps --status running --quiet app",
+               "make docs-check RUN_IN_CONTAINER=1", "not run (no Docker)"]
 SETUP_STEPS = ['setup-preflight.sh" --report', "make bmalph-setup", "generate-profile.sh", "validate-profile.sh",
-               "inject-governance.sh", "merge-settings.sh", "hooks_active", "make docs-check",
+               "inject-governance.sh", "merge-settings.sh", "hooks_active", SETUP_STEP8,
                "commit `.claude/rust-sdlc.yml`, `CLAUDE.md` and `AGENTS.md` together in one commit"]
 SETUP_TOKENS = [
     "DEGRADED: make bmalph-setup not run (tracked changes: ", "NEXT: commit or stash, then make bmalph-setup",
@@ -888,13 +934,15 @@ SETUP_TOKENS = [
 
 
 def check_steps(rel, prefixes, tokens):
+    """The step headings PREFIXES exist in order; each step section holds its token (a string or a list)."""
     found = [heading_starting(rel, 3, p) for p in prefixes]
     if None in found or [headings(rel, 3).index(h) for h in found] != sorted(headings(rel, 3).index(h) for h in found):
         bad(f"{rel}: the step headings {prefixes} are missing or out of order")
         return
-    for title, token in zip(found, tokens):
-        if token and token not in section(rel, title, 3):
-            bad(f"{rel}: ### {title} lacks {token!r}")
+    for title, step_tokens in zip(found, tokens):
+        for token in [step_tokens] if isinstance(step_tokens, str) else step_tokens or []:
+            if token not in section(rel, title, 3):
+                bad(f"{rel}: ### {title} lacks {token!r}")
 
 
 def check_cc17():
@@ -911,15 +959,31 @@ NEW_SERVICE_TOKENS = [
     "SKIP: sync flavour (undecided)", "WOULD:", "`S<k>: DONE <evidence>`", "is_commit_subject",
     "`HOOKS: foreign <value>` → `ESCALATED`", "PR_URL:", "ISSUE_NUMBER:",
 ]
-NEW_SERVICE_STEPS = {3: "before hook activation", 9: "scripts/set-version.sh <v>", 11: "hooks_active",
-                     12: "/rs-sdlc-setup --exec <resolved>", 13: "HOOKS: active",
-                     14: "${CLAUDE_PLUGIN_ROOT}/commands/rs-sdlc-finish-pr.md"}
+# AC-11.1: the EXECUTED/NEXT condition of each of S1-S14, pinned inside its own step (S9: its three modes);
+# NFR-6: the S8 bootstrap cap.
+NEW_SERVICE_STEPS = {
+    1: ["S1: DONE source <SOURCE_MODE>"], 2: ["S2: NEXT create the bootstrap issue"],
+    3: ["before hook activation", "S3: SKIP import commit (<SOURCE_MODE>)"],
+    4: ["S4: NEXT git switch -c chore/<N>-initialize-service"], 5: ["S5: DONE customize"],
+    6: ["NEXT: keep the example bounded context"], 7: ["S7: DONE make doctor (report only"],
+    8: ["at most 60 min in total", "S8: NOT RUN (no Docker)"],
+    9: ["Host mode and `command -v cargo` succeeds", "scripts/set-version.sh <v>",
+        "Container mode and the `app` container running",
+        "docker compose exec -T --user <uid>:<gid> app scripts/set-version.sh <v>",
+        "S9: NEXT scripts/set-version.sh <v>"],
+    10: ["S10: NEXT make generate-openapi-spec"], 11: ["hooks_active"],
+    12: ["/rs-sdlc-setup --exec <resolved>"], 13: ["HOOKS: active"],
+    14: ["${CLAUDE_PLUGIN_ROOT}/commands/rs-sdlc-finish-pr.md"],
+}
+# NFR-6: the bootstrap cap (S8) and its breach outcome.
+BOOTSTRAP_BREACH = "No `RUST_SDLC_EXIT=` line after 60 min → `ESCALATED`"
 
 
 def check_cc18():
     rel = cmd("rs-sdlc-new-service")
     check_steps(rel, [f"S{n} — " for n in range(1, 15)], [NEW_SERVICE_STEPS.get(n) for n in range(1, 15)])
     need(rel, NEW_SERVICE_TOKENS + [f"`{s}`" for s in FIXED_SUBJECTS["rs-sdlc-new-service"]])
+    need(rel, [BOOTSTRAP_BREACH], section(rel, heading_starting(rel, 3, "S8 — ") or "", 3))
 
 
 GATE_SET = ["make ci-preflight base_ref=<base> CONFIG_CHANGE_APPROVED=", "make ci-static-analysis", "make ci-tests",
@@ -942,6 +1006,10 @@ def check_cc19():
         bad(f"{rel}: the checklist must list C1-C12 in order, each with an evidence target")
     need(rel, NEW_CONTEXT_TOKENS)
     in_order(rel, read(rel), GATE_SET)
+    # AC-14.1: the procedure calls validate_context_name before any mention of make new-context.
+    proc = section(rel, "Procedure")
+    if not 0 <= proc.find('common.sh" validate_context_name') < proc.find("make new-context"):
+        bad(f"{rel}: validate_context_name is not called before make new-context")
 
 
 QUALITY_KEYS = ["coverage_lines", "coverage_functions", "max_surviving_mutants", "max_clippy_findings",
@@ -949,6 +1017,9 @@ QUALITY_KEYS = ["coverage_lines", "coverage_functions", "max_surviving_mutants",
                 "max_dependency_policy_findings", "max_spectral_findings", "max_unapproved_breaking_changes",
                 "max_image_vulnerabilities_high_critical", "max_smoke_budget_breaches"]
 DOCKER_CLASS = ["docker info", "This target needs a reachable container engine (docker).", "not run (no Docker)"]
+DB_FREE = ["make.format", "make.lint_code", "make.unit_tests", "make.architecture", "make.complexity"]
+DB_BACKED = ["make.setup_test_db", "make.integration_tests", "make.tests_with_coverage", "make.e2e_tests",
+             "make.sqlx_prepare"]
 STAGE_TOKENS = {
     cmd("rs-sdlc-issue"): ["ISSUE_URL:", "ISSUE_NUMBER:", "--label rust-backend-sdlc", "enhancement",
                            ".github/ISSUE_TEMPLATE/feature_request.md", "Problem statement", "Proposed change",
@@ -956,10 +1027,8 @@ STAGE_TOKENS = {
     cmd("rs-sdlc-plan"): ["research.md", "product-brief.md", "prd.md", "architecture.md", "epics.md",
                           "implementation-readiness.md", "run-summary.md", "## Tech Stack", "## Constraints",
                           "4,500", "(#<N>)", "story N.M", "Depends on:", "NO[-\\s]?GO", "SPECS_DIR:",
-                          'stage-planning-artifacts.sh" "$SPECS_DIR" --dry-run', "bmad-autonomous-planning",
-                          "make.format", "make.lint_code", "make.unit_tests", "make.architecture", "make.complexity",
-                          "make.setup_test_db", "make.integration_tests", "make.tests_with_coverage",
-                          "make.e2e_tests", "make.sqlx_prepare"],
+                          'stage-planning-artifacts.sh" "$SPECS_DIR" --dry-run', "bmad-autonomous-planning"]
+                         + DB_FREE + DB_BACKED,
     cmd("rs-sdlc-implement"): DOCKER_CLASS + [
         "stage-planning-artifacts.sh", "bmalph implement", "bmalph run --driver claude-code --no-dashboard",
         ".ralph/.ralphrc", ".ralph/PROJECT_CONTEXT.md", "`bmalph run` is the only implementer",
@@ -1007,12 +1076,77 @@ def check_review_rules():
     need(rel, ["Skill triage: 28 verdicts", "exactly 28 rows", "skill triage (28/28)"], procedure)
 
 
+BUNDLE_FILES = ["research.md", "product-brief.md", "prd.md", "architecture.md", "epics.md",
+                "implementation-readiness.md", "run-summary.md"]
+PRD_H2 = ["`## Executive Summary`", "`## Functional Requirements`", "`## Non-Functional Requirements`",
+          "`## Product Scope`"]
+BUNDLE_ROWS = {  # AC-16.1: the required headings of each bundle file, in its row of the step-5 table
+    "architecture.md": ["`## Tech Stack`", "`## Constraints`"],
+    "epics.md": ["`## Epic N: Title`", "`### Story N.M: Title`", "`**Acceptance Criteria:**`", "`**Given**`",
+                 "`**When**`", "`**Then**`", "Depends on:"],
+}
+
+
+def check_plan_bundle():
+    rel = cmd("rs-sdlc-plan")
+    rows = {r[0].strip("`"): r for r in table_rows(subsection(rel, "Step 5 — "), r"`[a-z-]+\.md`")}
+    if list(rows) != BUNDLE_FILES or any(len(r) < 2 for r in rows.values()):
+        bad(f"{rel}: the step-5 bundle table rows are {list(rows)}, expected {BUNDLE_FILES}")
+        return
+    in_order(f"{rel} (prd.md row)", rows["prd.md"][1], PRD_H2)
+    for name, tokens in BUNDLE_ROWS.items():
+        need(f"{rel} ({name} row)", tokens, rows[name][1])
+
+
+IMPLEMENT_STEPS = {  # AC-18.1 and AC-18.2, each pinned in the step of rs-sdlc-implement.md that states it
+    "Step 4 — ": ["`bmalph run` is the only implementer", "dispatches no `rust-implementer`",
+                  "DB-free targets may run in parallel", "the DB-backed targets run in one serialized verify step"],
+}
+PROJECT_CONTEXT_CHECK = ["`.ralph/PROJECT_CONTEXT.md`", "part (a), the commit convention", "the literal `(#<N>)`",
+                         "part (b), the story-dispatch rule"] + DB_FREE + DB_BACKED  # AC-18.1, item 6 of Step 2
+BREAKER_TRIP = ["`ESCALATED`", "the last `---RALPH_STATUS---` block", "newest `.ralph/logs/` file",
+                "there is no second `bmalph run`", "the breaker is never reset"]
+
+
+def check_implement_steps():
+    rel = cmd("rs-sdlc-implement")
+    for prefix, tokens in IMPLEMENT_STEPS.items():
+        need(f"{rel} ({prefix.strip()})", tokens, subsection(rel, prefix))
+    need(f"{rel} (Step 2 PROJECT_CONTEXT check)", PROJECT_CONTEXT_CHECK,
+         line_with(subsection(rel, "Step 2 — "), "Verify that both parts"))
+    need(f"{rel} (Step 5 breaker trip)", BREAKER_TRIP, line_with(subsection(rel, "Step 5 — "), "**Breaker trip**"))
+
+
+QA_PROBE_RULES = {  # AC-20.2: each FR-20 rule pinned in its own item of ### Probe rules
+    "**Health.**": ["expects 200 `text/plain` `pong`", "expects 204", "application/problem+json",
+                    "/problems/dependency-unavailable"],
+    "**REST.**": ["service.openapi_snapshot"],
+    "**GraphQL.**": ["service.graphql_snapshot", "HTTP 200", "extensions.code", "VALIDATION_FAILED",
+                     "INTERNAL_SERVER_ERROR"],
+    "**Negatives": ["application/problem+json", "the problem `type`", "never on axum rejection text"],
+    "**Evidence.**": ["`method`", "`URL`", "`request`", "`status`", "`content type`", "`x-request-id`",
+                      "`excerpt (≤ 20 lines)`", "`expected`", "`observed`"],
+}
+
+
+def check_qa_rules():
+    rel = cmd("rs-sdlc-qa")
+    rules = subsection(rel, "Probe rules")
+    for marker, tokens in QA_PROBE_RULES.items():
+        need(f"{rel} (probe rule {marker.strip('*')})", tokens, line_with(rules, marker))
+    need(f"{rel} (5. migrations)", ["make migrate", "before the first probe"], subsection(rel, "5. "))
+    need(f"{rel} (6. liveness)", ["every ≤ 10 s for ≤ 900 s until two consecutive 200 responses"], subsection(rel, "6. "))
+
+
 def check_cc20():
     need_all(STAGE_TOKENS)
     check_review_rules()
     check_q_table(cmd("rs-sdlc-review"))
     plan = section(cmd("rs-sdlc-plan"), "Procedure")
     in_order(cmd("rs-sdlc-plan"), plan, ["(#<N>)", "make.format", "make.setup_test_db"])
+    check_plan_bundle()
+    check_implement_steps()
+    check_qa_rules()
     for n, line in enumerate(read(cmd("rs-sdlc-implement")).split("\n"), 1):
         if re.search(r"(?<!\.ralph/)\.ralphrc", line) and not PROHIBITION.search(line):
             bad(f"{cmd('rs-sdlc-implement')}:{n}: a repository-root .ralphrc outside a prohibition line")
@@ -1057,6 +1191,34 @@ AGENT_TOKENS = {
 }
 PROTECTED_LINE = ("BLOCKED: protected configuration <path> — needs approved-config-change and a session "
                   "restarted with ALLOW_PROTECTED_CONFIG_EDIT=1")
+# AC-23.1: every FR-23 rule, inside the rules section (the frontmatter and the checklist repeat some names).
+IMPLEMENTER_RULES = [
+    "domain → application → infrastructure → `crates/service` wiring", "`async-trait`, `thiserror`, `uuid`",
+    "shared domain", "`Problem`", "`application/problem+json`", "no type is named `Error`", "`ApiPath`",
+    "`ValidatedQuery`", "`ValidatedJson`", "`ApiJson`", "returns no data", "idempotent", "`Clock`",
+    "`UuidGenerator`", "`SystemTime::now`", "`Instant::now`", "`Uuid::new_v4`", "`unwrap`", "`expect`",
+    "`panic!`", "indexing", "`as`", "no mod.rs", "Never write `#[allow(...)]`", "`#[expect(<lint>, reason = ",
+    "lint policy permits", "never in a crate root", "never for a complexity lint", "`#[async_trait]`",
+    "inherent `async fn`", "`tests.rs`", "`<crate>/tests/integration/main.rs`", "`TEST_SEED`",
+    "`PROPTEST_RNG_SEED`", "`make create-migration", "`make migrate`", "`.sqlx/`", "`make sqlx-prepare`",
+    "`make generate-openapi-spec`", "`make generate-graphql-spec`", "`workspace.dsl`",
+    "never edits an applied migration"]
+IMPLEMENTER_OUTPUTS = ["**Changed files.**", "**Targets run.**", "**Self-review checklist.**", "---RALPH_STATUS---"]
+# AC-27.1 (FR-27): human-gated checks leave the mapping, get their own table and are never fixed;
+# the two mapping steps run in order, each names its documents and carries its `none` rule.
+HG_TABLE = "| human-gated check | approval label | log URL |"
+HG_DEGRADE = "| the check is human-gated | human-gated table; never fixed, never re-run (D9) |"
+NONE_OUTCOME = 'reported with its log URL and never "fixed"'
+CI_STEPS = [("**Check name → gate id(s).**", ["docs/repository-settings.md", "docs/repository-settings-service.md",
+                                              'A "Gate" cell that reads `none`', NONE_OUTCOME]),
+            ("**Gate id → target(s).**", ["docs/make-targets.md", "A gate id without a row gets target `none`",
+                                          NONE_OUTCOME])]
+# AC-28.1: the six FR-28 decline categories, in the order of the PRD.
+DECLINED = ["an `#[allow]` request", "an unjustified `#[expect]`", "a protected-config edit",
+            "a coverage or mutant exclusion", "a lowered threshold", "an edited applied migration"]
+# AC-29.1: the FR-29 families as ledger rule ids, memory safety last.
+SEC_FAMILIES = ["injection", "bola-idor", "mass-assignment", "dos", "information-disclosure", "secrets",
+                "dependency-advisories", "memory-safety"]
 
 
 def check_no_http_call(rel):
@@ -1068,12 +1230,52 @@ def check_no_http_call(rel):
         bad(f"{rel}: a curl http line")
 
 
+def check_no_git_push(rel):
+    """NFR-10: an agent holds no commit or push right; the command commits and pushes."""
+    need(rel, ["never runs `git commit` or `git push`"], section(rel, "Allowed actions"))
+    for n, line in enumerate(read(rel).split("\n"), 1):
+        if re.search(r"\bgit (commit|push)\b", line) and not PROHIBITION.search(line):
+            bad(f"{rel}:{n}: git commit or git push outside a prohibition line: {line.strip()[:120]}")
+
+
+def check_agent_rules():
+    rel = agent("rust-implementer")
+    need(rel, IMPLEMENTER_RULES, section(rel, "Rust rules (FR-23)", 3))
+    need(rel, IMPLEMENTER_OUTPUTS, section(rel, "Outputs"))
+    rel = agent("code-quality-reviewer")
+    need(rel, ["never proposes a suppression, an exclusion or a lowered limit"], section(rel, "Role"))
+    rel = agent("ci-fixer")
+    need(rel, ["at most once per head commit"], section(rel, "Allowed actions"))
+    line_order(rel, section(rel, "Outputs"), HG_TABLE, ["These rows are never fixed and never re-run"])
+    need(rel, [HG_DEGRADE], section(rel, "Degrade paths"))
+    mapping = section(rel, "Check-to-target mapping", 3)
+    in_order(rel, mapping, ["that is not human-gated"] + [label for label, _ in CI_STEPS])
+    for label, tokens in CI_STEPS:
+        line_order(rel, mapping, label, tokens)
+    rel = agent("pr-comment-resolver")
+    rows = [r for r in table_rows(section(rel, "Declined categories (FR-28)", 3), r"[^-].*") if r[0] != "Category"]
+    if [r[0] for r in rows] != DECLINED:
+        bad(f"{rel}: the Declined categories rows {[r[0] for r in rows]} != {DECLINED}")
+    for r in rows:
+        if len(r) != 3 or not r[2].startswith("`declined: "):
+            bad(f"{rel}: the decline of {r[0]!r} has no reply cell starting with `declined: ")
+    rel = agent("security-auditor")
+    rows = [r for r in table_rows(section(rel, "Families", 3), r"[A-Z][A-Za-z/ ]+") if r[0] != "Family"]
+    ids = [r[1].strip("`") if len(r) > 1 else None for r in rows]
+    if ids != SEC_FAMILIES:
+        bad(f"{rel}: the Families rule ids {ids} != {SEC_FAMILIES}")
+    need(rel, ["**Loopback only.**", "Dynamic probes reach only `service.base_url`"], section(rel, "Role"))
+    need(rel, ["only on the loopback base URL"], section(rel, "Dynamic probes", 3))
+
+
 def check_cc21():
     need_all(AGENT_TOKENS)
     check_q_table(agent("code-quality-reviewer"))
+    check_agent_rules()
     for name in AGENTS:
         need(agent(name), [PROTECTED_LINE])
         need(agent(name), ["MAX_ITERATIONS=5"], section(agent(name), "Iteration discipline"))
+        check_no_git_push(agent(name))
     if "verdict=DEGRADED" in read(agent("fr-nfr-reviewer")):
         bad(f"{agent('fr-nfr-reviewer')}: names verdict=DEGRADED")
     for name in ("qa-manual-tester", "security-auditor"):
@@ -1085,12 +1287,14 @@ def check_cc21():
 
 FR31 = {
     "service-scaffolding": ["S1", "S14", "is_template", "clone-and-push", "<description> API",
+                            "Regenerate the OpenAPI snapshot before the first pull request",
                             "scripts/set-version.sh", ".templatesyncignore", "Compose project", "base_ref=HEAD",
-                            "keep the example context", "rule-3", "never delete", "GraphQL roots", "sync flavour",
-                            "local mode", "origin/main"],
+                            "keep the example context", "rule-3", "never delete", "GraphQL roots",
+                            "Regenerate the snapshots", "sync flavour", "local mode", "origin/main"],
     "bounded-context-scaffolding": ["name rules", "reserved context names", "existence rule", "C1", "C12",
                                     "evidence target", "workspace.dsl", "one component per crate",
-                                    "[workspace.dependencies]", 'unused = "deny"', "Adapters { .. }",
+                                    "one relationship per dependency edge", "[workspace.dependencies]",
+                                    "at first use", 'unused = "deny"', "Adapters { .. }",
                                     "contract-pinning tests", "context gate set", "branch rule", "in-loop story-1",
                                     "make new-context", "feat/<N>-<context>"],
     "rust-error-handling": ["thiserror", "property_path()", "code()", "one application error enum", "BusError",
@@ -1107,6 +1311,9 @@ FR31 = {
                                  "std::env::var", "docs/environment.md", "?=", "docs-check rule 5",
                                  "never committed", "scripts/with-env.sh"],
 }
+# FR-31's existence rule, scoped to the name-check step: the same words occur in the scaffolder's prose.
+EXISTENCE_RULE = ("2. Check the names against the live tree",
+                  ["live tree", "any group", "`crates/<c>`", "member path", "package name"])
 
 
 def check_skill_anatomy(name):
@@ -1128,6 +1335,8 @@ def check_cc22():
         need(skill(name), [f"`.claude/skills/{name}/SKILL.md`", "`AGENTS.md`"], section(skill(name), "Repository precedence"))
     for name, tokens in FR31.items():
         need(skill(name), tokens)
+    rel, (prefix, tokens) = skill("bounded-context-scaffolding"), EXISTENCE_RULE
+    need(rel, tokens, section(rel, heading_starting(rel, 3, prefix) or "", 3))
 
 
 DOCS_ONLY = ["documentation-sync", "documentation-creation", "code-review", "quality-standards",
@@ -1177,6 +1386,59 @@ def check_cc24():
     entries = [p for p in market.get("plugins", []) if p.get("name") == "rust-backend-sdlc"]
     if entries != [MARKET_ENTRY] or entries[0]["description"] != manifest.get("description"):
         bad(f"marketplace entry {entries} differs from {MARKET_ENTRY}")
+    check_root_readme(ARGS[1])
+    check_ci_wiring(ARGS[2])
+
+
+def check_root_readme(path):
+    """FR-43: the root README's plugin table row and install line."""
+    rows = table_rows(section(path, "Plugins"), r"\[rust-backend-sdlc\]\(plugins/rust-backend-sdlc/\)")
+    if len(rows) != 1 or len(rows[0]) != 2 or not rows[0][1]:
+        bad(f"{path}: the ## Plugins table needs one rust-backend-sdlc row with a description, found {rows}")
+    need(path, [f"claude plugin install rust-backend-sdlc@{ORG.lower()}-plugins"], section(path, "Install"))
+
+
+def yaml_children(text, indent):
+    """{key: text}: the block-mapping entries of TEXT whose key starts at column INDENT."""
+    out, key = {}, None
+    for line in text.split("\n"):
+        match = re.match(r"^ {%d}([A-Za-z0-9_-]+):(.*)$" % indent, line)
+        if match:
+            key = match.group(1)
+            out[key] = match.group(2) + "\n"
+        elif key is not None:
+            out[key] += line + "\n"
+    return out
+
+
+def code_lines(text):
+    return [l for l in text.split("\n") if not l.lstrip().startswith("#")]
+
+
+K7_PINS = ["yamllint==1.38.0", "typos==1.52.0", "prettier@3.9.10", "markdownlint-cli2@0.24.0"]
+PLUGIN_LOOP = re.compile(r"^\s*for \w+ in plugins/php-backend-sdlc plugins/rust-backend-sdlc;")
+RUST_SUITES = "plugins/rust-backend-sdlc/tests/*.bats"
+
+
+def check_ci_wiring(path):
+    """FR-43 and NFR-14: the tag filter, the explicit plugin loops, the K7 pins and the suite budget of ci.yml."""
+    text = Path(path).read_text(encoding="utf-8")
+    top = yaml_children(text, 0)
+    push = yaml_children(top.get("on", ""), 2).get("push", "")
+    if "'rust-backend-sdlc-v*'" not in yaml_children(push, 4).get("tags", ""):
+        bad(f"{path}: on.push.tags lacks 'rust-backend-sdlc-v*'")
+    jobs = yaml_children(top.get("jobs", ""), 2)
+    for job in ("profile-keys-check", "generalization-audit"):
+        if not any(PLUGIN_LOOP.match(l) for l in code_lines(jobs.get(job, ""))):
+            bad(f"{path}: {job} does not iterate plugins/php-backend-sdlc plugins/rust-backend-sdlc")
+    bats = "\n".join(code_lines(jobs.get("bats", "")))
+    for pin in K7_PINS:
+        if pin not in bats:
+            bad(f"{path}: the bats job does not install {pin}")
+    steps = re.split(r"\n(?=      - )", bats)
+    rust = [s for s in steps if RUST_SUITES in s]
+    if len(rust) != 1 or not re.search(r"^        timeout-minutes: 10$", rust[0], re.M):
+        bad(f"{path}: the bats job needs one step running {RUST_SUITES} with timeout-minutes: 10 (NFR-14)")
 
 
 def links(rel):
@@ -1269,6 +1531,8 @@ def check_cc27():
 
 DENY = re.compile("vil" "nacrm|user[-_ ]serv" "ice|mongo[a-z][a-z0-9_]*repo" "sitory|app" "runner|src/us" "er|src/oa" "uth", re.I)
 SLUG = re.compile("rust-service" "-template", re.I)
+# NFR-2: the template's example-context path (crates/<group>/<context> of its sample context), assembled from parts.
+EXAMPLE_CONTEXT = re.compile("company-" "subdomain/some-" "module", re.I)
 
 
 def unfenced_lines(rel):
@@ -1290,6 +1554,8 @@ def check_denylist():
         for n, line in unfenced_lines(rel):
             if DENY.search(line) or SLUG.search(line):
                 bad(f"{rel}:{n}: denylisted identifier outside a # profile-example fence")
+            if EXAMPLE_CONTEXT.search(line):
+                bad(f"{rel}:{n}: the template's example-context path outside a # profile-example fence")
 
 
 def slug_hits(rel):
@@ -1412,9 +1678,18 @@ def check_cc33():
     need(rel, ["result: SUCCESS | ESCALATED", "`met: yes (degraded)`", "`met: yes`", "`met: no`",
                "a stage ending `SUCCESS-WITH-REPORT` yields run `result: SUCCESS`",
                "### Story <E>.<k>: Fix QA findings <n>", "**Acceptance Criteria:**", "- Given "])
+    # AC-3.2: one row per stage, each naming its durable record and its validity rule.
     rows = {r[0].strip("`"): r for r in table_rows(section(rel, "Resume table"), r"`[a-z-]+`")}
+    if list(rows) != LOOP_STAGES:
+        bad(f"{rel}: the resume table rows are {list(rows)}, expected {LOOP_STAGES}")
+    for stage, row in rows.items():
+        if len(row) < 3 or not row[1] or not row[2]:
+            bad(f"{rel}: the resume table row of {stage} lacks its durable record or its validity rule")
     for stage, rule in RESUME.items():
-        if stage not in rows or not rows[stage][2].startswith(rule):
+        record, validity = (rows.get(stage, []) + ["", "", ""])[1:3]
+        if not record.startswith(f"the `{stage}` row"):
+            bad(f"{rel}: the resume table row of {stage} does not name the `{stage}` row as its durable record")
+        if not validity.startswith(rule):
             bad(f"{rel}: the resume table row of {stage} does not name the {rule} rule")
 
 
@@ -1560,6 +1835,45 @@ def check_edges():
     check_agent_refs()
 
 
+# --- NFR-15: template lists read at runtime --------------------------------------------
+
+RUNTIME_READS = [  # (file, heading prefix, level, tokens): where each template list is read at runtime
+    (skill("quality-standards"), "1. Read the gate order", 3, ["`make.ci_list`"]),
+    (skill("quality-standards"), "2. Look up the bar", 3,
+     ["read at runtime from `docs/repository-settings.md`", "`cargo xtask config-guard --list`"]),
+    (skill("verification-workflow"), "4. Read the gate order", 3, ["`make.ci_list`", "CI_[A-Z_]+_TARGETS"]),
+    (skill("bounded-context-scaffolding"), "5. Work the checklist", 3, ["`make help`"]),
+    (skill("bounded-context-scaffolding"), "6. Run the context gate set", 3,
+     ["read at runtime from the Makefile's `CI_*_TARGETS` lines"]),
+    (cmd("rs-sdlc-new-context"), "Step 6 — ", 3, ["read at runtime", "`CI_*_TARGETS`"]),
+]
+STAGE_LIST = re.compile(r"^(CI_[A-Z_]+_TARGETS)\s*:?=\s*(.*)$", re.M)
+RESTATED_ASSIGN = re.compile(r"\bCI_[A-Z_]+_TARGETS\s*:?=\s*[a-z]")
+
+
+def gate_run():
+    """A run of three or more of the template's stage-member gates separated by blanks, the shape
+    of a restated CI_*_TARGETS list; the members come from the template stub's Makefile."""
+    gates = {g for _, members in STAGE_LIST.findall(read("tests/fixtures/rust-repo/Makefile")) for g in members.split()}
+    if not gates:
+        return None
+    alt = "|".join(sorted(map(re.escape, gates), key=len, reverse=True))
+    return re.compile(r"(?<![\w.-])(?:%s)(?:[ \t]+(?:%s)){2,}(?![\w-])" % (alt, alt))
+
+
+def check_runtime_reads():
+    for rel, prefix, level, tokens in RUNTIME_READS:
+        need(rel, tokens, section(rel, heading_starting(rel, level, prefix) or "", level))
+    run = gate_run()
+    if run is None:
+        bad("tests/fixtures/rust-repo/Makefile: no CI_*_TARGETS list to read the template's gates from")
+        return
+    for rel in component_files():
+        for n, line in unfenced_lines(rel):
+            if RESTATED_ASSIGN.search(line) or run.search(line):
+                bad(f"{rel}:{n}: a template CI_*_TARGETS list restated outside a # profile-example fence: {line.strip()[:100]}")
+
+
 # --- D-map ---------------------------------------------------------------------------
 
 def test_names(suite):
@@ -1570,6 +1884,9 @@ def test_names(suite):
 
 
 def check_dmap_row(row, own_ids):
+    # NFR-3: every degrade row is mapped to at least one bats, contract or harness case.
+    if not (re.findall(r"`[^`]+`", row[3]) or re.findall(r"CC-\d+", row[4]) or re.findall(r"`[^`]+`", row[5])):
+        bad(f"{row[0]}: no test cited")
     for name in re.findall(r"`([^`]+)`", row[3]):
         if name not in test_names(name.split(":", 1)[0]):
             bad(f"{row[0]}: no @test {name!r} in tests/{name.split(':', 1)[0]}.bats")
@@ -1698,7 +2015,7 @@ CC_DISPATCH=(validate_context_name resume_point derive_issue_number is_commit_su
   cc_assert cc14
 }
 
-@test "component-counts: CC-15 P1-P7 only on prohibition lines, with the positive cases request-ai-reviews.sh --force and git config --get core.hooksPath" {
+@test "component-counts: CC-15 P1-P7 only on prohibition lines, with the positive cases request-ai-reviews.sh --force and git config --get core.hooksPath; no discard of user changes and no QA stack stop (NFR-5)" {
   cc_assert cc15
 }
 
@@ -1712,7 +2029,7 @@ CC_DISPATCH=(validate_context_name resume_point derive_issue_number is_commit_su
   cc_assert cc17
 }
 
-@test "component-counts: CC-18 new-service S1-S14 in order with the S3 before-hooks sentence, hooks_active at S11, the subjects and the hand-off" {
+@test "component-counts: CC-18 new-service S1-S14 in order with the S3 before-hooks sentence, the S8 60-minute bootstrap cap, hooks_active at S11, the subjects and the hand-off" {
   cc_assert cc18
 }
 
@@ -1738,10 +2055,11 @@ CC_DISPATCH=(validate_context_name resume_point derive_issue_number is_commit_su
 
 # --- CC-24 to CC-36: packaging and hygiene ---------------------------------------------
 
-@test "component-counts: CC-24 plugin.json and the marketplace entry are exact" {
-  local market="$REPO_ROOT/.claude-plugin/marketplace.json"
-  [ -f "$market" ] || skip "the marketplace manifest .claude-plugin/marketplace.json is not part of this checkout"
-  cc_assert cc24 "$market"
+@test "component-counts: CC-24 plugin.json and the marketplace entry are exact; the root README row and install line and the ci.yml wiring are present (FR-43, NFR-14)" {
+  local market="$REPO_ROOT/.claude-plugin/marketplace.json" readme="$REPO_ROOT/README.md" ci="$REPO_ROOT/.github/workflows/ci.yml"
+  [ -f "$market" ] && [ -f "$readme" ] && [ -f "$ci" ] ||
+    skip "the repository wiring (.claude-plugin/marketplace.json, README.md, .github/workflows/ci.yml) is not part of this checkout"
+  cc_assert cc24 "$market" "$readme" "$ci"
 }
 
 @test "component-counts: CC-25 README commands, workflows, doc links and version floors equal to docs/setup-walkthrough.md" {
@@ -1756,7 +2074,7 @@ CC_DISPATCH=(validate_context_name resume_point derive_issue_number is_commit_su
   cc_assert cc27
 }
 
-@test "component-counts: CC-28 generalization grep over the five component directories and the template slug only where allowed" {
+@test "component-counts: CC-28 generalization grep and the template example-context path over the five component directories, and the template slug only where allowed" {
   cc_assert cc28
 }
 
@@ -1830,21 +2148,47 @@ CC_DISPATCH=(validate_context_name resume_point derive_issue_number is_commit_su
   cc_assert edges
 }
 
-@test "component-counts: the checks fail on a broken copy (a removed agent, a drifted exit string, a leaked slug)" {
-  local copy="$BATS_TEST_TMPDIR/copy" good="$PLUGIN_ROOT"
+@test "component-counts: NFR-15 template lists read at runtime, never restated outside a # profile-example fence" {
+  cc_assert runtime_reads
+}
+
+@test "component-counts: the checks fail on a broken copy (a removed agent, a drifted exit string, a leaked slug or example-context path, a dropped FR-31 token, an unmapped degrade row)" {
+  local copy="$BATS_TEST_TMPDIR/copy" good="$PLUGIN_ROOT" rel
   cp -R "$good" "$copy"
   rm "$copy/agents/ci-fixer.md"
   cc_fails "$copy" cc02 ci-fixer
+  sed 's/ at most once per head commit//' "$good/agents/ci-fixer.md" >"$copy/agents/ci-fixer.md"
+  cc_fails "$copy" cc21 'once per head commit'
+  sed 's/ These rows are never fixed and never re-run;//' "$good/agents/ci-fixer.md" >"$copy/agents/ci-fixer.md"
+  cc_fails "$copy" cc21 'never fixed'
+  sed '/^1\. \*\*Check name/s/: the row is reported with its log URL and never "fixed"\./: the row is fixed from the job definition./' \
+    "$good/agents/ci-fixer.md" >"$copy/agents/ci-fixer.md"
+  cc_fails "$copy" cc21 'reported with its log URL and never "fixed"'
+  sed '/^| a lowered threshold |/d' "$good/agents/pr-comment-resolver.md" >"$copy/agents/pr-comment-resolver.md"
+  cc_fails "$copy" cc21 'Declined categories'
+  sed '/^| DoS |/d' "$good/agents/security-auditor.md" >"$copy/agents/security-auditor.md"
+  cc_fails "$copy" cc21 'Families rule ids'
   sed 's/zero new gate findings AND/zero new findings AND/' "$good/docs/sdlc-loop.md" >"$copy/docs/sdlc-loop.md"
   cc_fails "$copy" cc12 docs/sdlc-loop.md
   printf '\nSee %s for the defaults.\n' "rust-service""-template" >>"$copy/skills/testing-workflow/SKILL.md"
   cc_fails "$copy" cc28 testing-workflow
+  printf '\nThe sample context lives in crates/%s.\n' "company-subdomain""/some-module" >>"$copy/skills/testing-workflow/SKILL.md"
+  cc_fails "$copy" cc28 'example-context path'
   cc_fence "$copy/skills/testing-workflow/SKILL.md" 'make tests-with-coverage COVERAGE_GATE_CMD=true'
   cc_fails "$copy" cc36 COVERAGE_GATE_CMD
+  rel=skills/bounded-context-scaffolding/SKILL.md
+  sed 's/one relationship per dependency edge/one relationship per edge/g' "$good/$rel" >"$copy/$rel"
+  cc_fails "$copy" cc22 'one relationship per dependency edge'
+  sed 's/, a member path ending in `<c>\/<layer>`//' "$good/$rel" >"$copy/$rel"
+  cc_fails "$copy" cc22 'member path'
+  rel=docs/testing/test-strategy.md
+  sed 's/^\(| D24 | [^|]* | [^|]* | \).*$/\1— | — | — |/' "$good/$rel" >"$copy/$rel"
+  cc_fails "$copy" dmap 'D24: no test cited' "$BATS_TEST_FILENAME"
 }
 
-@test "component-counts: the row and code-line checks fail on a drifted copy (stage row, Q table, cargo, &, git, make)" {
+@test "component-counts: the row and code-line checks fail on a drifted copy (stage row, Q table, cargo, &, git, make, stop, discard, budget, wiring, restated list)" {
   local copy="$BATS_TEST_TMPDIR/copy" good="$PLUGIN_ROOT" rel
+  local market="$REPO_ROOT/.claude-plugin/marketplace.json" readme="$BATS_TEST_TMPDIR/README.md" ci="$BATS_TEST_TMPDIR/ci.yml"
   cp -R "$good" "$copy"
   sed 's/| A 5, B 5, C 3, W 6, R 3 |$/| A 9, B 5, C 3, W 6, R 3 |/' "$good/commands/rs-sdlc.md" >"$copy/commands/rs-sdlc.md"
   cc_fails "$copy" cc12 'row of finish-pr'
@@ -1852,22 +2196,71 @@ CC_DISPATCH=(validate_context_name resume_point derive_issue_number is_commit_su
     sed 's/^| Q1 | `make.format_check`/| Q1 | `make.lint_code`/' "$good/$rel" >"$copy/$rel"
   done
   cc_fails "$copy" cc35 'differs from FR-19'
+  sed 's/never proposes a suppression, an exclusion or a lowered limit:/never proposes a suppression:/' \
+    "$good/agents/code-quality-reviewer.md" >"$copy/agents/code-quality-reviewer.md"
+  cc_fails "$copy" cc21 'an exclusion or a lowered limit'
+  sed '/^7\. \*\*No panics\.\*\*/d' "$good/agents/rust-implementer.md" >"$copy/agents/rust-implementer.md"
+  cc_fails "$copy" cc21 '`unwrap`'
   sed 's/Mutation run rule (PA-13)/Mutation rule/' "$good/commands/rs-sdlc-review.md" >"$copy/commands/rs-sdlc-review.md"
   cc_fails "$copy" cc20 'Mutation run rule (PA-13)'
   cc_fence "$copy/skills/testing-workflow/SKILL.md" 'cargo +nightly build'
   cc_fails "$copy" cc32 'cargo +nightly build'
   printf '\nRun cargo build --release first.\n' >>"$copy/agents/ci-fixer.md"
   cc_fails "$copy" cc32 'cargo build --release'
+  cc_fence "$copy/agents/ci-fixer.md" 'git push -u origin HEAD'
+  cc_fails "$copy" cc21 'git push -u origin HEAD'
   sed 's/28/27/g' "$good/commands/rs-sdlc-review.md" >"$copy/commands/rs-sdlc-review.md"
   cc_fails "$copy" cc20 'Skill triage: 28 verdicts'
   sed -e 's/post-review-findings.sh" <lens> --pr <n>/post-review-findings.sh" --pr <n>/' \
     -e 's/<!-- rust-sdlc-review:<lens> -->/<!-- review -->/g' \
     "$good/commands/rs-sdlc-finish-pr.md" >"$copy/commands/rs-sdlc-finish-pr.md"
   cc_fails "$copy" cc20 'rust-sdlc-review:<lens>'
+  sed 's/^| `qa` | the `qa` row |/| `qa` |  |/' "$good/commands/rs-sdlc.md" >"$copy/commands/rs-sdlc.md"
+  cc_fails "$copy" cc33 'resume table row of qa lacks its durable record'
+  sed '/^### Step 8 — /,/^### Step 9 — /s/  # Bash tool, run_in_background: true//' \
+    "$good/commands/rs-sdlc-setup.md" >"$copy/commands/rs-sdlc-setup.md"
+  cc_fails "$copy" cc17 "Step 8 — docs-check (\`make docs-check\`) lacks 'run_in_background: true'"
+  sed 's/`S8: NOT RUN (no Docker)`, //' "$good/commands/rs-sdlc-new-service.md" >"$copy/commands/rs-sdlc-new-service.md"
+  cc_fails "$copy" cc18 "lacks 'S8: NOT RUN (no Docker)'"
+  sed '/common\.sh" validate_context_name/d' "$good/commands/rs-sdlc-new-context.md" >"$copy/commands/rs-sdlc-new-context.md"
+  cc_fails "$copy" cc19 'validate_context_name is not called before make new-context'
+  sed 's/ After a trip there is no second .* is never edited\.$//' \
+    "$good/commands/rs-sdlc-implement.md" >"$copy/commands/rs-sdlc-implement.md"
+  cc_fails "$copy" cc20 "(Step 5 breaker trip): missing 'there is no second \`bmalph run\`'"
+  sed 's/part (a), the commit convention, found by the literal `(#<N>)` with the real issue number, and //' \
+    "$good/commands/rs-sdlc-implement.md" >"$copy/commands/rs-sdlc-implement.md"
+  cc_fails "$copy" cc20 "(Step 2 PROJECT_CONTEXT check): missing 'part (a), the commit convention'"
+  sed 's/extensions\.code//g' "$good/commands/rs-sdlc-qa.md" >"$copy/commands/rs-sdlc-qa.md"
+  cc_fails "$copy" cc20 "(probe rule GraphQL.): missing 'extensions.code'"
+  sed 's/, `## Product Scope`//' "$good/commands/rs-sdlc-plan.md" >"$copy/commands/rs-sdlc-plan.md"
+  cc_fails "$copy" cc20 "(prd.md row): '\`## Product Scope\`' missing"
   cc_fence "$copy/commands/rs-sdlc-plan.md" 'make ci-tests & wait_log x'
   cc_fails "$copy" cc11 'make ci-tests & wait_log x'
   cc_fence "$copy/commands/rs-sdlc-plan.md" 'git push upstream feature'
   cc_fails "$copy" cc14 'git push upstream feature'
   cc_fence "$copy/commands/rs-sdlc-plan.md" 'make ci-tests ci-static-analysis FOO=1'
   cc_fails "$copy" cc36 'variable FOO'
+  cc_fence "$copy/commands/rs-sdlc-qa.md" 'make stop'
+  cc_fails "$copy" cc15 'QA stops the shared stack'
+  printf '\nStart from a clean tree: git reset --hard HEAD.\n' >>"$copy/skills/testing-workflow/SKILL.md"
+  cc_fails "$copy" cc15 'git reset --hard HEAD'
+  sed 's/60 min/90 min/g' "$good/commands/rs-sdlc-new-service.md" >"$copy/commands/rs-sdlc-new-service.md"
+  cc_fails "$copy" cc18 '60 min'
+  sed 's/make\.ci_list/make.gate_list/g' "$good/skills/quality-standards/SKILL.md" >"$copy/skills/quality-standards/SKILL.md"
+  cc_fails "$copy" runtime_reads 'make.ci_list'
+  cc_fence "$copy/agents/ci-fixer.md" 'format-check validate-manifest check-crate-isolation'
+  cc_fails "$copy" runtime_reads 'restated outside a # profile-example fence: format-check'
+  grep -m1 '^CI_TESTS_TARGETS' "$good/skills/verification-workflow/SKILL.md" >>"$copy/skills/testing-workflow/SKILL.md"
+  cc_fails "$copy" runtime_reads 'restated outside a # profile-example fence: CI_TESTS_TARGETS'
+  if [[ -f "$market" && -f "$REPO_ROOT/README.md" && -f "$REPO_ROOT/.github/workflows/ci.yml" ]]; then
+    sed -e "s/, 'rust-backend-sdlc-v\*'//" -e 's#plugins/php-backend-sdlc plugins/rust-backend-sdlc#plugins/php-backend-sdlc#' \
+      -e 's/typos==1\.52\.0/typos==1.51.0/' -e '/timeout-minutes: 10$/d' "$REPO_ROOT/.github/workflows/ci.yml" >"$ci"
+    sed '/^| \[rust-backend-sdlc\](/d; s/install rust-backend-sdlc@/install rust-sdlc@/' "$REPO_ROOT/README.md" >"$readme"
+    cc_fails "$copy" cc24 "lacks 'rust-backend-sdlc-v*'" "$market" "$readme" "$ci"
+    cc_fails "$copy" cc24 'generalization-audit does not iterate' "$market" "$readme" "$ci"
+    cc_fails "$copy" cc24 'typos==1.52.0' "$market" "$readme" "$ci"
+    cc_fails "$copy" cc24 'timeout-minutes: 10' "$market" "$readme" "$ci"
+    cc_fails "$copy" cc24 'one rust-backend-sdlc row' "$market" "$readme" "$ci"
+    cc_fails "$copy" cc24 'claude plugin install rust-backend-sdlc@' "$market" "$readme" "$ci"
+  fi
 }
