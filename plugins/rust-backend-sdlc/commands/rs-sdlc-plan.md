@@ -44,7 +44,7 @@ Exit 1: stop with `run /rs-sdlc-setup on the default branch and commit the resul
    ```
 
    Exit 1 (no source yields a number) → `ESCALATED` with `blocking_finding: no issue number (derive_issue_number exit 1)` and `recommended_action: run /rs-sdlc-plan #<N>, or run /rs-sdlc-issue first`.
-2. An empty branch (detached `HEAD`) or the value of `project.default_branch` → `ESCALATED` (`blocking_finding: planning started on <branch>`, `recommended_action: check out <type>/<N>-<slug> from the default branch, then run /rs-sdlc-plan again`); nothing is written.
+2. An empty branch (detached `HEAD`) or the value of `project.default_branch` → `ESCALATED` (`blocking_finding: planning started on <branch>`, `recommended_action: check out <type>/<N>-<slug> from the default branch, then run /rs-sdlc-plan again`); nothing is written. A branch that names an issue in the branch grammar of `derive_issue_number` (`^[a-z]+/([0-9]+)-`, the number `<M>` read without leading zeros, so `feat/01-slug` names issue 1 and a number of 0 names none) whose `<M>` is not the `<N>` of item 1 → `ESCALATED` (`blocking_finding: issue #<N> conflicts with branch <branch> (issue <M>)`, `recommended_action: check out the branch of issue #<N>, or run /rs-sdlc-plan #<M> on this branch`); nothing is written, because /rs-sdlc-implement refuses a bundle whose `<N>` is not the branch's.
 3. Read the issue once; this read is also the skill's step-1 read and is not repeated:
 
    ```bash

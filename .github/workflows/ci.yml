@@ -134,15 +134,24 @@ jobs:
           "$RUNNER_TEMP/k7/node_modules/.bin/prettier" --version
           # markdownlint-cli2 --help exits 2 by design; print the installed version instead.
           npm ls --prefix "$RUNNER_TEMP/k7" markdownlint-cli2
-      - name: Run bats suites
+      - name: Run bats suites (other plugins)
         run: |
           set -euo pipefail
-          mapfile -t files < <(find plugins -type f -path '*/tests/*.bats')
+          # The rust-backend-sdlc suites run in the next step, under their own budget.
+          mapfile -t files < <(find plugins -type f -path '*/tests/*.bats' -not -path 'plugins/rust-backend-sdlc/*')
           if [ "${#files[@]}" -eq 0 ]; then
             echo "No bats tests yet — pass"
             exit 0
           fi
           npx --yes bats "${files[@]}"
+      # NFR-14: the rust-backend-sdlc suites finish in 10 minutes or less in
+      # this job (component-counts CC-24 pins the step and its timeout). The
+      # suites run one after another; each runs its cases four at a time.
+      - name: Run rust-backend-sdlc bats suites (NFR-14 budget)
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          npx --yes bats --jobs 4 --no-parallelize-across-files plugins/rust-backend-sdlc/tests/*.bats
 
   frontmatter-check:
     runs-on: ubuntu-latest

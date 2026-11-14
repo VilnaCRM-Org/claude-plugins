@@ -333,4 +333,4 @@ A run can be repeated with the same arguments, plus `--issue <N>` once the issue
 
 ## K9/K13 record
 
-This section is filled by the first post-release run: the hands-on time from the command to the bootstrap pull request (K9, target at most 15 minutes) and the bootstrap pull request with every check that no human gates green on its first push (K13). No run is recorded yet.
+This section is filled by the first post-release run: the hands-on time from the command to the bootstrap pull request (K9, target at most 15 minutes) and the bootstrap pull request with every check that no human gates green on its first push (K13, target at most 2 hours from S1). No run is recorded yet.

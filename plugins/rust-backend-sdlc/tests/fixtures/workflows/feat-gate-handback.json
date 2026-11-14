@@ -233,7 +233,9 @@
           "gate": 1
         },
         "journal": [
-          "1: READY -> confirmation snapshot -> READY on c3d4e5f"
+          "1: GATE -> hand-back (gate 1/3) -> GATE on b2c3d4e returned to the caller",
+          "2: GATE hand-back -> rs-sdlc-fr-nfr-review --pr 34 --head b2c3d4e (gate 1/3) -> SUCCESS, iterations 2, 1 fixed, fixes published",
+          "3: READY -> confirmation snapshot -> READY on c3d4e5f"
         ],
         "degrade_notes": []
       }

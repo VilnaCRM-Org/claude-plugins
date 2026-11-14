@@ -5,7 +5,7 @@ export const meta = {
   whenToUse:
     'Top level only: start it directly with the Workflow tool in a repository prepared by /rs-sdlc-setup (it nests rs-sdlc-review-panel, rs-sdlc-fr-nfr-review and rs-sdlc-pr-until-green one level deep, so no other workflow may call it). Give it the task text, an issue URL (it becomes issue) or nothing on a <type>/<N>-<slug> branch; or the object form {task, slug, issue, reviewers, maxImplementRounds: 5, maxQaLoops: 2}, where the max values only lower the caps and reviewers defaults to null (the PR sensor reads the profile). It keeps no state comment: resume inside a run is the carry hand-back of pr-until-green, resume across sessions is the command path (/rs-sdlc <N>). Returns {result, task, branch, issue_url, specs_dir, pr_url, stages, degrade_notes, escalation?}.',
   phases: [
-    { title: 'Setup check', detail: 'validate-profile.sh, setup-preflight.sh, governance markers in CLAUDE.md and AGENTS.md, _bmad/ present; a failure halts with: run /rs-sdlc-setup on the default branch and commit the result' },
+    { title: 'Setup check', detail: 'validate-profile.sh, setup-preflight.sh, governance markers in CLAUDE.md and AGENTS.md, _bmad/ present, the null test keys of the profile read; a failure halts with: run /rs-sdlc-setup on the default branch and commit the result' },
     { title: 'Resolve plan', detail: 'issue, <type>/<N>-<slug> branch and specs/<N>-<slug>/ through the issue and plan procedures; a new bundle is committed by the publish step' },
     { title: 'Stage', detail: 'ADR-10a re-entry protocol: ralph_fix_plan_prepare; stage-planning-artifacts.sh, bmalph implement and (keep-progress) ralph_fix_plan_restore only after FIX_PLAN: absent or ARCHIVED:; always ralph_agent_md_patch and the two-part .ralph/PROJECT_CONTEXT.md check' },
     { title: 'Implement', detail: 'rust-implementer rounds over .ralph/@fix_plan.md (read only), layer-first, at most 4 stories per round; parallel stories run the DB-free targets, one serialized verify <round> step runs the DB-backed targets; 5 rounds for the whole run; the publish step commits each story' },
@@ -227,7 +227,13 @@ const specsPath = () => run.specsDir.replace(/\/+$/, '')
 const SETUP_SCHEMA = {
   type: 'object',
   required: ['ok', 'message'],
-  properties: { ok: { type: 'boolean' }, message: { type: 'string' }, failures: { type: 'array', items: { type: 'string' } }, warnings: { type: 'array', items: { type: 'string' } } },
+  properties: {
+    ok: { type: 'boolean' },
+    message: { type: 'string' },
+    failures: { type: 'array', items: { type: 'string' } },
+    warnings: { type: 'array', items: { type: 'string' } },
+    null_test_keys: { type: 'array', items: { type: 'string' } },
+  },
 }
 
 const PLAN_SCHEMA = {
@@ -278,7 +284,7 @@ const STAGE_SCHEMA = {
 
 const STORY_SCHEMA = {
   type: 'object',
-  required: ['status', 'exit_signal'],
+  required: ['status', 'exit_signal', 'tests_status'],
   properties: {
     status: { type: 'string', enum: ['COMPLETE', 'IN_PROGRESS', 'BLOCKED'] },
     exit_signal: { type: 'boolean' },
@@ -354,7 +360,8 @@ function setupPrompt() {
     `  grep -q '${BEGIN_MARKER}' AGENTS.md`,
     '  test -d _bmad',
     'When the runtime refuses the grep or test call, the Grep tool (fixed string, one file at a time) or the Glob tool (_bmad/*) answers the same question; a refused call is never read as a failed check.',
-    'ok is true only when validate-profile.sh exits 0, setup-preflight.sh prints no FAIL: line, both markers are present and _bmad/ exists. message = the first failing line verbatim (a VIOLATION: or FAIL: line, "governance marker missing in <file>" or "_bmad/ absent (test -d _bmad exit 1)"), else "ok"; failures = every failing line; warnings = every WARN: line of the preflight.',
+    'Then read .claude/rust-sdlc.yml with the Read tool for the four test keys make.unit_tests, make.integration_tests, make.tests_with_coverage and make.e2e_tests.',
+    'ok is true only when validate-profile.sh exits 0, setup-preflight.sh prints no FAIL: line, both markers are present and _bmad/ exists. message = the first failing line verbatim (a VIOLATION: or FAIL: line, "governance marker missing in <file>" or "_bmad/ absent (test -d _bmad exit 1)"), else "ok"; failures = every failing line; warnings = every WARN: line of the preflight; null_test_keys = each of the four test keys whose value is null, [] when all four are mapped.',
     'Setup is a human decision on the default branch: never run /rs-sdlc-setup, generate-profile.sh, inject-governance.sh or merge-settings.sh, and never edit the profile or the managed block.',
   ].join('\n')
 }
@@ -409,6 +416,7 @@ function modeLine(mode, round, size) {
 
 const lastReply = new Map()
 const storyFiles = new Map()
+const verifyFiles = new Map()
 
 function storyPrompt(s, round, mode, size) {
   const prior = lastReply.get(s.id)
@@ -477,7 +485,7 @@ function publishPrompt(what, changes) {
     '3. Format, only when a change is listed: make <make.format> in the background, in suffix form (RUN_IN_CONTAINER=1 after the target in container mode); make.format null → the note "format: not run (capability absent)".',
     '4. Branch guard: "$P/scripts/lib/common.sh" protected_changes <merge-base-sha>. A PROTECTED: <path> (<commit>) line → return pushed false with protected "<path> (<commit>)"; a PROFILE_CHANGED: line → return pushed false with profile_changed true; nothing is committed or pushed.',
     '5. Hooks: "$P/scripts/lib/common.sh" hooks_active must print HOOKS: active; HOOKS: unset → make <make.install_hooks> in the foreground, then check again; any other line → return pushed false with that line as reason.',
-    "6. Per change: stage exactly its paths that git status --porcelain lists as changed with git add -- '<path>' … (a change none of whose paths changed is skipped and its subject named in skipped); git diff --cached --name-only must list only those paths, else return pushed false. Pre-validate the subject: make <make.check_commit_message> COMMIT_TITLE='<subject>' in the foreground when that key is mapped and the subject has no space-hyphen sequence, else \"$P/scripts/lib/common.sh\" is_commit_subject '<subject>'. Write the message file with `\"$P/scripts/lib/common.sh\" commit_msg_file '<subject>'` (it prints <file>; a ' inside the subject is written '\\''), then commit in the background with `git commit -F <file>` (`RUN_IN_CONTAINER=1 git commit -F <file>` in container mode).",
+    "6. Per change: stage exactly its paths that git status --porcelain lists as changed with git add -- '<path>' … (a change none of whose paths changed is skipped and its subject named in skipped); git diff --cached --name-only must list only those paths, else return pushed false. A path that ends in / names a directory: it stands for every path under it that git status --porcelain --untracked-files=all -- '<path>' lists, tracked or not, and each of those counts as listed. Pre-validate the subject: make <make.check_commit_message> COMMIT_TITLE='<subject>' in the foreground when that key is mapped and the subject has no space-hyphen sequence, else \"$P/scripts/lib/common.sh\" is_commit_subject '<subject>'. Write the message file with `\"$P/scripts/lib/common.sh\" commit_msg_file '<subject>'` (it prints <file>; a ' inside the subject is written '\\''), then commit in the background with `git commit -F <file>` (`RUN_IN_CONTAINER=1 git commit -F <file>` in container mode).",
     '7. Push once, after the last commit and also when nothing was committed, in the background: `git push -u origin HEAD` (`RUN_IN_CONTAINER=1 git push -u origin HEAD` in container mode).',
     "8. A failing hook (the log of step 6 or 7 shows a commit-msg, pre-commit or pre-push failure): run make <make.format> once, re-stage the same paths with git add -- '<path>' … (after a failed push, commit the reformatted files first, with the subject of the last change, or style(#<N>): apply make format when no change was listed) and retry the failed call once; a second failure → return pushed false with the last 40 log lines as log_tail. Fix the cause, never the hook.",
     'Never pass --no-verify or -n, never set core.hooksPath or use git -c core.hooksPath, never force-push (--force, --force-with-lease, -f), never amend, rebase or reset, never push to the default branch and never apply or remove a label.',
@@ -546,14 +554,17 @@ async function publish(what, ph, changes) {
 }
 
 // Fail closed: every listed change is either committed or reported as skipped
-// (none of its paths changed); a silent drop is never a pass.
+// (none of its paths changed); a silent drop is never a pass, and a required
+// change (the bundle the plan reported uncommitted) is never skipped.
+const landedAs = (c, commits, skipped) => commits.includes(withIssue(c.subject)) || (!c.required && skipped.includes(withIssue(c.subject)))
+
 function publishLanded(what, changes, pub) {
   const commits = isList(pub.commits) ? pub.commits.map((s) => s.trim()) : []
   const skipped = isList(pub.skipped) ? pub.skipped.map((s) => s.trim()) : []
-  const lost = changes.map((c) => withIssue(c.subject)).filter((s) => !commits.includes(s) && !skipped.includes(s))
+  const lost = changes.filter((c) => !landedAs(c, commits, skipped)).map((c) => withIssue(c.subject))
   if (lost.length) {
     record(`publish ${what} (${changes.length} change(s))`, `pushed ${sha7(pub.head)} without ${lost.length} listed change(s)`)
-    return { finding: `publish ${what} reported a push without committing or skipping: ${lost.map((s) => `'${clip(s, 120)}'`).join(', ')}`, action: 'inspect git status and git log of the branch, commit the missing change by hand through the git rules, then re-run' }
+    return { finding: `publish ${what} reported a push without committing: ${lost.map((s) => `'${clip(s, 120)}'`).join(', ')}`, action: 'inspect git status and git log of the branch, commit the missing change by hand through the git rules, then re-run' }
   }
   record(`publish ${what} (${changes.length} change(s))`, `${commits.length} commit(s), pushed ${sha7(pub.head)}${skipped.length ? `; skipped ${skipped.length}` : ''}`)
   return null
@@ -620,13 +631,12 @@ function nextBatch(pending) {
 const UNTRACKED_PREFIXES = ['/', 'target/', '.ralph/']
 const trackablePath = (p) => p !== '' && !UNTRACKED_PREFIXES.some((prefix) => p.startsWith(prefix)) && !p.split('/').includes('..')
 
+const pathsOf = (reply) => (isList(reply.files) ? reply.files : []).map((f) => f.trim()).filter(trackablePath)
+
 function track(id, reply, round) {
   if (!reply) return
   const files = storyFiles.get(id) || new Set()
-  for (const f of isList(reply.files) ? reply.files : []) {
-    const p = f.trim()
-    if (trackablePath(p)) files.add(p)
-  }
+  for (const p of pathsOf(reply)) files.add(p)
   storyFiles.set(id, files)
   lastReply.set(id, { round, status: reply.status, recommendation: typeof reply.recommendation === 'string' ? clip(reply.recommendation, 300) : null })
 }
@@ -663,27 +673,46 @@ async function dispatchRound(pending) {
   return { round, mode, batch, replies, ran }
 }
 
-// A serial story is complete with STATUS: COMPLETE and EXIT_SIGNAL true.
-const serialEnd = ({ replies }) => ({ completed: replies.filter(({ r }) => r && r.status === 'COMPLETE' && r.exit_signal === true), verifyText: '' })
+// STATUS: COMPLETE counts only without a failing test: TESTS_STATUS PASSING,
+// or NOT_RUN when every test key the mode made due is null (D1). A parallel
+// round makes make.unit_tests due, a serial round and a verify step all four
+// test keys. A key counts as null only when the setup check listed it in
+// null_test_keys, so an unverified NOT_RUN never closes a story.
+const TEST_KEYS = ['make.unit_tests', 'make.integration_tests', 'make.tests_with_coverage', 'make.e2e_tests']
+const nullTestKeys = new Set()
+const dueTests = (mode) => (mode === 'parallel' ? TEST_KEYS.slice(0, 1) : TEST_KEYS)
+const testsDone = (r, mode) => r.tests_status === 'PASSING' || (r.tests_status === 'NOT_RUN' && dueTests(mode).every((k) => nullTestKeys.has(k)))
+
+// A serial story, and a verify step, complete with STATUS: COMPLETE,
+// EXIT_SIGNAL true and a TESTS_STATUS that testsDone accepts for the mode.
+const finished = (r, mode) => Boolean(r) && r.status === 'COMPLETE' && r.exit_signal === true && testsDone(r, mode)
+const serialEnd = ({ replies }) => ({ completed: replies.filter(({ r }) => finished(r, 'serial')), verifyText: '' })
+
+// Why a COMPLETE reply leaves its story open: no EXIT_SIGNAL true (a parallel
+// story never signals exit) or a TESTS_STATUS that testsDone refuses.
+function shortfall(r, mode) {
+  if (mode !== 'parallel' && r.exit_signal !== true) return ' without EXIT_SIGNAL'
+  return testsDone(r, mode) ? '' : ` with TESTS_STATUS ${clip(r.tests_status ?? 'missing', 20)}`
+}
 
 // A parallel round ends with the serialized verify step: the written stories
-// count only when it completes. Returns {halt} on BLOCKED, else {completed,
-// verifyText}.
+// count only when it completes. Its files are kept per round for the publish
+// step (verifyOnly). Returns {halt} on BLOCKED, else {completed, verifyText}.
 async function verifyEnd({ round, batch, replies, ran }, doneNow) {
-  const written = replies.filter(({ r }) => r && r.status === 'COMPLETE')
+  const written = replies.filter(({ r }) => r && r.status === 'COMPLETE' && testsDone(r, 'parallel'))
   const v = await agent(verifyPrompt(round, batch), { label: `verify ${round}`, phase: 'Implement', agentType: IMPLEMENTER, schema: STORY_SCHEMA })
-  track(`verify ${round}`, v, round)
+  if (v) verifyFiles.set(round, { batch, files: pathsOf(v) })
   if (v && v.status === 'BLOCKED') {
     record(`${ran}, verify ${round}`, 'verify BLOCKED')
     return { halt: implementBlocked(round, `the serialized verify step of round ${round}`, v.recommendation, doneNow) }
   }
-  const verified = Boolean(v && v.status === 'COMPLETE' && v.exit_signal === true)
-  const verifyText = `, verify ${v ? `${v.status}${v.exit_signal === true ? '' : ' (EXIT_SIGNAL false)'}` : 'returned nothing'}`
+  const verified = finished(v, 'verify')
+  const verifyText = `, verify ${v ? `${v.status}${v.status === 'COMPLETE' ? shortfall(v, 'verify') : ''}` : 'returned nothing'}`
   if (!verified) log(`implement round ${round}: the serialized verify step did not complete; the round's stories stay open`)
   return { completed: verified ? written : [], verifyText }
 }
 
-const openState = (r, mode) => (r ? `${r.status}${r.status === 'COMPLETE' && r.exit_signal !== true && mode === 'serial' ? ' without EXIT_SIGNAL' : ''}` : 'no reply')
+const openState = (r, mode) => (r ? `${r.status}${r.status === 'COMPLETE' ? shortfall(r, mode) : ''}` : 'no reply')
 
 function closeRound({ round, mode, batch, replies, ran }, { completed, verifyText }, doneNow) {
   for (const { s } of completed) {
@@ -710,12 +739,31 @@ async function implementRound(pending, doneNow) {
   return null
 }
 
+// The paths only a verify step changed: each goes with the first story of
+// that verify step's round, in fix-plan order, that this call completed. A
+// path a story of this call reports stays with that story. Returns the map
+// story id → paths.
+function verifyOnly(ordered) {
+  const claimed = new Set(ordered.flatMap((s) => [...(storyFiles.get(s.id) || [])]))
+  const extra = new Map()
+  for (const { batch, files } of verifyFiles.values()) {
+    const owner = ordered.find((s) => batch.includes(s))
+    for (const p of owner ? files : []) {
+      if (claimed.has(p)) continue
+      claimed.add(p)
+      extra.set(owner.id, [...(extra.get(owner.id) || []), p])
+    }
+  }
+  return extra
+}
+
 // The publish step commits every story completed by this call, in fix-plan
 // order; the last change also takes every other changed path.
 async function publishStories(doneNow, what) {
   if (!doneNow.length) return null
   const ordered = [...doneNow].sort((a, b) => a.order - b.order)
-  const changes = ordered.map((s, i) => ({ subject: subjectOf(s), files: [...(storyFiles.get(s.id) || [])], rest: i === ordered.length - 1 }))
+  const extra = verifyOnly(ordered)
+  const changes = ordered.map((s, i) => ({ subject: subjectOf(s), files: [...(storyFiles.get(s.id) || []), ...(extra.get(s.id) || [])], rest: i === ordered.length - 1 }))
   return publishOrEscalate({ stage: 'implement', ph: 'Implement', it: `${counters.implement}/${CAP.implement}` }, what, changes)
 }
 
@@ -1026,6 +1074,11 @@ if (!setup || setup.ok !== true) {
   return escalate('setup-check', 'Setup check', '1/1', finding, HALT)
 }
 for (const w of isList(setup.warnings) ? setup.warnings : []) addNote(`setup-preflight ${w}`)
+for (const k of isList(setup.null_test_keys) ? setup.null_test_keys.map((t) => t.trim()) : []) {
+  if (!TEST_KEYS.includes(k)) continue
+  nullTestKeys.add(k)
+  addNote(`${k} absent: ${k.slice(5).replace(/_/g, '-')} not run (capability absent) (D1)`)
+}
 record('validate-profile.sh, setup-preflight.sh, marker check, _bmad/ check', 'ok')
 row('setup-check', 'Setup check', '1/1', 'yes', 'profile valid, preflight without FAIL, markers present, _bmad/ present')
 
@@ -1071,7 +1124,7 @@ record('issue, branch and plan procedures', `issue #${N}, branch ${run.branch}, 
 row('issue', 'Resolve plan', '1/5', 'yes', `ISSUE_URL: ${run.issueUrl}`)
 row('branch', 'Resolve plan', '1/1', 'yes', `BRANCH: ${run.branch}`)
 if (plan.bundle_uncommitted === true) {
-  const halt = await publishOrEscalate({ stage: 'plan', ph: 'Resolve plan', it: '1/5' }, 'plan', [{ subject: `docs(#<N>): add planning bundle ${slug}`, files: [run.specsDir], rest: false }])
+  const halt = await publishOrEscalate({ stage: 'plan', ph: 'Resolve plan', it: '1/5' }, 'plan', [{ subject: `docs(#<N>): add planning bundle ${slug}`, files: [run.specsDir], rest: false, required: true }])
   if (halt) return halt
 }
 row('plan', 'Resolve plan', '1/5', 'yes', `SPECS_DIR: ${run.specsDir}${plan.bundle_uncommitted ? ' (committed by the publish step)' : ' (already committed)'}`)

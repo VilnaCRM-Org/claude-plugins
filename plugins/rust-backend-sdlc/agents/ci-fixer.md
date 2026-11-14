@@ -195,8 +195,8 @@ Degrades never loop and never fake a pass: each one ends in a recorded `not run 
 | RUSTSEC advisory without a fixed version (the log names no patched version) | action `escalate`, no edit for it; `blocking_finding` names the advisory id, the crate, its version and the `cargo tree -i <crate>` path; `recommended_action`: replace the dependency or drop the feature that pulls it in, or a maintainer-approved `deny.toml` exception (a protected file: `approved-config-change` and `ALLOW_PROTECTED_CONFIG_EDIT=1`); `## Status: BLOCKED` |
 | HIGH or CRITICAL image finding without a fixed version | the same: `escalate`, `## Status: BLOCKED`; an ignore entry is never added (it is protected) |
 | infrastructure flake | one `gh run rerun --failed <run-id>` per head; spent → `report` |
-| Docker unreachable (`docker info` fails, or a log holds the template's no-engine message) | Docker-dependent targets `not run (no Docker)`, never `failed` and never remediated (D2); a fix the log alone proves is still made and noted |
-| container mode and `app` not running | `make.start` once in the background (≤ 900 s, one restart attempt); `make.start` null, or `app` still down → every target `not run (no Docker)` (D25) |
+| Docker unreachable (`docker info` fails in host mode, or a log holds the template's no-engine message) | Docker-dependent targets `not run (no Docker)`, never `failed` and never remediated (D2); a fix the log alone proves is still made and noted |
+| container mode: `docker info` fails, or `app` not running | `make.start` once in the background (≤ 900 s, one restart attempt) when only `app` is down; `docker info` failing, `make.start` null, or `app` still down → every target `not run (no Docker)` (D25) |
 | host mode without a Rust toolchain | targets `not run (no toolchain)` (D3) |
 | a call is denied by an `ask` rule in a headless run | that target is `not run (ask rule)` and is never retried under another spelling (D13) |
 | a protected path must change, or the guard hook denies an edit | the `BLOCKED: protected configuration <path> …` line, the denial quoted verbatim, `## Status: BLOCKED` (D23) |
