@@ -339,9 +339,13 @@ gp_workflows_without() {
   grep -qx 'mktemp .claude/.rust-sdlc.yml.XXXXXX' "$BATS_TEST_TMPDIR/wrap.log"
   grep -qE '^mv -f -- \.claude/\.rust-sdlc\.yml\.[A-Za-z0-9]{6} \.claude/rust-sdlc\.yml$' "$BATS_TEST_TMPDIR/wrap.log"
   [ -z "$(gp_leftovers)" ]
+  before="$(gp_inode "$PROFILE")"
   run --separate-stderr "$GEN" --refresh "$STUB"
   [ "$status" -eq 0 ]
   [ "$output" = "UNCHANGED: .claude/rust-sdlc.yml" ]
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
+  [ "$(gp_inode "$PROFILE")" = "$before" ]
+  gp_same "$GOLDEN" "$PROFILE"
 }
 
 @test "generate-profile: --stdout with an existing profile prints what --refresh would write and keeps the file" {
