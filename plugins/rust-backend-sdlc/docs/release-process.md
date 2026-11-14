@@ -94,7 +94,7 @@ The other fields of the entry (`description`, `author`, `category`) stay as they
 
 ## Evidence after a release
 
-The measurable outcomes recorded after v0.1.0 ship in a PATCH release: K9 and K13 in the "K9/K13 record" section of the [new-service walkthrough](new-service-walkthrough.md), and the K10 run report appended to `docs/sdlc-loop.md` or to a new file under `docs/evidence/` (which is not one of the 9 docs of v0.1.0).
+The measurable outcomes recorded after v0.1.0 ship in a PATCH release: K9 and K13 in the [K9/K13 record](new-service-walkthrough.md#k9k13-record) section of the new-service walkthrough, and the K10 run report appended to `docs/sdlc-loop.md` or to a new file under `docs/evidence/` (which is not one of the 9 docs of v0.1.0).
 
 ## Changelog
 

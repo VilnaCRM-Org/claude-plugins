@@ -283,24 +283,28 @@ gp_workflows_without() {
 
 # --- an existing profile (NFR-3, NFR-1) --------------------------------------------
 
-@test "generate-profile: an identical existing profile prints UNCHANGED and is not touched" {
+@test "generate-profile: an identical existing profile prints UNCHANGED, and neither it nor any other file is touched" {
   gp_install
   local before
   before="$(gp_inode "$PROFILE")"
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
   run --separate-stderr "$GEN" "$STUB"
   [ "$status" -eq 0 ]
   [ "$output" = "UNCHANGED: .claude/rust-sdlc.yml" ]
   [ -z "$stderr" ]
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
   [ "$(gp_inode "$PROFILE")" = "$before" ]
   gp_same "$GOLDEN" "$PROFILE"
 }
 
-@test "generate-profile: a differing profile prints DIFF and a unified diff, keeps the file and exits 0" {
+@test "generate-profile: a differing profile prints DIFF and a unified diff, keeps the file, writes no other file and exits 0" {
   gp_expect project.description "'Stale text'" make.complexity null
   gp_install "$EXPECTED"
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
   run --separate-stderr "$GEN" "$STUB"
   [ "$status" -eq 0 ]
   [ -z "$stderr" ]
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
   [ "${lines[0]}" = "DIFF: .claude/rust-sdlc.yml (kept; re-run with --refresh to apply)" ]
   [ "${lines[1]}" = "--- .claude/rust-sdlc.yml" ]
   [ "${lines[2]}" = "+++ detected" ]
@@ -509,17 +513,20 @@ gp_workflows_without() {
   gp_same "$EXPECTED" "$PROFILE"
 }
 
-@test "generate-profile: ADR-24 an existing false plus --run-in-container true without --refresh prints UPDATED" {
+@test "generate-profile: ADR-24 an existing false plus --run-in-container true without --refresh prints UPDATED, then UNCHANGED, and neither run writes another file" {
   gp_install
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
   run --separate-stderr "$GEN" --run-in-container true "$STUB"
   [ "$status" -eq 0 ]
   [ "$output" = "UPDATED: .claude/rust-sdlc.yml (capabilities.run_in_container=true)" ]
   [ -z "$stderr" ]
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
   gp_expect capabilities.run_in_container true
   gp_same "$EXPECTED" "$PROFILE"
   run --separate-stderr "$GEN" --run-in-container true "$STUB"
   [ "$status" -eq 0 ]
   [ "$output" = "UNCHANGED: .claude/rust-sdlc.yml" ]
+  [ "$(gp_tree)" = "?? .claude/rust-sdlc.yml" ]
 }
 
 @test "generate-profile: ADR-24 --run-in-container without --refresh rewrites only that key; other drift stays a DIFF" {
