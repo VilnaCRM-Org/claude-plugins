@@ -1074,7 +1074,11 @@ if (!setup || setup.ok !== true) {
   return escalate('setup-check', 'Setup check', '1/1', finding, HALT)
 }
 for (const w of isList(setup.warnings) ? setup.warnings : []) addNote(`setup-preflight ${w}`)
-for (const k of isList(setup.null_test_keys) ? setup.null_test_keys.map((t) => t.trim()) : []) if (TEST_KEYS.includes(k)) nullTestKeys.add(k)
+for (const k of isList(setup.null_test_keys) ? setup.null_test_keys.map((t) => t.trim()) : []) {
+  if (!TEST_KEYS.includes(k)) continue
+  nullTestKeys.add(k)
+  addNote(`${k} absent: ${k.slice(5).replace(/_/g, '-')} not run (capability absent) (D1)`)
+}
 record('validate-profile.sh, setup-preflight.sh, marker check, _bmad/ check', 'ok')
 row('setup-check', 'Setup check', '1/1', 'yes', 'profile valid, preflight without FAIL, markers present, _bmad/ present')
 

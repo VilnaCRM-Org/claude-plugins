@@ -1198,7 +1198,8 @@ wf_same_as_child() {
   node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.replies.find((r) => r.match === "^setup-check$").reply.null_test_keys.push("make.unit_tests"); s.replies.push({match: "^publish implement$", reply: null}); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$notrun" "$nulltests"
   wf_scenario rs-sdlc-feature "$nulltests"
   wf_expect 'r.result === "ESCALATED" && field("stage") === "implement" && count("story 1.1") === 1 && labels[labels.length - 1] === "publish implement"' \
-    'has(field("iteration_log"), "(serial: story 1.1) -> 1/1 complete") && has(field("blocking_finding"), "the publish agent returned nothing")'
+    'has(field("iteration_log"), "(serial: story 1.1) -> 1/1 complete") && has(field("blocking_finding"), "the publish agent returned nothing")' \
+    'notes.includes("make.unit_tests absent: unit-tests not run (capability absent) (D1)") && notes.includes("make.e2e_tests absent: e2e-tests not run (capability absent) (D1)")'
 }
 
 @test "workflows: feat-no-nested: an unresolved nested workflow escalates with the manual command line (D21)" {

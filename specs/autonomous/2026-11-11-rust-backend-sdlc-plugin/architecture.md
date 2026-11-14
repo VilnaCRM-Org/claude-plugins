@@ -1274,7 +1274,7 @@ escalation: <the failing stage's block, or none>
 === END ===
 ```
 
-- **Loop & exit:** each stage's own guard; a `SUCCESS-WITH-REPORT` stage records `met: yes (degraded)` and keeps `result: SUCCESS`; an `ESCALATED` stage records `met: no` and ends the run. **Guard:** `MAX_ITERATIONS=5` per stage, counters never reset within a run, restored from the state comment on resume (finish-pr: the `A<n>.B<n>.C<n>.W<n>.R<n>` cell; implement: raised to the `implement` iteration of the state cache when that is higher, because implement records each attempt in the cache before it starts and a lost session never reaches the comment). **Escalation stage ids:** those of the delegated stage, plus `setup-check` and `branch`. **Handles:** `ISSUE_URL:`, `ISSUE_NUMBER:`, `BRANCH:`, `SPECS_DIR:`, `PR_URL:`, the run report.
+- **Loop & exit:** each stage's own guard; a `SUCCESS-WITH-REPORT` stage records `met: yes (degraded)` and keeps `result: SUCCESS`; an `ESCALATED` stage records `met: no` and ends the run. **Guard:** `MAX_ITERATIONS=5` per stage, counters never reset within a run, restored from the state comment on resume (finish-pr: the `A<n>.B<n>.C<n>.W<n>.R<n>` cell; implement: when the resume point comes from the state comment and exactly one `target/rust-sdlc/state/<N>-*.json` cache matches, raised to that cache's `implement` iteration when that is higher, a cache without an `implement` element counting as 0, because implement records each attempt in the cache before it starts and a lost session never reaches the comment). **Escalation stage ids:** those of the delegated stage, plus `setup-check` and `branch`. **Handles:** `ISSUE_URL:`, `ISSUE_NUMBER:`, `BRANCH:`, `SPECS_DIR:`, `PR_URL:`, the run report.
 
 ### `/rs-sdlc-setup` (FR-4)
 
