@@ -5,7 +5,7 @@ export const meta = {
   whenToUse:
     'Top level only: start it directly with the Workflow tool in a repository prepared by /rs-sdlc-setup (it nests rs-sdlc-review-panel, rs-sdlc-fr-nfr-review and rs-sdlc-pr-until-green one level deep, so no other workflow may call it). Give it the task text, an issue URL (it becomes issue) or nothing on a <type>/<N>-<slug> branch; or the object form {task, slug, issue, reviewers, maxImplementRounds: 5, maxQaLoops: 2}, where the max values only lower the caps and reviewers defaults to null (the PR sensor reads the profile). It keeps no state comment: resume inside a run is the carry hand-back of pr-until-green, resume across sessions is the command path (/rs-sdlc <N>). Returns {result, task, branch, issue_url, specs_dir, pr_url, stages, degrade_notes, escalation?}.',
   phases: [
-    { title: 'Setup check', detail: 'validate-profile.sh, setup-preflight.sh, governance markers in CLAUDE.md and AGENTS.md, _bmad/ present; a failure halts with: run /rs-sdlc-setup on the default branch and commit the result' },
+    { title: 'Setup check', detail: 'validate-profile.sh, setup-preflight.sh, governance markers in CLAUDE.md and AGENTS.md, _bmad/ present, the null test keys of the profile read; a failure halts with: run /rs-sdlc-setup on the default branch and commit the result' },
     { title: 'Resolve plan', detail: 'issue, <type>/<N>-<slug> branch and specs/<N>-<slug>/ through the issue and plan procedures; a new bundle is committed by the publish step' },
     { title: 'Stage', detail: 'ADR-10a re-entry protocol: ralph_fix_plan_prepare; stage-planning-artifacts.sh, bmalph implement and (keep-progress) ralph_fix_plan_restore only after FIX_PLAN: absent or ARCHIVED:; always ralph_agent_md_patch and the two-part .ralph/PROJECT_CONTEXT.md check' },
     { title: 'Implement', detail: 'rust-implementer rounds over .ralph/@fix_plan.md (read only), layer-first, at most 4 stories per round; parallel stories run the DB-free targets, one serialized verify <round> step runs the DB-backed targets; 5 rounds for the whole run; the publish step commits each story' },
@@ -227,7 +227,13 @@ const specsPath = () => run.specsDir.replace(/\/+$/, '')
 const SETUP_SCHEMA = {
   type: 'object',
   required: ['ok', 'message'],
-  properties: { ok: { type: 'boolean' }, message: { type: 'string' }, failures: { type: 'array', items: { type: 'string' } }, warnings: { type: 'array', items: { type: 'string' } } },
+  properties: {
+    ok: { type: 'boolean' },
+    message: { type: 'string' },
+    failures: { type: 'array', items: { type: 'string' } },
+    warnings: { type: 'array', items: { type: 'string' } },
+    null_test_keys: { type: 'array', items: { type: 'string' } },
+  },
 }
 
 const PLAN_SCHEMA = {
@@ -354,7 +360,8 @@ function setupPrompt() {
     `  grep -q '${BEGIN_MARKER}' AGENTS.md`,
     '  test -d _bmad',
     'When the runtime refuses the grep or test call, the Grep tool (fixed string, one file at a time) or the Glob tool (_bmad/*) answers the same question; a refused call is never read as a failed check.',
-    'ok is true only when validate-profile.sh exits 0, setup-preflight.sh prints no FAIL: line, both markers are present and _bmad/ exists. message = the first failing line verbatim (a VIOLATION: or FAIL: line, "governance marker missing in <file>" or "_bmad/ absent (test -d _bmad exit 1)"), else "ok"; failures = every failing line; warnings = every WARN: line of the preflight.',
+    'Then read .claude/rust-sdlc.yml with the Read tool for the four test keys make.unit_tests, make.integration_tests, make.tests_with_coverage and make.e2e_tests.',
+    'ok is true only when validate-profile.sh exits 0, setup-preflight.sh prints no FAIL: line, both markers are present and _bmad/ exists. message = the first failing line verbatim (a VIOLATION: or FAIL: line, "governance marker missing in <file>" or "_bmad/ absent (test -d _bmad exit 1)"), else "ok"; failures = every failing line; warnings = every WARN: line of the preflight; null_test_keys = each of the four test keys whose value is null, [] when all four are mapped.',
     'Setup is a human decision on the default branch: never run /rs-sdlc-setup, generate-profile.sh, inject-governance.sh or merge-settings.sh, and never edit the profile or the managed block.',
   ].join('\n')
 }
@@ -667,34 +674,39 @@ async function dispatchRound(pending) {
 }
 
 // STATUS: COMPLETE counts only without a failing test: TESTS_STATUS PASSING,
-// or NOT_RUN when every test key the mode made due is null (D1).
-const TESTS_DONE = ['PASSING', 'NOT_RUN']
-const testsDone = (r) => TESTS_DONE.includes(r.tests_status)
+// or NOT_RUN when every test key the mode made due is null (D1). A parallel
+// round makes make.unit_tests due, a serial round and a verify step all four
+// test keys. A key counts as null only when the setup check listed it in
+// null_test_keys, so an unverified NOT_RUN never closes a story.
+const TEST_KEYS = ['make.unit_tests', 'make.integration_tests', 'make.tests_with_coverage', 'make.e2e_tests']
+const nullTestKeys = new Set()
+const dueTests = (mode) => (mode === 'parallel' ? TEST_KEYS.slice(0, 1) : TEST_KEYS)
+const testsDone = (r, mode) => r.tests_status === 'PASSING' || (r.tests_status === 'NOT_RUN' && dueTests(mode).every((k) => nullTestKeys.has(k)))
 
 // A serial story, and a verify step, complete with STATUS: COMPLETE,
-// EXIT_SIGNAL true and a TESTS_STATUS of TESTS_DONE.
-const finished = (r) => Boolean(r) && r.status === 'COMPLETE' && r.exit_signal === true && testsDone(r)
-const serialEnd = ({ replies }) => ({ completed: replies.filter(({ r }) => finished(r)), verifyText: '' })
+// EXIT_SIGNAL true and a TESTS_STATUS that testsDone accepts for the mode.
+const finished = (r, mode) => Boolean(r) && r.status === 'COMPLETE' && r.exit_signal === true && testsDone(r, mode)
+const serialEnd = ({ replies }) => ({ completed: replies.filter(({ r }) => finished(r, 'serial')), verifyText: '' })
 
 // Why a COMPLETE reply leaves its story open: no EXIT_SIGNAL true (a parallel
-// story never signals exit) or a TESTS_STATUS outside TESTS_DONE.
+// story never signals exit) or a TESTS_STATUS that testsDone refuses.
 function shortfall(r, mode) {
   if (mode !== 'parallel' && r.exit_signal !== true) return ' without EXIT_SIGNAL'
-  return testsDone(r) ? '' : ` with TESTS_STATUS ${clip(r.tests_status ?? 'missing', 20)}`
+  return testsDone(r, mode) ? '' : ` with TESTS_STATUS ${clip(r.tests_status ?? 'missing', 20)}`
 }
 
 // A parallel round ends with the serialized verify step: the written stories
 // count only when it completes. Its files are kept per round for the publish
 // step (verifyOnly). Returns {halt} on BLOCKED, else {completed, verifyText}.
 async function verifyEnd({ round, batch, replies, ran }, doneNow) {
-  const written = replies.filter(({ r }) => r && r.status === 'COMPLETE' && testsDone(r))
+  const written = replies.filter(({ r }) => r && r.status === 'COMPLETE' && testsDone(r, 'parallel'))
   const v = await agent(verifyPrompt(round, batch), { label: `verify ${round}`, phase: 'Implement', agentType: IMPLEMENTER, schema: STORY_SCHEMA })
   if (v) verifyFiles.set(round, { batch, files: pathsOf(v) })
   if (v && v.status === 'BLOCKED') {
     record(`${ran}, verify ${round}`, 'verify BLOCKED')
     return { halt: implementBlocked(round, `the serialized verify step of round ${round}`, v.recommendation, doneNow) }
   }
-  const verified = finished(v)
+  const verified = finished(v, 'verify')
   const verifyText = `, verify ${v ? `${v.status}${v.status === 'COMPLETE' ? shortfall(v, 'verify') : ''}` : 'returned nothing'}`
   if (!verified) log(`implement round ${round}: the serialized verify step did not complete; the round's stories stay open`)
   return { completed: verified ? written : [], verifyText }
@@ -1062,6 +1074,7 @@ if (!setup || setup.ok !== true) {
   return escalate('setup-check', 'Setup check', '1/1', finding, HALT)
 }
 for (const w of isList(setup.warnings) ? setup.warnings : []) addNote(`setup-preflight ${w}`)
+for (const k of isList(setup.null_test_keys) ? setup.null_test_keys.map((t) => t.trim()) : []) if (TEST_KEYS.includes(k)) nullTestKeys.add(k)
 record('validate-profile.sh, setup-preflight.sh, marker check, _bmad/ check', 'ok')
 row('setup-check', 'Setup check', '1/1', 'yes', 'profile valid, preflight without FAIL, markers present, _bmad/ present')
 

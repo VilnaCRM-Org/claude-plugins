@@ -1186,6 +1186,19 @@ wf_same_as_child() {
   wf_scenario rs-sdlc-feature "$failing"
   wf_expect 'r.result === "ESCALATED" && field("iteration") === "5/5" && count("story 1.1") === 5 && count(/^publish/) === 0' \
     'has(field("iteration_log"), "1.1 COMPLETE with TESTS_STATUS FAILING")'
+  # NOT_RUN closes a story only when the setup check reported every due test key null (D1): a mapped make.unit_tests leaves it open.
+  local notrun="$BATS_TEST_TMPDIR/feat-incomplete-story-not-run.json"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); Object.assign(s.replies.find((r) => r.match === "^setup-check$").reply, {null_test_keys: ["make.integration_tests", "make.tests_with_coverage", "make.e2e_tests"]}); Object.assign(s.replies.find((r) => r.match === "^story ").reply, {exit_signal: true, tests_status: "NOT_RUN"}); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$FX/feat-incomplete-story.json" "$notrun"
+  wf_scenario rs-sdlc-feature "$notrun"
+  wf_expect 'r.result === "ESCALATED" && field("iteration") === "5/5" && count("story 1.1") === 5 && count(/^publish/) === 0' \
+    'has(field("iteration_log"), "1.1 COMPLETE with TESTS_STATUS NOT_RUN")' \
+    'has(call("setup-check").prompt, "null_test_keys = each of the four test keys whose value is null")'
+  # With all four test keys reported null, the same reply closes the story in one round and reaches the publish step.
+  local nulltests="$BATS_TEST_TMPDIR/feat-incomplete-story-null-tests.json"
+  node -e 'const fs = require("fs"); const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); s.replies.find((r) => r.match === "^setup-check$").reply.null_test_keys.push("make.unit_tests"); s.replies.push({match: "^publish implement$", reply: null}); fs.writeFileSync(process.argv[2], JSON.stringify(s))' "$notrun" "$nulltests"
+  wf_scenario rs-sdlc-feature "$nulltests"
+  wf_expect 'r.result === "ESCALATED" && field("stage") === "implement" && count("story 1.1") === 1 && labels[labels.length - 1] === "publish implement"' \
+    'has(field("iteration_log"), "(serial: story 1.1) -> 1/1 complete") && has(field("blocking_finding"), "the publish agent returned nothing")'
 }
 
 @test "workflows: feat-no-nested: an unresolved nested workflow escalates with the manual command line (D21)" {

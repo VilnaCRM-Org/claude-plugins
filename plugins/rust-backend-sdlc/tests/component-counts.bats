@@ -1128,12 +1128,12 @@ STAGE_TOKENS = {
 # file, which comes earlier or which that line itself cites (the raw file, then "redact", then the
 # body file); never inline, never the raw file. On a gh issue or gh pr line the short flag -F <file>
 # (gh's --body-file) names a body file too. A fenced gh issue or gh pr create, gh pr comment or gh api
-# write to a comments path always carries such a file (`<...>` and an elided `…` name no file).
+# write to a comments path (-X or --method POST/PATCH, or a -f/-F field) always carries such a file (`<...>` and an elided `…` name no file).
 # Each command of PUBLISH_COMMANDS (the ADR-27 sites: issue body, state comment, PR body, new-service
 # S2 issue and S14 PR) holds at least one checked body file, so the check never passes on no site.
 GH_WRITE = re.compile(r"\bgh\s+(?:(?:issue|pr)\s+(?:create|edit|comment|review)|api)\b")
 GH_BODY_CALL = re.compile(r"\bgh\s+(?:(?:issue|pr)\s+create|pr\s+comment)\b"
-                          r"|\bgh\s+api\b(?=.*/comments\b)(?=.*\s(?:-X\s+(?:POST|PATCH)|-[fF]|--(?:raw-)?field)[\s=])")
+                          r"|\bgh\s+api\b(?=.*/comments\b)(?=.*\s(?:(?:-X|--method)[\s=]+(?:POST|PATCH)|-[fF]|--(?:raw-)?field)[\s=])")
 INLINE_BODY = re.compile(r"(?:-f|--raw-field|-F|--field)[\s=]+['\"]?body=(?!@)|\s-b[\s=]|--body[\s=]")
 BODY_FILE = re.compile(r"(?:--body-file|(?:-F|--field)[\s=]+body=@)[\s=]*['\"]?(<[^>]*>|…|[^\s`'\"]+)")
 GH_ISSUE_PR_WRITE = re.compile(r"\bgh\s+(?:issue|pr)\s+(?:create|edit|comment|review)\b")
@@ -2659,6 +2659,9 @@ CC_DISPATCH=(validate_context_name resume_point derive_issue_number is_commit_su
   sed 's/^\(   gh pr edit <n> --title .<title>.\) --body-file target\/rust-sdlc\/tmp\/pr-body\.md$/\1 -F target\/rust-sdlc\/tmp\/pr-body.raw.md/' \
     "$good/commands/rs-sdlc-finish-pr.md" >"$copy/commands/rs-sdlc-finish-pr.md"
   cc_fails "$copy" cc20 'a gh body published from the unredacted raw file: target/rust-sdlc/tmp/pr-body.raw.md'
+  sed 's/^gh api -X PATCH \(repos\/{owner}\/{repo}\/issues\/comments\/<id>\) -F body=@target\/rust-sdlc\/tmp\/state\.md$/gh api --method PATCH \1/' \
+    "$good/commands/rs-sdlc-finish-pr.md" >"$copy/commands/rs-sdlc-finish-pr.md"
+  cc_fails "$copy" cc20 'a gh publish call without a redacted body file: gh api --method PATCH'
   sed 's/-F body=@target\/rust-sdlc\/tmp\/state\.md/-F body=@target\/rust-sdlc\/tmp\/state.raw.md/' \
     "$good/commands/rs-sdlc.md" >"$copy/commands/rs-sdlc.md"
   cc_fails "$copy" cc20 'a gh body published from the unredacted raw file: target/rust-sdlc/tmp/state.raw.md'
